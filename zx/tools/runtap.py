@@ -58,27 +58,43 @@ def code_blocks(path):
 
 def boot(path):
     """
-    A CPU with the tape loaded the way its BASIC loader would.  Blocks bound
-    for a RAM bank are named in the .banks.json the build writes, since we do
-    not run the loader itself.
+    A CPU with the tape loaded the way the tape loads it: the program first,
+    then a paging stub and a block for each bank, in order.  Doing it any
+    other way hides the bugs that only show up in that order -- one of them
+    was writing six kilobytes into whichever bank happened to be paged.
     """
     manifest = os.path.splitext(path)[0] + '.banks.json'
     banks = json.load(open(manifest)) if os.path.exists(manifest) else []
     cpu = z80.Z80()
-    start = None
-    for (addr, payload), m in zip(code_blocks(path), banks or [{}] * 99):
-        bank = m.get('bank')
-        if bank is None:
-            cpu.mem[addr:addr + len(payload)] = payload
-            start = m.get('entry', addr)
-        else:
-            off = addr - 0xC000
-            cpu.banks[bank][off:off + len(payload)] = payload
-    if banks:
-        cpu.mem[0xC000:] = cpu.banks[cpu.page]
-    cpu.pc = start
+    cpu.sp = 0x5FF0                 # somewhere for the stubs to return to
+    cpu.mem[0x5B5C] = 0x00          # BANKM, as 128 BASIC leaves it
+    blocks = code_blocks(path)
+    entry = None
+    for i, (addr, payload) in enumerate(blocks):
+        if i and banks:             # page the bank this block belongs in
+            _usr(cpu, banks[0]['entry'] - STUB * (len(banks) - i))
+        cpu.mem[addr:addr + len(payload)] = payload
+        if not i:
+            entry = banks[0]['entry'] if banks else addr
+    cpu.pc = entry
     release(cpu)
     return cpu
+
+
+STUB = 4
+
+
+def _usr(cpu, addr):
+    """RANDOMIZE USR: call it and let it come back."""
+    cpu.mem[0x5FF0] = 0
+    cpu.mem[0x5FF1] = 0
+    cpu.sp = 0x5FF0
+    cpu.pc = addr
+    for _ in range(200):
+        if cpu.pc == 0:
+            return
+        cpu.step()
+    raise SystemExit('заглушка страницы по %d не вернулась' % addr)
 
 
 def release(cpu):

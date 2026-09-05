@@ -20,6 +20,7 @@
 
                 org     24576
 PAGEPORT        equ     0x7FFD
+BANKM           equ     0x5B5C  ; the 128 ROM's copy of it
 
 ; The tape's BASIC loader cannot page banks itself -- OUT is the one statement
 ; this build cannot try out before it ships -- so it calls in here instead.
@@ -43,7 +44,19 @@ stubs:          ld      a, BANK_ART
                 jr      dopage
                 jp      start
 
-dopage:         or      0x10            ; bit 4 keeps the 48K ROM
+; Called from BASIC, so it has to leave everything else about the port alone
+; -- above all bit 4, which picks the ROM: switching that while the 128 ROM is
+; mid-statement pulls the interpreter out from under itself.  BANKM at 5B5C is
+; the ROM's own copy of the port, and it writes that copy back at its leisure,
+; so ours has to go through it.
+
+dopage:         and     7
+                ld      b, a
+                ld      hl, BANKM
+                ld      a, (hl)
+                and     0xf8
+                or      b
+                ld      (hl), a
                 ld      bc, PAGEPORT
                 out     (c), a
                 ret
@@ -74,9 +87,9 @@ start:          di
                 xor     a
                 out     (254), a
 
+                call    check_banks     ; before anything is written, and it
+                                        ; leaves the art bank in
                 call    build_fore
-
-                call    check_banks
 
                 ld      hl, room        ; the screen and the working copy both
                 ld      de, SCREEN      ; start out as the bare room
@@ -274,10 +287,10 @@ page_frame:     ld      a, (curbank)
                 add     hl, de
                 ld      a, (hl)
 pageset:        or      0x10            ; bit 4 keeps the 48K ROM, which is
-                push    bc              ; what the handler at 0x38 is
-                ld      bc, PAGEPORT
+                push    bc              ; what the handler at 0x38 is.  By now
+                ld      bc, PAGEPORT    ; BASIC is gone and BANKM with it
                 out     (c), a
-                pop     bc              ; find_spr counts banks in C
+                pop     bc
                 ret
 
 ; [0] where the tape left the first bank of sprites, [1] the rest of them,
