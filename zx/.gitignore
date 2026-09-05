@@ -1,0 +1,10 @@
+# everything under build/ is produced by build.sh
+build/
+
+# the assemblers and tap packer live here but are not ours to ship
+tools/*.exe
+tools/__pycache__/
+
+# assets copied into src/ by build.sh; pop.asm is the only source here
+src/*.bin
+src/*.inc
