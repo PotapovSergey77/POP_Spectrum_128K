@@ -675,7 +675,17 @@ crawlmaybe:     ld      a, (clrf)
 ; stick pushed forward is a standing jump instead; otherwise he jumps on the
 ; spot.  POP also tries a step back first, which comes later.
 
-stjumpup:       ret                     ; the first frames of a jump up
+; The first frames of a jump up.  Forward now -- held or freshly pressed --
+; makes it a standing jump instead, which is the other way round of pressing
+; the two keys: up first, then the direction.
+
+stjumpup:       ld      a, (jstkx)
+                or      a
+                jp      m, do_standjump
+                ld      a, (clrf)
+                or      a
+                jp      m, do_standjump
+                ret
 
 do_up:          call    clrall
                 ld      (clru), a
