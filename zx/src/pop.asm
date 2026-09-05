@@ -26,11 +26,15 @@ SCREEN          equ     16384
 BUFW            equ     8               ; widest sprite plus the shift byte
 FRAME_WAIT      equ     3               ; 50Hz frames per game frame
 BLOCK_PX        equ     28
+TILE_GROUND     equ     TILE_FLOOR | TILE_SOLID   ; anything but space
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
 PAGEPORT        equ     0x7FFD
-X_MIN           equ     40
-X_MAX           equ     240
+; The room runs from block 0 to block 9, and a character on block b has his
+; anchor between 28b+2 and 28b+29.  Only walls should stop him inside that --
+; these are just to keep him on the map.
+X_MIN           equ     2
+X_MAX           equ     253
 
 ; ---------------------------------------------------------------- entry
 
@@ -42,7 +46,18 @@ start:          di
                 out     (254), a
 
                 call    find_spr        ; which bank the tape put them in
-                call    pick_art        ; and a different one for the room
+                call    pick_banks      ; and free ones for the rest
+
+                ld      a, (banktab + 1); frames past the first bank
+                call    pageset
+                ld      bc, SPR2_LEN
+                ld      a, b
+                or      c
+                jr      z, nospr2
+                ld      hl, stage_spr2
+                ld      de, sprblob
+                ldir
+nospr2:
                 call    page_art
                 ld      hl, stage_art
                 ld      de, room
@@ -75,7 +90,6 @@ start:          di
                 call    set_row
                 xor     a
                 ld      (yvel), a
-                ld      (falling), a
                 ld      (facing), a
                 ld      (seqid), a
                 ld      (oldw), a       ; nothing to erase on the first pass
@@ -87,7 +101,6 @@ start:          di
                 ld      (seqptr), hl
 
                 call    step_seq
-                call    page_spr
                 call    draw_prince
                 call    page_art
                 call    hide_behind
@@ -107,7 +120,6 @@ mainwait:       halt
                 call    step_seq
                 call    check_floor
                 call    do_fall
-                call    page_spr
                 call    draw_prince
                 call    page_art
                 call    hide_behind
@@ -141,19 +153,28 @@ fsloop:         ld      a, c
                 jr      c, fsloop
                 jr      badload
 fsfound:        ld      a, c
-                ld      (sprbank), a
+                ld      (banktab), a
                 ret
 
-; The room needs a bank of its own.  Six is uncontended and out of the way,
-; unless that is where the sprites landed.
+; The rest of the sprites and the room need banks of their own.  Take them
+; from the uncontended ones, skipping whichever the tape happened to use.
 
-pick_art:       ld      a, (sprbank)
-                cp      6
-                ld      a, 6
-                jr      nz, pickset
-                ld      a, 4
-pickset:        ld      (artbank), a
+pick_banks:     ld      hl, bankcand
+                ld      de, banktab + 1
+                ld      b, 2
+pbloop:         ld      a, (hl)
+                inc     hl
+                ld      c, a
+                ld      a, (banktab)
+                cp      c               ; that is where the tape put the first
+                jr      z, pbloop
+                ld      a, c
+                ld      (de), a
+                inc     de
+                djnz    pbloop
                 ret
+
+bankcand:       db      6, 4, 1
 
 ; A bank that did not arrive: red border, and nothing else is going to work.
 
@@ -163,7 +184,15 @@ badload:        ld      a, 2
 
 page_art:       ld      a, (artbank)
                 jr      pageset
-page_spr:       ld      a, (sprbank)
+
+; The frame's own bank: the top two bits of its blob offset say which.
+
+page_frame:     ld      a, (curbank)
+                ld      l, a
+                ld      h, 0
+                ld      de, banktab
+                add     hl, de
+                ld      a, (hl)
 pageset:        or      0x10            ; bit 4 keeps the 48K ROM, which is
                 push    bc              ; what the handler at 0x38 is
                 ld      bc, PAGEPORT
@@ -171,8 +200,10 @@ pageset:        or      0x10            ; bit 4 keeps the 48K ROM, which is
                 pop     bc              ; find_spr counts banks in C
                 ret
 
-sprbank:        db      0
-artbank:        db      0
+; [0] where the tape left the first bank of sprites, [1] the rest of them,
+; [2] the room and its mask.
+banktab:        db      0, 0, 0
+artbank         equ     banktab + 2
 
 ; ---------------------------------------------------------------- input
 ;
@@ -202,14 +233,28 @@ read_up:        ld      bc, 0xEFFE
                 and     8
                 ret
 
+; Cursor down is key 6, the same half row, bit 4.
+
+read_down:      ld      bc, 0xEFFE
+                in      a, (c)
+                cpl
+                and     16
+                ret
+
 ; Standing and running listen to the keys; turning, stopping and turning on
 ; the run play out to their end, as they do in the original.
 
 ; A run that has run out of floor or hit a wall skids to a halt.
 
-input_step:     ld      a, (falling)
-                or      a
-                ret     nz              ; no steering in the air
+input_step:     ld      a, (charact)
+                cp      2               ; hanging: up climbs, down lets go
+                jr      z, fromhang
+                cp      6
+                jr      z, fromhang
+                cp      3               ; no steering in the air
+                ret     z
+                cp      4
+                ret     z
                 ld      a, (seqid)
                 cp      ID_CROUCH
                 jr      z, fromcrouch
@@ -222,12 +267,21 @@ input_step:     ld      a, (falling)
                 cp      ID_STARTRUN
                 jr      nz, inputkeys
 tostopnow:      ld      hl, seqs + SQ_RUNSTOP
-                jr      setseq
+                jp      setseq
+
+fromhang:       call    read_up
+                jr      z, fhdrop
+                ld      hl, seqs + SQ_CLIMBUP
+                jp      setseq
+fhdrop:         call    read_down
+                ret     z
+                ld      hl, seqs + SQ_HANGDROP
+                jp      setseq
 
 fromcrouch:     call    read_up
                 ret     z
                 ld      hl, seqs + SQ_STANDUP
-                jr      setseq
+                jp      setseq
 
 inputkeys:      call    read_keys
                 ld      b, a
@@ -240,7 +294,31 @@ inputkeys:      call    read_keys
                 jr      z, fromrun
                 ret
 
-fromstand:      ld      a, b
+fromstand:      push    bc              ; down, at an edge, climbs over it
+                call    read_down
+                pop     bc
+                jr      z, fsnodown
+                ld      a, (charx)
+                ld      c, a
+                ld      a, (facing)
+                or      a
+                ld      a, c
+                jr      nz, fdright
+                sub     BLOCK_PX
+                jr      fdtest
+fdright:        add     a, BLOCK_PX
+fdtest:         call    tile_flags
+                and     TILE_FLOOR
+                jr      nz, tostoop     ; floor ahead: he just crouches
+                call    below_flags     ; and there has to be somewhere to
+                and     TILE_SOLID      ; hang: a wall under the ledge is not
+                jr      nz, tostoop
+                ld      hl, seqs + SQ_CLIMBDOWN
+                jp      setseq
+tostoop:        ld      hl, seqs + SQ_STOOP
+                jp      setseq
+
+fsnodown:       ld      a, b
                 or      a
                 ret     z
                 dec     a               ; 0 = left, 1 = right
@@ -249,7 +327,7 @@ fromstand:      ld      a, b
                 cp      c
                 jr      z, tostartrun
                 ld      hl, seqs + SQ_TURN
-                jr      setseq
+                jp      setseq
 ; No point starting a run into a wall or off the edge, or he twitches on the
 ; spot: stand still instead.
 
@@ -268,7 +346,7 @@ trtest:         call    tile_flags
                 bit     0, a
                 ret     z
                 ld      hl, seqs + SQ_STARTRUN
-                jr      setseq
+                jp      setseq
 
 fromrun:        ld      a, b
                 or      a
@@ -279,7 +357,7 @@ fromrun:        ld      a, b
                 cp      c
                 ret     z
                 ld      hl, seqs + SQ_RUNTURN
-                jr      setseq
+                jp      setseq
 torunstop:      ld      hl, seqs + SQ_RUNSTOP
 setseq:         ld      (seqptr), hl
                 xor     a               ; a new sequence starts from a stop
@@ -329,7 +407,29 @@ seqnoface:      cp      SEQ_CHY
                 ld      (hl), a
                 pop     hl
                 jr      seqloop
-seqnochy:       cp      SEQ_SETFALL
+seqnochy:       cp      SEQ_ACT
+                jr      nz, seqnoact
+                ld      a, (hl)
+                inc     hl
+                ld      (charact), a
+                jr      seqloop
+seqnoact:       cp      SEQ_UP
+                jr      nz, seqnoup
+                push    hl
+                ld      hl, blocky
+                dec     (hl)
+                call    set_row
+                pop     hl
+                jr      seqloop
+seqnoup:        cp      SEQ_DOWN
+                jr      nz, seqnodown
+                push    hl
+                ld      hl, blocky
+                inc     (hl)
+                call    set_row
+                pop     hl
+                jr      seqloop
+seqnodown:      cp      SEQ_SETFALL
                 jr      nz, seqnosetf
                 inc     hl              ; the X velocity, which we do not use
                 ld      a, (hl)
@@ -483,6 +583,28 @@ set_row:        ld      a, (blocky)
 under_flags:    ld      a, (charx)
                 jr      tile_flags
 
+; Out: A = the flags of the tile one row below his feet, zero past the
+; bottom of the room.  Climbing down needs somewhere to hang into.
+
+below_flags:    ld      a, (blocky)
+                cp      2
+                jr      nc, belownone
+                ld      hl, (tilerow)
+                ld      de, 10
+                add     hl, de
+                ld      (tilerow), hl
+                ld      a, (charx)
+                call    tile_flags
+                ld      c, a
+                ld      hl, (tilerow)
+                ld      de, -10
+                add     hl, de
+                ld      (tilerow), hl
+                ld      a, c
+                ret
+belownone:      xor     a
+                ret
+
 ; Out: A = FloorY for the row below his feet -- the plane he lands on.
 
 floor_plane:    ld      a, (blocky)
@@ -500,17 +622,23 @@ floor_plane:    ld      a, (blocky)
 ; counts CharBlockY as the floor just below his feet while he is in the air,
 ; so it steps down here and again each time he passes a floor plane.
 
-check_floor:    ld      a, (falling)
-                or      a
-                ret     nz
+check_floor:    ld      a, (charact)
+                cp      2               ; hanging
+                ret     z
+                cp      6               ; hanging straight
+                ret     z
+                cp      3               ; in the air already
+                ret     z
+                cp      4
+                ret     z
                 call    under_flags
-                and     TILE_FLOOR
+                and     TILE_GROUND
                 ret     nz
                 ld      hl, blocky
                 inc     (hl)
                 call    set_row
-                ld      a, 1
-                ld      (falling), a
+                ld      a, 3
+                ld      (charact), a
                 xor     a
                 ld      (yvel), a
                 ld      hl, seqs + SQ_STEPFALL
@@ -523,13 +651,10 @@ check_floor:    ld      a, (falling)
 ; carries its own chy for the first four frames and gravity only takes over
 ; at the setfall, which is why the velocity is left alone until then.
 
-do_fall:        ld      a, (falling)
-                or      a
-                ret     z
-                ld      a, (seqid)
-                cp      ID_FREEFALL
-                jr      nz, fallplane
-                ld      a, (yvel)
+do_fall:        ld      a, (charact)
+                cp      4               ; only a free fall has weight: the
+                ret     nz              ; four frames of stepfall carry their
+                ld      a, (yvel)       ; own chy, and climbing none at all
                 add     a, ACCEL_G
                 cp      TERM_VEL + 1
                 jr      c, fallvel
@@ -545,7 +670,7 @@ fallplane:      call    floor_plane
                 cp      b
                 ret     c               ; not down to the plane yet
                 call    under_flags
-                and     TILE_FLOOR
+                and     TILE_GROUND
                 jr      nz, hit_floor
                 ld      hl, blocky      ; straight through, keep going
                 ld      a, (hl)
@@ -558,8 +683,9 @@ hit_floor:      call    floor_plane
                 ld      (chary), a
                 xor     a
                 ld      (yvel), a
-                ld      (falling), a
                 ld      (pendchx), a
+                ld      a, 1
+                ld      (charact), a
                 ld      hl, seqs + SQ_SOFTLAND
                 ld      (seqptr), hl
                 ret
@@ -603,9 +729,18 @@ dpxoff:         ld      a, (hl)
                 ld      e, (hl)
                 inc     hl
                 ld      d, (hl)
+                ld      a, d            ; the top two bits are the bank
+                rlca
+                rlca
+                and     3
+                ld      (curbank), a
+                ld      a, d
+                and     0x3f
+                ld      d, a
                 ld      hl, sprblob
                 add     hl, de
                 ld      (curdat), hl
+                call    page_frame
 
 ; The anchor is the leading edge, so the offset differs with facing and is
 ; kept with the sprite rather than worked out here.
@@ -1056,7 +1191,7 @@ blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0
 yvel:           db      0
-falling:        db      0
+charact:        db      1
 wanted:         db      0
 
 curw:           db      0
@@ -1064,6 +1199,7 @@ curh:           db      0
 curoff:         db      0
 curshift:       db      0
 curdat:         dw      0
+curbank:        db      0
 curent:         dw      0
 fillhi:         db      0
 filllo:         db      0
@@ -1120,6 +1256,10 @@ work            equ     codeend
 stage_art:      incbin  "bank_art.bin"
 stage_end:
 ART_LEN         equ     stage_end - stage_art
+
+stage_spr2:     incbin  "bank_spr2.bin"         ; frames past the first bank
+spr2_end:
+SPR2_LEN        equ     spr2_end - stage_spr2
 
                 ds      0xC000 - $              ; the sprites load in a bank
 stage_spr:      incbin  "bank_spr.bin"

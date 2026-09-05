@@ -18,6 +18,8 @@ with a little byte code of its own.  Ours keeps the same shape:
     0xFC n       say which sequence we are in, so the keys know what to do
     0xFB d       drop by d screen lines
     0xFA x y     set the falling velocities
+    0xF9 n       CharAction: which of POP's states he is in
+    0xF8         step a block row up, 0xF7 down
     f    d       show frame f and move by d
 
 `d` is chx, in the 140-wide logic space, so a screen pixel is half a unit; the
@@ -34,7 +36,7 @@ import renderroom
 import zxscreen
 
 GOTO, FACE, CHX, SEQID = 0xFF, 0xFE, 0xFD, 0xFC
-CHY, SETFALL = 0xFB, 0xFA
+CHY, SETFALL, ACT, UP, DOWN = 0xFB, 0xFA, 0xF9, 0xF8, 0xF7
 
 # Straight out of SEQTABLE.S.  A plain number is a frame, a tuple is a frame
 # with its chx, and the strings are the byte code above.
@@ -42,47 +44,77 @@ CHY, SETFALL = 0xFB, 0xFA
 # crouch a soft landing ends in is part of `softland` and still has to be
 # told apart from the landing itself, so the list stands on its own.
 IDS = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn',
-       'stepfall', 'freefall', 'softland', 'crouch', 'standup']
+       'stepfall', 'freefall', 'softland', 'crouch', 'standup',
+       'climbdown', 'hang', 'climbup', 'hangdrop', 'stoop']
 (ID_STAND, ID_STARTRUN, ID_RUNCYC, ID_TURN, ID_RUNSTOP, ID_RUNTURN,
- ID_STEPFALL, ID_FREEFALL, ID_SOFTLAND, ID_CROUCH,
- ID_STANDUP) = range(len(IDS))
+ ID_STEPFALL, ID_FREEFALL, ID_SOFTLAND, ID_CROUCH, ID_STANDUP,
+ ID_CLIMBDOWN, ID_HANG, ID_CLIMBUP, ID_HANGDROP,
+ ID_STOOP) = range(len(IDS))
 
 SEQUENCES = {
-    'stand':    [('id', ID_STAND), (15, 0), ('goto', 'stand')],
-    'startrun': [('id', ID_STARTRUN),
+    'stand':    [('id', ID_STAND), ('act', 1), (15, 0), ('goto', 'stand')],
+    'startrun': [('id', ID_STARTRUN), ('act', 1),
                  (1, 0), (2, 0), (3, 0), (4, 8), (5, 3), (6, 3),
                  ('goto', 'runcyc')],
-    'runcyc':   [('id', ID_RUNCYC), (7, 5), (8, 1), (9, 2), (10, 4),
+    'runcyc':   [('id', ID_RUNCYC), ('act', 1), (7, 5), (8, 1), (9, 2), (10, 4),
                  ('label', 'runcyc5'), ('id', ID_RUNCYC),
                  (11, 5), (12, 2), (13, 3), (14, 4), ('goto', 'runcyc')],
-    'turn':     [('id', ID_TURN), ('face',), ('chx', 6),
+    'turn':     [('id', ID_TURN), ('act', 1), ('face',), ('chx', 6),
                  (45, 1), (46, 2), (47, -1), (48, 1),
                  (49, -2), (50, 0), (51, 0), (52, 0), ('goto', 'stand')],
-    'runstop':  [('id', ID_RUNSTOP), (53, 2), (54, 7), (55, 0), (56, 2),
+    'runstop':  [('id', ID_RUNSTOP), ('act', 1), (53, 2), (54, 7), (55, 0), (56, 2),
                  (49, -2), (50, 0), (51, 0), (52, 0), ('goto', 'stand')],
-    'runturn':  [('id', ID_RUNTURN), ('chx', 1),
+    'runturn':  [('id', ID_RUNTURN), ('act', 1), ('chx', 1),
                  (53, 1), (54, 8), (55, 0), (56, 7), (57, 3),
                  (58, 1), (59, 0), (60, 2), (61, -1), (62, 0), (63, 0),
                  (64, -1), (65, -14), ('face',), ('goto', 'runcyc5')],
     # The floor runs out and he tips over the edge.  The chy beside a frame
     # is the drop out of it, exactly as chx is the step; the setfall at the
     # end hands him to gravity with a Y velocity already wound up.
-    'stepfall': [('id', ID_STEPFALL), ('chx', 1), ('chy', 3),
+    'stepfall': [('id', ID_STEPFALL), ('act', 3), ('chx', 1), ('chy', 3),
                  (102, 2, 6), (103, -1, 9), (104, 0, 12), (105, -2),
                  ('setfall', 1, 15), ('goto', 'freefall')],
-    'freefall': [('id', ID_FREEFALL), ('label', 'ff'), (106, 0),
+    'freefall': [('id', ID_FREEFALL), ('act', 4), ('label', 'ff'), (106, 0),
                  ('goto', 'ff')],
     # A one storey drop: he takes it on his hands and stays crouched until
     # he is told to get up.
-    'softland': [('id', ID_SOFTLAND), ('chx', 1), (107, 2), (108, 0),
-                 ('label', 'crouch'), ('id', ID_CROUCH), (109, 0),
+    'softland': [('id', ID_SOFTLAND), ('act', 5), ('chx', 1), (107, 2), (108, 0),
+                 ('label', 'crouch'), ('id', ID_CROUCH), ('act', 1), (109, 0),
                  ('goto', 'crouch')],
-    'standup':  [('id', ID_STANDUP), ('chx', 1),
+    'standup':  [('id', ID_STANDUP), ('act', 5), ('chx', 1),
                  (110, 0), (111, 2), (112, 0), (113, 1), (114, 0), (115, 0),
                  (116, -4), (117, 0), (118, 0), (119, 0), ('goto', 'stand')],
+    # Lowering himself over the edge.  The chy of 63 and the `down` go
+    # together: one block row is 63 scanlines, so he ends up hanging with his
+    # feet where they would be if he were standing on the floor below.
+    'climbdown': [('id', ID_CLIMBDOWN), ('act', 1),
+                  (148, 0), (145, 0), (144, 0), (143, 0), (142, 0), (141, 0),
+                  ('chx', -5), ('chy', 63), ('down',), ('act', 3),
+                  (140, 0), (138, 0), (136, 0), (91, 0),
+                  ('goto', 'hang')],
+    'hang':     [('id', ID_HANG), ('act', 6),
+                 (92, 0), (93, 0), (93, 0), (92, 0), (92, 0),
+                 ('label', 'hangloop'), (91, 0), ('goto', 'hangloop')],
+    # act 3 all the way up: POP gates its floor check on a per frame flag we
+    # do not carry, and "in the air" says the same thing -- do not look for
+    # ground under him while he is halfway over the edge.
+    'climbup':  [('id', ID_CLIMBUP), ('act', 3),
+                 (135, 0), (136, 0), (137, 0), (138, 0), (139, 0), (140, 0),
+                 ('chx', 5), ('chy', -63), ('up',),
+                 (141, 0), (142, 0), (143, 0), (144, 0), (145, 0), (146, 0),
+                 (147, 0), (148, 0), ('act', 5), (149, 0), ('act', 1),
+                 (118, 0), (119, 0), ('chx', 1), ('goto', 'stand')],
+    # Down with floor still ahead of him is just a crouch; it ends in the
+    # same loop a soft landing does.
+    'stoop':    [('id', ID_STOOP), ('act', 1), ('chx', 1),
+                 (107, 2), (108, 0), ('goto', 'crouch')],
+    'hangdrop': [('id', ID_HANGDROP), ('act', 0),
+                 (81, 0), (82, 0), ('act', 5), (83, 0), ('act', 1),
+                 (84, 0), (85, 0), ('chx', 3), ('goto', 'stand')],
 }
 ORDER = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn',
-         'stepfall', 'freefall', 'softland', 'standup']
+         'stepfall', 'freefall', 'softland', 'standup',
+         'climbdown', 'hang', 'climbup', 'hangdrop', 'stoop']
 
 # POP anchors a character by his leading edge: facing left that is the left
 # edge of the image, facing right it is the leftmost pixel of the RIGHTMOST
@@ -120,6 +152,13 @@ CAMERA = 12
 # each direction a frame is all it costs.  Which banks they end up in is
 # settled at startup, not here: see the tail of pop.asm.
 PAGE_WINDOW = 0xC000
+BANK_SIZE = 0x4000
+
+# A frame's blob offset carries the bank it lives in: the top two bits index a
+# table the program fills in at startup, the low fourteen are the offset
+# inside that bank.  Sprites therefore cost no more table than they did with
+# one bank, and no frame is ever split across the join.
+BANK_SHIFT = 14
 SIG_ART, SIG_SPR = bytes([0x5A, 0xA5]), bytes([0xA5, 0x5A])
 START_ROW, START_COL = 0, 5
 
@@ -148,21 +187,25 @@ def sprite_bytes(img, mirror):
 def build_sprites(frames_used):
     """
     Table of (width, height, xoff left, xoff right, blob offset) and the
-    pixels.  Only one facing is stored -- mirroring at draw time through a
-    bit reversal table costs a lookup per byte and saves ten kilobytes.
+    pixels, the latter cut into bank sized pieces.  Only one facing is stored
+    -- mirroring at draw time through a bit reversal table costs a lookup per
+    byte and saves ten kilobytes.
     """
     frames = popframe.load()
-    index, table, blob = {}, bytearray(), bytearray()
+    index, table, banks = {}, bytearray(), [bytearray()]
     for n in frames_used:
         index[n] = len(index)
         img = popframe.image(frames[n])
         apple_bytes = (img.px_width + 6) // 7
         width, height, data = sprite_bytes(img, 0)
+        if len(banks[-1]) + len(data) > BANK_SIZE - 2:
+            banks.append(bytearray())   # this one will not fit: start the next
         table += bytes([width, height, (-CHAR_ANCHOR) & 0xff,
                         (-CHAR_ANCHOR - (apple_bytes - 1) * 7) & 0xff])
-        table += len(blob).to_bytes(2, 'little')
-        blob += data
-    return index, bytes(table), bytes(blob)
+        table += (((len(banks) - 1) << BANK_SHIFT)
+                  | len(banks[-1])).to_bytes(2, 'little')
+        banks[-1] += data
+    return index, bytes(table), [bytes(b) for b in banks]
 
 
 def build_sequences(index):
@@ -183,6 +226,12 @@ def build_sequences(index):
                 code += bytes([CHX, step[1] & 0xff])
             elif step[0] == 'chy':
                 code += bytes([CHY, step[1] & 0xff])
+            elif step[0] == 'act':
+                code += bytes([ACT, step[1]])
+            elif step[0] == 'up':
+                code.append(UP)
+            elif step[0] == 'down':
+                code.append(DOWN)
             elif step[0] == 'setfall':
                 code += bytes([SETFALL, step[1] & 0xff, step[2] & 0xff])
             elif step[0] == 'id':
@@ -272,11 +321,16 @@ def main(argv):
         for step in SEQUENCES[name]:
             if isinstance(step[0], int) and step[0] not in used:
                 used.append(step[0])
-    index, table, blob = build_sprites(used)
+    index, table, blobs = build_sprites(used)
     # The index stays in fixed memory -- it is walked every frame -- and only
-    # the pixels go in a bank.
+    # the pixels go in banks.  The first rides at 0xC000 in the tape image and
+    # so needs no copying, only a signature to say which bank it landed in.
     open(os.path.join(binout, 'sprtab.bin'), 'wb').write(table)
-    open(os.path.join(binout, 'bank_spr.bin'), 'wb').write(blob + SIG_SPR)
+    open(os.path.join(binout, 'bank_spr.bin'), 'wb').write(blobs[0] + SIG_SPR)
+    rest = b''.join(blobs[1:])
+    open(os.path.join(binout, 'bank_spr2.bin'), 'wb').write(rest)
+    if len(blobs) > 2:
+        raise SystemExit('спрайты переросли два банка: %d' % sum(map(len, blobs)))
 
     # Shifting a row bit by bit was costing more than the whole rest of the
     # frame, so it goes through tables instead: for a shift of s, hi[s][b] is
@@ -321,6 +375,9 @@ def main(argv):
         f.write('SEQ_ID      equ %d' % SEQID + chr(10))
         f.write('SEQ_CHY     equ %d' % CHY + chr(10))
         f.write('SEQ_SETFALL equ %d' % SETFALL + chr(10))
+        f.write('SEQ_ACT     equ %d' % ACT + chr(10))
+        f.write('SEQ_UP      equ %d' % UP + chr(10))
+        f.write('SEQ_DOWN    equ %d' % DOWN + chr(10))
         f.write('TILE_FLOOR  equ %d' % TILE_FLOOR + chr(10))
         f.write('TILE_SOLID  equ %d' % TILE_SOLID + chr(10))
 
@@ -341,8 +398,10 @@ def main(argv):
 
     print('bank_art    %d байт (комната %d + маска %d)'
           % (len(screen) + len(fore), len(screen), len(fore)))
-    print('bank_spr    %d байт, %d кадров  (свободно в банке %d)'
-          % (len(blob), len(used), 0x4000 - len(blob) - 2))
+    for i, b in enumerate(blobs):
+        print('bank_spr%-3d %d байт  (свободно в банке %d)'
+              % (i + 1, len(b), BANK_SIZE - len(b) - (2 if not i else 0)))
+    print('спрайтов    %d кадров, %d байт' % (len(used), sum(map(len, blobs))))
     print('sprtab.bin  %d байт' % len(table))
     print('seqs.bin    %d bytes, %d sequences' % (len(code), len(ORDER)))
     # FloorY, indexed by block row + 1: the plane his feet rest on.

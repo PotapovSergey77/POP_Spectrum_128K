@@ -7,8 +7,8 @@ def main(argv):
     tap, out, frames = argv[1], argv[2], int(argv[3])
     x0, y0, x1, y1, Z = (int(v) for v in argv[4:9])
     held = argv[9:]
-    cpu = runtap.boot(tap, held)
-    cpu.run(frames)
+    cpu = runtap.boot(tap)
+    runtap.play(cpu, frames, runtap.parse(held))
     rows = []
     for y in range(y0, y1):
         line = []
