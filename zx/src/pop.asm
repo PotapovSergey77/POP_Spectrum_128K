@@ -1639,7 +1639,6 @@ dpxoff:         ld      a, (hl)
                 ld      hl, sprblob
                 add     hl, de
                 ld      (curdat), hl
-                call    page_frame
 
 ; The anchor is the leading edge, so the offset differs with facing and is
 ; kept with the sprite rather than worked out here.
@@ -1712,27 +1711,36 @@ dpxoff:         ld      a, (hl)
                 call    crop_char
                 call    erase_new
 
+; Only now: everything above reads the room and the tables, and the sprite's
+; bank goes over the top of the room.
+
+                call    page_frame
+
                 ld      a, (newh)       ; the calls above have had A
                 ld      b, a
                 ld      hl, (curdat)
                 ld      a, (newtop)
                 ld      (rowy), a
 
+                ld      a, (newcol)
+                ld      (linecol), a
+                call    startrows
 drawrow:        push    bc
                 call    build_row       ; HL walks over the source row
                 push    hl
                 ld      a, (rowy)
                 cp      192
-                jr      nc, drawskip
+                jr      nc, drawblank
                 ld      c, a
                 ld      a, (charcu)     ; cut off by the floor above?
                 cp      c
                 jr      c, drawgo
-                jr      nz, drawskip
-drawgo:         ld      a, (newcol)
-                ld      e, a
-                ld      a, c
-                call    scraddr
+                jr      z, drawgo
+                call    line_addr       ; above the cut, but the row still
+                jr      drawskip        ; counts towards where the next one is
+drawblank:      call    startrows
+                jr      drawskip
+drawgo:         call    line_addr
                 ld      bc, work - SCREEN
                 add     hl, bc          ; draw into the working copy
                 ld      de, mbuf
@@ -1939,19 +1947,26 @@ cover_rows:     ld      a, (newcol)
                 ld      (masterc), a
                 ld      a, (newh)
                 ld      b, a
+                ld      a, (newcol)
+                ld      (linecol), a
                 ld      a, (newtop)
                 ld      (rowy), a
+                call    startrows
 coverrow:       push    bc
                 ld      a, (rowy)
                 cp      192
-                jr      nc, coverskip
+                jr      nc, coverblank
+                call    room_addr       ; both walk on whatever the mask says
+                push    hl
+                call    line_addr
+                ld      a, (rowy)
                 ld      l, a
                 ld      h, 0
                 ld      de, (coverb)
                 add     hl, de
                 ld      a, (hl)
                 inc     a
-                jr      z, coverskip    ; the mask has nothing on this row
+                jr      z, coverpop     ; the mask has nothing on this row
                 dec     a
                 call    mul35
                 ld      de, (coverm)
@@ -1961,30 +1976,20 @@ coverrow:       push    bc
                 ld      d, 0
                 add     hl, de
                 push    hl              ; the mask's row
-
-                ld      a, (rowy)
-                call    mul35
-                ld      de, room
-                add     hl, de
-                ld      a, (masterc)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                push    hl              ; the room's row
-
-                ld      a, (newcol)
-                ld      e, a
-                ld      a, (rowy)
-                call    scraddr
+                ld      hl, (rowptr)
                 ld      de, work - SCREEN
                 add     hl, de
                 ld      (workp), hl     ; the working copy
-                pop     de              ; the room
                 pop     hl              ; the mask
+                pop     de              ; the room
                 ld      a, (neww)
                 ld      b, a
                 call    cover_apply
-coverskip:      ld      hl, rowy
+                jr      covernxt
+coverpop:       pop     hl
+                jr      covernxt
+coverblank:     call    startrows
+covernxt:       ld      hl, rowy
                 inc     (hl)
                 pop     bc
                 djnz    coverrow
@@ -2048,23 +2053,16 @@ eraseset:       ld      de, ercol       ; col, top, width, height, in order
                 ld      (rowy), a
                 ld      a, (erh)
                 ld      b, a
+                ld      a, (ercol)
+                ld      (linecol), a
+                call    startrows
 eraserow:       push    bc
                 ld      a, (rowy)
                 cp      192
                 jr      nc, eraseskip
-                ld      a, (rowy)
-                call    mul35
-                ld      de, room
-                add     hl, de
-                ld      a, (masterc)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
+                call    room_addr
                 push    hl
-                ld      a, (ercol)
-                ld      e, a
-                ld      a, (rowy)
-                call    scraddr
+                call    line_addr
                 ld      de, work - SCREEN
                 add     hl, de
                 ex      de, hl
@@ -2073,10 +2071,76 @@ eraserow:       push    bc
                 ld      c, a
                 ld      b, 0
                 ldir
-eraseskip:      ld      hl, rowy
+                jr      erasenext
+eraseskip:      call    startrows       ; off the screen: begin again below it
+erasenext:      ld      hl, rowy
                 inc     (hl)
                 pop     bc
                 djnz    eraserow
+                ret
+
+startrows:      ld      hl, 0
+                ld      (rowptr), hl
+                ld      (roomp), hl
+                ret
+
+; Four passes a frame walk the same rows, and each of them was working out
+; a screen address from scratch for every one.  A scanline down is a short
+; step from the one above -- the third's line number lives in the high byte
+; and only overflows every eighth row -- so the address is worked out once
+; and walked after that.  The room's rows are simply thirty five bytes apart.
+;
+; (rowptr) is the screen address of the row in hand, or zero for "not yet".
+; A row off the screen puts it back to zero, so the next one on starts again.
+
+nextline:       inc     h               ; the next line within the third
+                ld      a, h
+                and     7
+                ret     nz
+                ld      a, l            ; every eighth, the next row of it
+                add     a, 32
+                ld      l, a
+                ret     c
+                ld      a, h            ; and every eighth of those, the
+                sub     8               ; next third, which the carry gave
+                ld      h, a
+                ret
+
+; In: (rowy), (linecol).  Out: HL = the screen address of that row.
+
+line_addr:      ld      hl, (rowptr)
+                ld      a, h
+                or      l
+                jr      z, lafirst
+                call    nextline
+                ld      (rowptr), hl
+                ret
+lafirst:        ld      a, (linecol)
+                ld      e, a
+                ld      a, (rowy)
+                call    scraddr
+                ld      (rowptr), hl
+                ret
+
+; The same for the room, whose rows are plain.  In: (masterc).
+
+room_addr:      ld      hl, (roomp)
+                ld      a, h
+                or      l
+                jr      z, rafirst
+                ld      de, ROOM_BYTES
+                add     hl, de
+                ld      (roomp), hl
+                ret
+rafirst:        ld      a, (rowy)
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (masterc)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (roomp), hl
                 ret
 
 ; A screen byte column, and which byte of the room the camera puts under it.
@@ -2136,14 +2200,14 @@ showgo:         ld      a, (shh)
                 ld      b, a
                 ld      a, (shtop)
                 ld      (rowy), a
+                ld      a, (shcol)
+                ld      (linecol), a
+                call    startrows
 showrow:        push    bc
                 ld      a, (rowy)
                 cp      192
                 jr      nc, showskip
-                ld      a, (shcol)
-                ld      e, a
-                ld      a, (rowy)
-                call    scraddr
+                call    line_addr
                 ld      d, h
                 ld      e, l            ; DE = screen
                 ld      bc, work - SCREEN
@@ -2152,7 +2216,9 @@ showrow:        push    bc
                 ld      c, a
                 ld      b, 0
                 ldir
-showskip:       ld      hl, rowy
+                jr      shownext
+showskip:       call    startrows
+shownext:       ld      hl, rowy
                 inc     (hl)
                 pop     bc
                 djnz    showrow
@@ -2253,6 +2319,8 @@ coverm:         dw      0
 coverb:         dw      0
 workp:          dw      0
 roomp:          dw      0
+rowptr:         dw      0
+linecol:        db      0
 camstep:        db      0
 ercol:          db      0
 ertop:          db      0

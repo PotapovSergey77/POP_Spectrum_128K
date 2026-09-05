@@ -452,8 +452,12 @@ class Z80:
                 self.hl = (self.hl + step) & 0xffff
                 self.de = (self.de + step) & 0xffff
                 self.bc = (self.bc - 1) & 0xffff
-                self.cycles += 21
-                if not op & 0x10 or self.bc == 0:
+                # ldi/ldd take 16; ldir/lddr take 21 for every pass but the
+                # last, which is a plain 16 -- and counting them all at 21
+                # made every block move look a third dearer than it is.
+                repeat = op & 0x10 and self.bc
+                self.cycles += 21 if repeat else 16
+                if not repeat:
                     break
             self.f &= SF | ZF | CF
             self.f |= PF if self.bc else 0
