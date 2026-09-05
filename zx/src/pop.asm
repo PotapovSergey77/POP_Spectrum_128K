@@ -41,19 +41,19 @@ start:          di
                 xor     a
                 out     (254), a
 
-                call    page_art        ; a bank that did not load leaves a
-                ld      hl, (SIG_ART_AT); black screen and nothing to go on,
-                ld      de, SIG_ART     ; so each one is signed and checked
-                or      a
-                sbc     hl, de
-                jp      nz, badload
-                call    page_spr
-                ld      hl, (SIG_SPR_AT)
-                ld      de, SIG_SPR
-                or      a
-                sbc     hl, de
-                jp      nz, badload
+                call    find_spr        ; which bank the tape put them in
+                call    pick_art        ; and a different one for the room
                 call    page_art
+                ld      hl, stage_art
+                ld      de, room
+                ld      bc, ART_LEN
+                ldir
+
+                ld      hl, (SIG_ART_AT); a bank that did not arrive leaves a
+                ld      de, SIG_ART     ; black screen and nothing to go on
+                or      a
+                sbc     hl, de
+                jp      nz, badload
 
                 ld      hl, room        ; the screen and the working copy both
                 ld      de, SCREEN      ; start out as the bare room
@@ -122,19 +122,57 @@ mainwait:       halt
 ; 0xC000 and is paged in for the part of the frame that wants it.  Bit 4 keeps
 ; the 48K ROM, which is what the interrupt handler at 0x38 is.
 
-; Load in 128 mode: 48 BASIC locks paging on its way in, and then the banks
-; never arrive.  A red border says exactly that happened.
+; The tape loaded the sprites through the window at 0xC000, into whichever
+; bank the loader had paged there -- bank 0 on a machine that has just been
+; reset, but there is no need to take that on trust.  Page each bank in turn
+; and look for the signature the sprites end with.
+
+find_spr:       ld      c, 0
+fsloop:         ld      a, c
+                call    pageset
+                ld      hl, (SPR_SIG_AT)
+                ld      de, SIG_SPR
+                or      a
+                sbc     hl, de
+                jr      z, fsfound
+                inc     c
+                ld      a, c
+                cp      8
+                jr      c, fsloop
+                jr      badload
+fsfound:        ld      a, c
+                ld      (sprbank), a
+                ret
+
+; The room needs a bank of its own.  Six is uncontended and out of the way,
+; unless that is where the sprites landed.
+
+pick_art:       ld      a, (sprbank)
+                cp      6
+                ld      a, 6
+                jr      nz, pickset
+                ld      a, 4
+pickset:        ld      (artbank), a
+                ret
+
+; A bank that did not arrive: red border, and nothing else is going to work.
 
 badload:        ld      a, 2
                 out     (254), a
                 jr      badload
 
-page_art:       ld      a, 0x10 + BANK_ART
+page_art:       ld      a, (artbank)
                 jr      pageset
-page_spr:       ld      a, 0x10 + BANK_SPR
-pageset:        ld      bc, PAGEPORT
+page_spr:       ld      a, (sprbank)
+pageset:        or      0x10            ; bit 4 keeps the 48K ROM, which is
+                push    bc              ; what the handler at 0x38 is
+                ld      bc, PAGEPORT
                 out     (c), a
+                pop     bc              ; find_spr counts banks in C
                 ret
+
+sprbank:        db      0
+artbank:        db      0
 
 ; ---------------------------------------------------------------- input
 ;
@@ -1065,11 +1103,27 @@ shifthi:        incbin  "shifthi.bin"
 shiftlo:        incbin  "shiftlo.bin"
 revtab:         incbin  "revtab.bin"
 sprites:        incbin  "sprtab.bin"        ; the pixels live in a bank
-dataend:
+codeend:
 
-; The working copy is never loaded, only written, so it lives past the end of
-; the tape image rather than taking 6K of loading time.  It mirrors the bitmap
-; and not the attributes, which nothing here touches.
-work            equ     dataend
+; The tape carries one block, so both bank images ride along inside it.
+;
+; The room and its mask sit below the window and are copied into their bank at
+; startup.  The sprites are put at 0xC000 itself, which means the tape drops
+; them straight into whichever bank happens to be paged -- so they need no
+; copying at all, only finding, which the signature at the end of them does.
+;
+; The working copy is never loaded, only written, so it goes over the room
+; image once that has been moved out of the way.
+
+work            equ     codeend
+
+stage_art:      incbin  "bank_art.bin"
+stage_end:
+ART_LEN         equ     stage_end - stage_art
+
+                ds      0xC000 - $              ; the sprites load in a bank
+stage_spr:      incbin  "bank_spr.bin"
+spr_end:
+SPR_SIG_AT      equ     spr_end - 2
 
                 end     start

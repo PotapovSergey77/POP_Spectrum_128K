@@ -11,8 +11,6 @@ Keys are given as a list of names, held down for the whole run:
 
 Usage: runtap.py <tap> [out.png] [frames] [key ...]
 """
-import json
-import os
 import struct
 import sys
 
@@ -55,24 +53,12 @@ def code_blocks(path):
 
 
 def boot(path, held=()):
-    """
-    A CPU with the tape loaded the way its BASIC loader would.  Blocks bound
-    for a RAM bank are named in the .banks.json the build writes, since we do
-    not run the loader itself.
-    """
-    manifest = os.path.splitext(path)[0] + '.banks.json'
-    banks = json.load(open(manifest)) if os.path.exists(manifest) else []
+    """A CPU with the tape's CODE loaded and the keys held down set up."""
     cpu = z80.Z80()
     start = None
-    for (addr, payload), m in zip(code_blocks(path), banks or [{}] * 99):
-        bank = m.get('bank')
-        if bank is None:
-            cpu.mem[addr:addr + len(payload)] = payload
-            start = addr
-        else:
-            off = addr - 0xC000
-            cpu.banks[bank][off:off + len(payload)] = payload
-    cpu.mem[0xC000:] = cpu.banks[cpu.page]
+    for addr, payload in code_blocks(path):
+        cpu.mem[addr:addr + len(payload)] = payload
+        start = addr
     cpu.pc = start
     for row in set(r for r, _ in KEYS.values()):
         cpu.ports[row] = 0xFF
