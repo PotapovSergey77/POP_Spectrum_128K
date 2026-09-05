@@ -72,7 +72,6 @@ BUFW            equ     8               ; widest sprite plus the shift byte
 ; do, so the slot has to be wide enough for those.
 FRAME_WAIT      equ     4
 BLOCK_PX        equ     28
-TILE_GROUND     equ     TILE_FLOOR | TILE_SOLID   ; anything but space
 STEP_OFF_FWD    equ     3               ; CTRL.S
 STEP_OFF_BACK   equ     8
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
@@ -549,7 +548,7 @@ stnobtn:        ld      a, (clrf)       ; button up
 do_startrun:    call    clrall
                 ld      (clrf), a
                 call    front_flags
-                and     TILE_SOLID
+                call    cmp_barr
                 ret     nz
                 ld      a, SQ_STARTRUN
                 jp      jumpseq
@@ -634,9 +633,9 @@ hanging:        ld      a, (jstky)
                 ld      a, (charact)    ; hanging on the side of a block is
                 cp      6               ; hanging straight
                 ret     z
-                call    under_flags
-                and     TILE_SOLID
-                ret     z
+                call    under_flags     ; hanging on the side of a block
+                cp      BLK_BLOCK
+                ret     nz
                 ld      a, SQ_HANGSTRAIGHT
                 jp      jumpseq
 
@@ -692,11 +691,11 @@ do_up:          call    clrall
                 ld      a, (jstkx)
                 or      a
                 jp      m, do_standjump
-                call    above_flags     ; must be clear over his head
-                and     TILE_GROUND
+                call    above_flags     ; CHECKLEDGE: clear over his head,
+                call    cmp_space       ; and something to grab in front
                 jr      nz, jumphigh
                 call    abovefront_flags
-                and     TILE_FLOOR
+                call    cmp_space
                 jr      z, jumphigh
 
 ; DoJumphang.  Which of the two reaches the ledge best, and then his X is
@@ -743,7 +742,7 @@ do_runjump:     call    clrall
 do_down:        call    clrall
                 ld      (clrd), a
                 call    front_flags
-                and     TILE_GROUND
+                call    cmp_space
                 jr      nz, downback    ; no cliff in front of him
                 call    get_dist
                 cp      STEP_OFF_FWD
@@ -752,13 +751,13 @@ do_down:        call    clrall
                 jp      move_by
 
 downback:       call    behind_flags
-                and     TILE_GROUND
+                call    cmp_space
                 jr      nz, do_crouch   ; no cliff behind him either
                 call    get_dist
                 cp      STEP_OFF_BACK
                 jr      c, do_crouch    ; not backed up to the edge
                 call    under_flags     ; and there has to be a ledge to hold
-                and     TILE_FLOOR
+                call    cmp_space
                 jr      z, do_crouch
                 call    get_dist        ; line him up with it
                 sub     9
@@ -777,10 +776,10 @@ do_crouch:      ld      a, SQ_STOOP
 
 get_fwd_dist:   call    front_flags
                 ld      c, a
-                and     TILE_SOLID
+                call    cmp_barr        ; a wall: step up to it
                 jr      nz, fwdedge
                 ld      a, c
-                and     TILE_FLOOR
+                call    cmp_space       ; a drop: step to the edge
                 jr      z, fwdedge
                 ld      a, 14
                 ret
@@ -1007,7 +1006,7 @@ cbgo:           xor     a
                 ld      b, 32           ; he cannot be deeper in than this
 cbtry:          ld      a, (charx)      ; his own coordinate, not his foot:
                 call    tile_flags      ; the wall stops his body
-                and     TILE_SOLID
+                call    cmp_barr
                 ret     z
                 ld      a, 1
                 ld      (blocked), a
@@ -1038,6 +1037,27 @@ tile_flags:     ld      l, a
                 ld      a, (hl)
                 ret
 tilenone:       xor     a
+                ret
+
+; CMPSPACE and CMPBARR out of CTRLSUBS.S, as the tables they may as well be.
+; In: A = a block type.  cmp_space: Z when the block is clear -- and a solid
+; block counts as clear here, which is why onground has a case of its own for
+; it.  cmp_barr: Z when nothing is in the way, else the barrier's code.
+
+cmp_space:      ld      l, a
+                ld      h, 0
+                ld      de, cmpspace
+                add     hl, de
+                ld      a, (hl)
+                or      a
+                ret
+
+cmp_barr:       ld      l, a
+                ld      h, 0
+                ld      de, cmpbarr
+                add     hl, de
+                ld      a, (hl)
+                or      a
                 ret
 
 ; In: A = a screen x, C = a block row.  Out: A = that tile's flags.  The row
@@ -1120,7 +1140,7 @@ bxfwd:          ld      b, a
 ; Out: A = the flags of the tile he is standing on.
 
 under_flags:    call    base_x
-                jr      tile_flags
+                jp      tile_flags
 
 ; Out: A = the flags of the block one along, the way he faces or the way he
 ; came -- GETINFRONT and GETBEHIND.  Off the map reads as space, which is
@@ -1223,7 +1243,7 @@ check_floor:    ld      a, (charact)
                 and     F_CHECK
                 ret     z
                 call    under_flags
-                and     TILE_GROUND
+                call    cmp_space       ; solid: he stays where he is
                 ret     nz
                 ld      hl, blocky
                 inc     (hl)
@@ -1258,7 +1278,7 @@ fallplane:      call    floor_plane
                 cp      b
                 ret     c               ; not down to the plane yet
                 call    under_flags
-                and     TILE_GROUND
+                call    cmp_space
                 jr      nz, hit_floor
                 ld      hl, blocky      ; straight through, keep going
                 ld      a, (hl)
@@ -1870,6 +1890,8 @@ stack:
 seqs:           incbin  "seqs.bin"
 seqtab:         incbin  "seqtab.bin"
 tiles:          incbin  "tiles.bin"
+cmpspace:       incbin  "cmpspace.bin"
+cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"

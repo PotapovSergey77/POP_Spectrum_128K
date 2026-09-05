@@ -183,17 +183,29 @@ def main(argv):
 
     types, _ = level.screen(ROOM[1])
     ids = [b & poplevel.IDMASK for b in types]
-    flags = bytearray(30)
-    for i, t in enumerate(ids):
-        # A tile has a floor when its D section is one of the floor tops --
-        # the renderer's own test -- plus the loose floor, whose top is drawn
-        # by its movable piece instead.
-        if (renderroom.bg.pieced[t] in renderroom.FLOOR_TOPS
-                or t == renderroom.bg.loose):
-            flags[i] |= TILE_FLOOR      # something to stand on
-        if t == renderroom.bg.block:
-            flags[i] |= TILE_SOLID      # and nothing to walk through
-    open(os.path.join(binout, 'tiles.bin'), 'wb').write(bytes(flags))
+    # The block types themselves, as BLUETYPE has them.  Two flags of my own
+    # were standing in for these and every rule I had to invent came out of
+    # that; POP asks the type and so do we now.
+    open(os.path.join(binout, 'tiles.bin'), 'wb').write(bytes(ids))
+
+    # CMPSPACE and CMPBARR out of CTRLSUBS.S, as lookups.  cmpspace: is the
+    # block clear -- and note that a solid block counts as clear here, which
+    # is why onground has a case of its own for it.  cmpbarr: 0 clear, else
+    # the barrier's code.
+    bg = renderroom.bg
+    space = bytearray(32)
+    barr = bytearray(32)
+    for t in range(32):
+        clear = t in (bg.space, bg.pillartop, bg.panelwof, bg.block)             or t >= bg.archtop1
+        space[t] = 0 if clear else 1
+        if t in (bg.panelwif, bg.panelwof, bg.gate):
+            barr[t] = 1
+        elif t in (bg.mirror, bg.slicer):
+            barr[t] = 3
+        elif t == bg.block:
+            barr[t] = 4
+    open(os.path.join(binout, 'cmpspace.bin'), 'wb').write(bytes(space))
+    open(os.path.join(binout, 'cmpbarr.bin'), 'wb').write(bytes(barr))
 
     # POP draws the foreground pieces after the characters, which is what
     # lets a wall or a post stand in front of the prince.  Those pieces are
@@ -360,10 +372,9 @@ def main(argv):
         f.write('BANK_ART    equ %d' % BANK_ART + chr(10))
         for i, n in enumerate(BANK_SPR):
             f.write('BANK_SPR%d   equ %d' % (i + 1, n) + chr(10))
+        f.write('BLK_BLOCK   equ %d' % renderroom.bg.block + chr(10))
         f.write('F_CHECK     equ %d' % 0x40 + chr(10))
         f.write('F_FOOTMARK  equ %d' % 0x1f + chr(10))
-        f.write('TILE_FLOOR  equ %d' % TILE_FLOOR + chr(10))
-        f.write('TILE_SOLID  equ %d' % TILE_SOLID + chr(10))
 
         # POP's own sequence numbers, so the control code can read the way
         # CTRL.S does: `lda #climbdown / jmp jumpseq`.
@@ -388,7 +399,7 @@ def main(argv):
     floory = bytes(v & 0xff for v in popframe.FLOOR_Y)
     open(os.path.join(binout, 'floory.bin'), 'wb').write(floory)
 
-    print('tiles.bin   %s' % ' '.join('%d' % f for f in flags))
+    print('tiles.bin   типы блоков: %s' % ' '.join('%d' % t for t in ids[:10]))
     print('floory.bin  %s' % ' '.join('%d' % f for f in floory))
     print('frontrect   %d прямоугольников переднего плана, %d байт'
           % (rects[0], len(rects)))
