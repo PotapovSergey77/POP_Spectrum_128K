@@ -120,6 +120,7 @@ CAMERA = 12
 # each direction a frame is all it costs.  Banks 0 and 6 are uncontended.
 PAGE_WINDOW = 0xC000
 BANK_SPR, BANK_ART = 0, 6
+SIG_ART, SIG_SPR = bytes([0x5A, 0xA5]), bytes([0xA5, 0x5A])
 START_ROW, START_COL = 0, 5
 
 
@@ -249,8 +250,11 @@ def main(argv):
                         continue
                     off = zxscreen.bitmap_offset(x >> 3, y)
                     fore[off] |= 0x80 >> (x & 7)
-    # The art bank: the room first, then the foreground mask behind it.
-    open(os.path.join(out, 'bank_art.bin'), 'wb').write(screen + bytes(fore))
+    # The art bank: the room first, then the foreground mask behind it, and a
+    # signature the program checks -- a bank that did not load leaves a black
+    # screen and nothing to go on, so it is worth two bytes to say so.
+    art = screen + bytes(fore)
+    open(os.path.join(out, 'bank_art.bin'), 'wb').write(art + SIG_ART)
 
     blockof = bytearray(256)            # screen pixel -> block column
     angle_px = 2 * popframe.ANGLE       # logic units are half pixels
@@ -268,7 +272,7 @@ def main(argv):
     # The index stays in fixed memory -- it is walked every frame -- and only
     # the pixels go in a bank.
     open(os.path.join(out, 'sprtab.bin'), 'wb').write(table)
-    open(os.path.join(out, 'bank_spr.bin'), 'wb').write(blob)
+    open(os.path.join(out, 'bank_spr.bin'), 'wb').write(blob + SIG_SPR)
 
     # Shifting a row bit by bit was costing more than the whole rest of the
     # frame, so it goes through tables instead: for a shift of s, hi[s][b] is
@@ -306,6 +310,10 @@ def main(argv):
         f.write('sprblob     equ %d' % PAGE_WINDOW + chr(10))
         f.write('room        equ %d' % PAGE_WINDOW + chr(10))
         f.write('foremask    equ %d' % (PAGE_WINDOW + len(screen)) + chr(10))
+        f.write('SIG_ART_AT  equ %d' % (PAGE_WINDOW + len(art)) + chr(10))
+        f.write('SIG_ART     equ %d' % int.from_bytes(SIG_ART, 'little') + chr(10))
+        f.write('SIG_SPR_AT  equ %d' % (PAGE_WINDOW + len(blob)) + chr(10))
+        f.write('SIG_SPR     equ %d' % int.from_bytes(SIG_SPR, 'little') + chr(10))
         f.write('SEQ_GOTO    equ %d\n' % GOTO)
         f.write('SEQ_FACE    equ %d\n' % FACE)
         f.write('SEQ_CHX     equ %d\n' % CHX)

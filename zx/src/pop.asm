@@ -41,7 +41,20 @@ start:          di
                 xor     a
                 out     (254), a
 
+                call    page_art        ; a bank that did not load leaves a
+                ld      hl, (SIG_ART_AT); black screen and nothing to go on,
+                ld      de, SIG_ART     ; so each one is signed and checked
+                or      a
+                sbc     hl, de
+                jp      nz, badload
+                call    page_spr
+                ld      hl, (SIG_SPR_AT)
+                ld      de, SIG_SPR
+                or      a
+                sbc     hl, de
+                jp      nz, badload
                 call    page_art
+
                 ld      hl, room        ; the screen and the working copy both
                 ld      de, SCREEN      ; start out as the bare room
                 ld      bc, 6912
@@ -108,6 +121,13 @@ mainwait:       halt
 ; its foreground mask, and the prince's pixels.  Each lives in its own bank at
 ; 0xC000 and is paged in for the part of the frame that wants it.  Bit 4 keeps
 ; the 48K ROM, which is what the interrupt handler at 0x38 is.
+
+; Load in 128 mode: 48 BASIC locks paging on its way in, and then the banks
+; never arrive.  A red border says exactly that happened.
+
+badload:        ld      a, 2
+                out     (254), a
+                jr      badload
 
 page_art:       ld      a, 0x10 + BANK_ART
                 jr      pageset

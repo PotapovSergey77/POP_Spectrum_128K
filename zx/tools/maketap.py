@@ -20,7 +20,15 @@ import taputil as t
 
 PAGE_WINDOW = 0xC000
 PAGE_PORT = 32765
-ROM48 = 0x10                    # keep the 48K ROM under the interrupt handler
+
+# The loader runs under 128 BASIC, whose interpreter is executing from ROM 0.
+# Bit 4 of the paging port picks the ROM, so the loader must leave it alone --
+# setting it would pull the 128 editor out from under the statement doing the
+# setting.  The program selects the 48K ROM itself, once it is running its own
+# code and no longer cares.
+#
+# 48 BASIC is not an option: entering it locks paging until a hard reset, and
+# these OUTs would do nothing at all.
 
 
 def main(argv):
@@ -31,7 +39,7 @@ def main(argv):
     n = 20
     for bank, _ in banks:
         lines.append(t.line(n, [t.OUT] + list(t.number(PAGE_PORT)) + [ord(',')]
-                            + list(t.number(ROM48 | bank))
+                            + list(t.number(bank))
                             + [ord(':'), t.LOAD, ord('"'), ord('"'), t.CODE_T]))
         n += 10
     lines.append(t.line(n, [t.LOAD, ord('"'), ord('"'), t.CODE_T]))
