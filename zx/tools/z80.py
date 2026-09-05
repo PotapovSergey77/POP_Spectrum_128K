@@ -21,6 +21,10 @@ for _i in range(256):
     PARITY[_i] = PF if not _n & 1 else 0
 
 
+# T-states between interrupts on a 128K -- 228 to the line, 311 lines.
+FRAME_TSTATES = 70908
+
+
 class Z80:
     def __init__(self, mem=None):
         self.mem = bytearray(65536) if mem is None else mem
@@ -185,6 +189,11 @@ class Z80:
             return
         if op == 0x76:                                  # halt
             if self.iff1:
+                # A halt waits for the interrupt, so the clock jumps to the
+                # next one.  Without this the cycle count is the work only and
+                # says nothing about how long a frame actually takes, which is
+                # the question the pace of the game turns on.
+                self.cycles += FRAME_TSTATES - self.cycles % FRAME_TSTATES
                 self.frames += 1
             else:
                 self.halted = True
