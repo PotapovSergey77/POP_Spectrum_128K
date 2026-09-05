@@ -36,6 +36,26 @@ class Z80:
         self.cycles = 0
         self.ports = {}          # port -> value returned by IN
         self.default_in = 0xFF
+        # 128K paging.  Rather than route every read through a mapper -- which
+        # would cost more than the rest of the interpreter -- the window is
+        # swapped in and out of the flat 64K array when the port is written.
+        self.banks = [bytearray(0x4000) for _ in range(8)]
+        self.page = 0
+
+    def set_page(self, n):
+        """Put RAM bank n at 0xC000, keeping what the old one held."""
+        n &= 7
+        if n == self.page:
+            return
+        self.banks[self.page][:] = self.mem[0xC000:]
+        self.mem[0xC000:] = self.banks[n]
+        self.page = n
+
+    def io_write(self, port, value):
+        # 0x7FFD is decoded on A15 and A1 both low, which is how every real
+        # 128K program addresses it.
+        if not port & 0x8002:
+            self.set_page(value & 7)
 
     # -- registers ------------------------------------------------------
 
@@ -340,7 +360,7 @@ class Z80:
             elif y == 1:
                 self.cb()
             elif y == 2:                                # out (n),a
-                self.fetch()
+                self.io_write((self.a << 8) | self.fetch(), self.a)
             elif y == 3:                                # in a,(n)
                 self.fetch()
                 self.a = self.default_in
@@ -454,6 +474,7 @@ class Z80:
             self.f = (self.f & CF) | self.sz(v) | PARITY[v]
             return
         if z == 1:                                      # out (c),r
+            self.io_write(self.bc, 0 if y == 6 else self.get_r(y))
             return
         if z == 2:                                      # sbc/adc hl,rr
             a, b = self.hl, self.get_rp(y >> 1)

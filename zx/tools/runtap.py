@@ -11,6 +11,8 @@ Keys are given as a list of names, held down for the whole run:
 
 Usage: runtap.py <tap> [out.png] [frames] [key ...]
 """
+import json
+import os
 import struct
 import sys
 
@@ -28,17 +30,58 @@ KEYS = {
 
 
 def load_tap(path):
+    """The last CODE block, which is the program itself."""
+    for addr, payload in code_blocks(path):
+        pass
+    return addr, payload
+
+
+def code_blocks(path):
+    """Every CODE block in the tape, in order, as (load address, bytes)."""
     data = open(path, 'rb').read()
     blocks, i = [], 0
     while i < len(data):
         n = struct.unpack_from('<H', data, i)[0]
         blocks.append(data[i + 2:i + 2 + n])
         i += 2 + n
+    out = []
     for j, b in enumerate(blocks):
         if b[0] == 0 and b[1] == 3:                 # CODE header
-            start = struct.unpack_from('<H', b, 14)[0]
-            return start, blocks[j + 1][1:-1]
-    raise SystemExit('%s: no CODE block' % path)
+            out.append((struct.unpack_from('<H', b, 14)[0],
+                        blocks[j + 1][1:-1]))
+    if not out:
+        raise SystemExit('%s: no CODE block' % path)
+    return out
+
+
+def boot(path, held=()):
+    """
+    A CPU with the tape loaded the way its BASIC loader would.  Blocks bound
+    for a RAM bank are named in the .banks.json the build writes, since we do
+    not run the loader itself.
+    """
+    manifest = os.path.splitext(path)[0] + '.banks.json'
+    banks = json.load(open(manifest)) if os.path.exists(manifest) else []
+    cpu = z80.Z80()
+    start = None
+    for (addr, payload), m in zip(code_blocks(path), banks or [{}] * 99):
+        bank = m.get('bank')
+        if bank is None:
+            cpu.mem[addr:addr + len(payload)] = payload
+            start = addr
+        else:
+            off = addr - 0xC000
+            cpu.banks[bank][off:off + len(payload)] = payload
+    cpu.mem[0xC000:] = cpu.banks[cpu.page]
+    cpu.pc = start
+    for row in set(r for r, _ in KEYS.values()):
+        cpu.ports[row] = 0xFF
+    for name in held:
+        if name not in KEYS:
+            raise SystemExit('unknown key %r' % name)
+        row, bit = KEYS[name]
+        cpu.ports[row] = cpu.ports[row] & ~(1 << bit) & 0xFF
+    return cpu
 
 
 def main(argv):
@@ -49,19 +92,7 @@ def main(argv):
     frames = int(argv[3]) if len(argv) > 3 else 4
     held = argv[4:]
 
-    start, code = load_tap(argv[1])
-    cpu = z80.Z80()
-    cpu.mem[start:start + len(code)] = code
-    cpu.pc = start
-
-    for row in set(r for r, _ in KEYS.values()):
-        cpu.ports[row] = 0xFF
-    for name in held:
-        if name not in KEYS:
-            raise SystemExit('unknown key %r' % name)
-        row, bit = KEYS[name]
-        cpu.ports[row] = cpu.ports[row] & ~(1 << bit) & 0xFF
-
+    cpu = boot(argv[1], held)
     steps = cpu.run(frames)
     scr = bytes(cpu.mem[16384:16384 + 6912])
     zxscreen.preview(scr, out)

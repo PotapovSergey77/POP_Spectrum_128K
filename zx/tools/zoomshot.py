@@ -7,15 +7,7 @@ def main(argv):
     tap, out, frames = argv[1], argv[2], int(argv[3])
     x0, y0, x1, y1, Z = (int(v) for v in argv[4:9])
     held = argv[9:]
-    start, code = runtap.load_tap(tap)
-    cpu = z80.Z80()
-    cpu.mem[start:start + len(code)] = code
-    cpu.pc = start
-    for row in set(r for r, _ in runtap.KEYS.values()):
-        cpu.ports[row] = 0xFF
-    for name in held:
-        row, bit = runtap.KEYS[name]
-        cpu.ports[row] &= ~(1 << bit) & 0xFF
+    cpu = runtap.boot(tap, held)
     cpu.run(frames)
     rows = []
     for y in range(y0, y1):

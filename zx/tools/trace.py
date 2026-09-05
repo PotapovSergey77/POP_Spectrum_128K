@@ -23,15 +23,7 @@ def main(argv):
     here = os.path.dirname(os.path.abspath(__file__))
     sym = json.load(open(os.path.join(here, '..', 'build', 'sym.json')))
 
-    start, code = runtap.load_tap(tap)
-    cpu = z80.Z80()
-    cpu.mem[start:start + len(code)] = code
-    cpu.pc = start
-    for row in set(r for r, _ in runtap.KEYS.values()):
-        cpu.ports[row] = 0xFF
-    for name in held:
-        row, bit = runtap.KEYS[name]
-        cpu.ports[row] &= ~(1 << bit) & 0xFF
+    cpu = runtap.boot(tap, held)
 
     print('%-5s ' % 'frame' + ' '.join('%-7s' % w for w in WATCH))
     for n in range(frames):

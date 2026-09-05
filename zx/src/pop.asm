@@ -12,6 +12,11 @@
 ;
 ; Sprites are stored byte aligned as (mask, data) pairs and shifted into
 ; place at draw time: screen = (screen AND mask) OR data.
+;
+; This is a 128K program.  The fixed half of the map holds the code, the
+; tables the inner loops index, and the off screen copy; the window at 0xC000
+; holds the room with its foreground mask in one bank and the prince's pixels
+; in another, paged in for the part of the frame that reads them.
 
                 org     24576
 
@@ -23,6 +28,7 @@ FRAME_WAIT      equ     3               ; 50Hz frames per game frame
 BLOCK_PX        equ     28
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
+PAGEPORT        equ     0x7FFD
 X_MIN           equ     40
 X_MAX           equ     240
 
@@ -35,6 +41,7 @@ start:          di
                 xor     a
                 out     (254), a
 
+                call    page_art
                 ld      hl, room        ; the screen and the working copy both
                 ld      de, SCREEN      ; start out as the bare room
                 ld      bc, 6912
@@ -67,7 +74,9 @@ start:          di
                 ld      (seqptr), hl
 
                 call    step_seq
+                call    page_spr
                 call    draw_prince
+                call    page_art
                 call    hide_behind
                 call    show_rect
                 call    keep_rect
@@ -79,16 +88,33 @@ main:           ld      b, FRAME_WAIT
 mainwait:       halt
                 djnz    mainwait
 
+                call    page_art
                 call    erase_prince
                 call    input_step
                 call    step_seq
                 call    check_floor
                 call    do_fall
+                call    page_spr
                 call    draw_prince
+                call    page_art
                 call    hide_behind
                 call    show_rect
                 call    keep_rect
                 jr      main
+
+; ---------------------------------------------------------------- paging
+;
+; Two things are too big to keep in the fixed half of the map: the room with
+; its foreground mask, and the prince's pixels.  Each lives in its own bank at
+; 0xC000 and is paged in for the part of the frame that wants it.  Bit 4 keeps
+; the 48K ROM, which is what the interrupt handler at 0x38 is.
+
+page_art:       ld      a, 0x10 + BANK_ART
+                jr      pageset
+page_spr:       ld      a, 0x10 + BANK_SPR
+pageset:        ld      bc, PAGEPORT
+                out     (c), a
+                ret
 
 ; ---------------------------------------------------------------- input
 ;
@@ -519,7 +545,7 @@ dpxoff:         ld      a, (hl)
                 ld      e, (hl)
                 inc     hl
                 ld      d, (hl)
-                ld      hl, sprites + SPR_BLOB
+                ld      hl, sprblob
                 add     hl, de
                 ld      (curdat), hl
 
@@ -1013,14 +1039,12 @@ seqs:           incbin  "seqs.bin"
 tiles:          incbin  "tiles.bin"
 floory:         incbin  "floory.bin"
 blockof:        incbin  "blockof.bin"
-foremask:       incbin  "foremask.bin"
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
 shiftlo:        incbin  "shiftlo.bin"
 revtab:         incbin  "revtab.bin"
-room:           incbin  "room.bin"
-sprites:        incbin  "sprites.bin"
+sprites:        incbin  "sprtab.bin"        ; the pixels live in a bank
 dataend:
 
 ; The working copy is never loaded, only written, so it lives past the end of
