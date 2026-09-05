@@ -217,6 +217,33 @@ def main(argv):
     rects = bytes([len(rects) // 4]) + rects
     open(os.path.join(binout, 'frontrect.bin'), 'wb').write(rects)
 
+    # Putting the foreground back is the most expensive thing in a frame, and
+    # most of it is spent walking over bytes the mask has nothing in.  This
+    # says, per scanline, the first and last byte column it covers, so the
+    # walk can be cut to the part that matters -- or skipped.
+    span = bytearray(192 * 2)
+    for row in range(3):
+        pass
+    cover = [[] for _ in range(192)]
+    for i in range(rects[0]):
+        x0, xw, y0, yh = rects[1 + i * 4:5 + i * 4]
+        for y in range(y0, y0 + yh):
+            cover[y].append((x0 >> 3, (x0 + xw - 1) >> 3))
+    for y in range(192):
+        if cover[y]:
+            span[y * 2] = min(a for a, _ in cover[y])
+            span[y * 2 + 1] = max(b for _, b in cover[y])
+        else:
+            span[y * 2], span[y * 2 + 1] = 31, 0     # first > last: nothing
+    open(os.path.join(binout, 'forespan.bin'), 'wb').write(bytes(span))
+
+    # The screen's thirds and interleave cost a dozen instructions a row to
+    # work out, and four passes a frame do it.  192 words is cheaper.
+    rows = bytearray()
+    for y in range(192):
+        rows += (0x4000 + zxscreen.bitmap_offset(0, y)).to_bytes(2, 'little')
+    open(os.path.join(binout, 'rowaddr.bin'), 'wb').write(bytes(rows))
+
     # The art bank: the room first, then the foreground mask behind it, and a
     # signature the program checks -- a bank that did not load leaves a black
     # screen and nothing to go on, so it is worth two bytes to say so.

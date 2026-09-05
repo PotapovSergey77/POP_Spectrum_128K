@@ -65,7 +65,12 @@ dopage:         and     7
 
 SCREEN          equ     16384
 BUFW            equ     8               ; widest sprite plus the shift byte
-FRAME_WAIT      equ     3               ; 50Hz frames per game frame
+; 50Hz frames per game frame.  The Apple ran the kid at about ten a second
+; and this is twelve and a half, but the number is not only about speed: a
+; game frame that outruns its slot lands late and the motion stutters.  The
+; tall frames -- hanging is fifty five scanlines of him -- are the ones that
+; do, so the slot has to be wide enough for those.
+FRAME_WAIT      equ     4
 BLOCK_PX        equ     28
 TILE_GROUND     equ     TILE_FLOOR | TILE_SOLID   ; anything but space
 STEP_OFF_FWD    equ     3               ; CTRL.S
@@ -314,7 +319,11 @@ artbank:        db      BANK_ART
 ;
 ;   left    key 5, row F7FE bit 4        up      key 7, row EFFE bit 3
 ;   right   key 8, row EFFE bit 2        down    key 6, row EFFE bit 4
-;   button  caps shift, row FEFE bit 0
+;   button  space, row 7FFE bit 0
+;
+; Not caps shift, tempting though it is: there are no cursor keys on a
+; Spectrum, and every emulator makes them caps shift and 5-6-7-8.  Using it
+; for the button would mean every step was a careful one.
 
 read_input:     ld      bc, 0xF7FE
                 in      a, (c)
@@ -333,24 +342,16 @@ riydn:          bit     4, e
                 inc     a
 riy2:           ld      (jstky), a
 
-                ld      a, (facing)     ; JSTKX, in his own terms: pushing
-                ld      c, a            ; the way he faces is forward, which
-                xor     a               ; POP counts as negative
-                bit     4, d
-                jr      nz, rix1
-                ld      a, c            ; left pressed
-                add     a, a
-                dec     a               ; facing left -1, facing right +1
+                xor     a               ; JSTKX, stored the way SPECIALK.S
+                bit     4, d            ; stores it: as if he faced left, so
+                jr      nz, rix1        ; forward is the left key
+                dec     a
 rix1:           bit     2, e
                 jr      nz, rix2
-                ld      b, a
-                ld      a, 1            ; right pressed
-                sub     c
-                sub     c               ; facing left +1, facing right -1
-                add     a, b
+                inc     a
 rix2:           ld      (jstkx), a
 
-                ld      bc, 0xFEFE
+                ld      bc, 0x7FFE
                 in      a, (c)
                 cpl
                 and     1
@@ -430,8 +431,32 @@ clrall:         xor     a
 
 ; A run that has run out of floor or hit a wall skids to a halt.
 
+; FACEJSTK.  POP keeps the stick and the fresh press flags as if he faced
+; left, and turns them into his own terms for the length of GENCTRL only.  It
+; is a swap, so the one routine does both ways.  Without it a key held through
+; a turn reads as a new press the moment he faces the other way, and he sets
+; off running on his own.
+
+facejstk:       ld      a, (facing)
+                or      a
+                ret     z               ; facing left: stored as it is
+                ld      a, (jstkx)
+                neg
+                ld      (jstkx), a
+                ld      a, (clrf)
+                ld      b, a
+                ld      a, (clrb)
+                ld      (clrf), a
+                ld      a, b
+                ld      (clrb), a
+                ret
+
 input_step:     call    read_input
-                ld      a, (blocked)
+                call    facejstk
+                call    ctrl_all
+                jp      facejstk
+
+ctrl_all:       ld      a, (blocked)
                 or      a
                 jr      z, ctrl
                 ld      a, (frame)
@@ -447,18 +472,13 @@ tostopnow:      ld      a, SQ_RUNSTOP
 ; the frame he was last drawn in.
 
 ctrl:           ld      a, (charact)
-                cp      4               ; falling
-                ret     z
                 cp      5               ; mid-bump
-                ret     z
-                cp      3               ; in the air: his sequence has it
-                ret     z
-                cp      2               ; hanging, either kind
-                jp      z, hanging
-                cp      6
-                jp      z, hanging
+                jr      z, ctrlclr
+                cp      4               ; or falling: not under control, and
+                jr      nz, ctrlon      ; forget whatever was pressed
+ctrlclr:        jp      clrall
 
-                ld      a, (frame)
+ctrlon:         ld      a, (frame)
                 cp      15
                 jp      z, standing
                 cp      48
@@ -475,7 +495,11 @@ ctrl0:          cp      4
                 jp      c, stjumpup
 ctrl4:          cp      15
                 jp      c, running      ; run 8-17
-                cp      109
+                cp      87
+                jp      c, ctrl1
+                cp      100
+                jp      c, hanging      ; hanging, and swinging on the ledge
+ctrl1:          cp      109
                 jp      z, crouching
                 ret
 
@@ -1475,14 +1499,48 @@ hide_behind:    ld      a, (newh)
 hiderow:        push    bc
                 ld      a, (rowy)
                 cp      192
-                jr      nc, hideskip
+                jp      nc, hideskip
+
+                ld      l, a            ; what the mask covers on this row.
+                ld      h, 0            ; Usually nothing near him, and then
+                add     hl, hl          ; there is nothing to do at all
+                ld      de, forespan
+                add     hl, de
+                ld      d, (hl)         ; D = first covered byte column
+                inc     hl
+                ld      e, (hl)         ; E = last
+
                 ld      a, (newcol)
+                ld      b, a            ; B = his first
+                ld      a, (neww)
+                add     a, b
+                dec     a
+                ld      c, a            ; C = his last
+
+                cp      d
+                jp      c, hideskip     ; all of him is left of the cover
+                ld      a, e
+                cp      b
+                jp      c, hideskip     ; or all of him is right of it
+
+                ld      a, d            ; clip to the overlap
+                cp      b
+                jr      nc, hidefrom
+                ld      a, b
+hidefrom:       ld      b, a
+                ld      a, e
+                cp      c
+                jr      c, hideto
+                ld      a, c
+hideto:         sub     b
+                inc     a
+                ld      (hidecnt), a
+
+                ld      a, b
                 ld      e, a
                 ld      a, (rowy)
                 call    scraddr
                 ld      (hideadr), hl
-                ld      a, (neww)
-                ld      (hidecnt), a
 hidecol:        ld      hl, (hideadr)
                 ld      de, foremask - SCREEN
                 add     hl, de
@@ -1672,23 +1730,23 @@ keep_rect:      ld      a, (newcol)
 ;
 ; A = scanline, E = byte column.  Out: HL = screen address.
 
-scraddr:        ld      b, a
-                and     %00000111
-                ld      h, a
-                ld      a, b
-                rrca
-                rrca
-                rrca
-                and     %00011000
-                or      h
-                or      %01000000
-                ld      h, a
-                ld      a, b
-                and     %00111000
-                rlca
-                rlca
-                add     a, e
+; In: A = a scanline, E = a byte column.  Out: HL = the screen address.
+; A table beats working the interleave out: four passes a frame ask for it.
+
+scraddr:        push    bc
                 ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      bc, rowaddr
+                add     hl, bc
+                ld      a, (hl)
+                inc     hl
+                ld      h, (hl)
+                ld      l, a
+                ld      a, e
+                add     a, l
+                ld      l, a
+                pop     bc
                 ret
 
 ; ---------------------------------------------------------------- data
@@ -1756,6 +1814,9 @@ tiles:          incbin  "tiles.bin"
 floory:         incbin  "floory.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"
+forespan:       incbin  "forespan.bin"
+                ds      (($ + 255) / 256 * 256) - $
+rowaddr:        incbin  "rowaddr.bin"
 fcheck:         incbin  "fcheck.bin"
 fdx:            incbin  "fdx.bin"
 frontrect:      incbin  "frontrect.bin"
