@@ -575,13 +575,18 @@ turning:        ld      a, (btn)
 
 ; ------------------------------------------------------------------ running
 
-starting:       ld      a, (jstky)      ; the first frames of a run
+; The first frames of a run.  Up with the stick still forward turns it into a
+; standing jump -- which is how pressing both at once comes out as one: the
+; forward press wins in `standing` and starts the run, and this catches it
+; three frames later.  DoStandjump, not DoRunjump: that is what CTRL.S says.
+
+starting:       ld      a, (jstky)
                 or      a
                 ret     p
                 ld      a, (jstkx)
                 or      a
                 ret     p
-                jp      do_runjump
+                jp      do_standjump
 
 running:        ld      a, (jstkx)
                 or      a

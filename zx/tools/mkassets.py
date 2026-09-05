@@ -47,7 +47,7 @@ KID_SEQS = (list(range(1, 51))
                79,      # crawl
                84])     # running
 
-CHAR_ANCHOR = 7
+CHAR_ANCHOR = 21
 
 # A block is drawn at canvas x = 28*b, so on screen it runs 28*b - CAMERA to
 # 28*b + 27 - CAMERA -- but the block a character is ON is not simply the one
@@ -138,9 +138,12 @@ def build_sprites(frames_used):
         # is still wrong somewhere, and the constant holds the place until
         # that is found.
         dx = 2 * frames[n].dx
+        # Facing right the image is mirrored inside its own byte buffer, so
+        # the offset has to mirror with it: content at p ends up at
+        # width*8-1-p, and the two facings have to come out as reflections of
+        # each other about the middle of the block he stands on.
         table[e:e + 4] = bytes([width, height, (-CHAR_ANCHOR - dx) & 0xff,
-                                (-CHAR_ANCHOR + dx
-                                 - (apple_bytes - 1) * 7) & 0xff])
+                                (dx - width * 8 - 8) & 0xff])
         table[e + 4:e + 6] = (((len(banks) - 1) << BANK_SHIFT)
                               | len(banks[-1])).to_bytes(2, 'little')
         banks[-1] += data
