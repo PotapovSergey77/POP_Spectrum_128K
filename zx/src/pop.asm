@@ -545,12 +545,22 @@ stnobtn:        ld      a, (clrf)       ; button up
 
 ; No point starting a run into a wall, or he twitches on the spot.
 
-do_startrun:    call    clrall
-                ld      (clrf), a
-                call    front_flags
-                call    cmp_barr
-                ret     nz
-                ld      a, SQ_STARTRUN
+; DoStartrun.  Very close to a barrier it becomes a careful step instead,
+; and it clears no flag of its own.
+
+do_startrun:    call    get_fwd_dist
+                ld      b, a
+                ld      a, (fwdkind)
+                cp      1               ; a barrier ahead?
+                jr      nz, srgo
+                ld      a, b
+                cp      8
+                jr      nc, srgo
+                ld      a, (clrf)
+                or      a
+                ret     p
+                jp      do_stepfwd
+srgo:           ld      a, SQ_STARTRUN
                 jp      jumpseq
 
 do_turn:        call    clrall
@@ -722,8 +732,13 @@ jhmed:          call    get_fwd_dist
 jumphigh:       ld      a, SQ_HIGHJUMP
                 jp      jumpseq
 
-do_standjump:   call    clrall          ; or the up press is still waiting
-                ld      (clru), a       ; when he lands, and he jumps again
+; DoStandjump marks both presses used and clears nothing else -- the
+; direction is very likely still held, and a fresh clrF on landing would set
+; him running.
+
+do_standjump:   ld      a, 1
+                ld      (clru), a
+                ld      (clrf), a
                 ld      a, SQ_STANDJUMP
                 jp      jumpseq
 
@@ -739,7 +754,7 @@ do_runjump:     call    clrall
 ; out of CTRL.S, and the way round it goes matters: you climb down backwards,
 ; holding the ledge you were standing on.
 
-do_down:        call    clrall
+do_down:        ld      a, 1            ; :down sets clrD and nothing else
                 ld      (clrd), a
                 call    front_flags
                 call    cmp_space
@@ -766,7 +781,10 @@ downback:       call    behind_flags
                 jp      jumpseq
 
 do_crouch:      ld      a, SQ_STOOP
-                jp      jumpseq
+                call    jumpseq
+                call    clrall
+                ld      (clrd), a
+                ret
 
 ; ------------------------------------------------------------ careful step
 ;
@@ -774,22 +792,33 @@ do_crouch:      ld      a, SQ_STOOP
 ; ahead means as far as the edge of his own block and no further; anything he
 ; can walk on means a whole one.
 
+; Out: A = how far he may go, and fwdkind = what he is stepping up to:
+; 0 an edge, 1 a barrier, 2 clear ground, as GETFWDDIST reports in X.
+
 get_fwd_dist:   call    front_flags
                 ld      c, a
-                call    cmp_barr        ; a wall: step up to it
-                jr      nz, fwdedge
-                ld      a, c
-                call    cmp_space       ; a drop: step to the edge
-                jr      z, fwdedge
+                call    cmp_barr
+                jr      z, fwdnobarr
+                ld      a, 1
+                ld      (fwdkind), a
+                jp      get_dist
+fwdnobarr:      ld      a, c
+                call    cmp_space
+                jr      nz, fwdclear
+                xor     a               ; an edge
+                ld      (fwdkind), a
+                jp      get_dist
+fwdclear:       ld      a, 2
+                ld      (fwdkind), a
                 ld      a, 14
                 ret
-fwdedge:        jp      get_dist
 
 ; POP keeps fourteen step sequences so that a step always ends where it
 ; should: against the wall, or with his toes exactly on the edge.
 
-do_stepfwd:     call    clrall
+do_stepfwd:     ld      a, 1
                 ld      (clrf), a
+                ld      (clrbtn), a
                 call    get_fwd_dist
                 or      a
                 jr      z, steptest     ; nothing left to step: test his foot
@@ -983,24 +1012,20 @@ movestore:      ld      a, l
 ; over the wall he is holding on to, and in the air it may be over anything.
 ; Pushing him out of those is how he ends up back where he jumped from.
 
+; COLLISIONS opens by naming the situations a character is let through a
+; barrier in: hanging, either kind, and the frames of a climb.  Exactly that
+; list, and nothing of mine.
+
 check_barr:     ld      a, (charact)
-                cp      2               ; hanging: over the wall he holds
+                cp      2               ; hanging
                 ret     z
                 cp      6
                 ret     z
-                cp      3               ; in the air: over anything, legally
-                ret     z
-                cp      4
-                ret     z
-                ld      a, (frame)      ; and the frames CHECKPRESS counts as
-                cp      87              ; hanging rather than standing: those
-                jr      c, cbnot87      ; are exactly the ones whose
-                cp      100             ; coordinate sits over the wall they
-                ret     c               ; are holding on to
-cbnot87:        cp      135
+                ld      a, (frame)
+                cp      135
                 jr      c, cbgo
-                cp      141
-                ret     c
+                cp      149
+                ret     c               ; climbing
 cbgo:           xor     a
                 ld      (blocked), a
                 ld      b, 32           ; he cannot be deeper in than this
@@ -1190,6 +1215,33 @@ arow:           ld      b, a
                 ld      a, b
                 jp      tile_in_row
 
+; InsideBlock in CTRL.S.  A solid block reads as clear to cmpspace, so a
+; character who ends up over one would drop straight through it.  This bumps
+; him out to whichever side he can go and hands back what is under him then.
+
+inside_block:   call    get_dist
+                cp      8
+                jr      nc, ibback
+                call    front_flags
+                cp      BLK_BLOCK
+                jr      z, ibback
+                call    get_dist
+                add     a, 4
+                jr      ibreland
+ibback:         call    behind_flags
+                cp      BLK_BLOCK
+                jr      z, ibstuck
+                call    get_dist
+                cpl
+                add     a, 8
+                jr      ibreland
+ibstuck:        call    get_dist        ; both sides blocked: two back
+                add     a, 14
+                cpl
+                add     a, 8
+ibreland:       call    move_by
+                jp      under_flags
+
 ; GETDIST: how far he is from the edge of his own block, in POP's units of
 ; two pixels, measured the way he faces.  Standing in the middle of a block
 ; is offset 7, so seven units to the edge behind and six to the one ahead.
@@ -1243,7 +1295,10 @@ check_floor:    ld      a, (charact)
                 and     F_CHECK
                 ret     z
                 call    under_flags
-                call    cmp_space       ; solid: he stays where he is
+                cp      BLK_BLOCK       ; inside a block: bump him out first
+                jr      nz, cfspace
+                call    inside_block
+cfspace:        call    cmp_space       ; solid: he stays where he is
                 ret     nz
                 ld      hl, blocky
                 inc     (hl)
@@ -1278,7 +1333,10 @@ fallplane:      call    floor_plane
                 cp      b
                 ret     c               ; not down to the plane yet
                 call    under_flags
-                call    cmp_space
+                cp      BLK_BLOCK
+                jr      nz, dfspace
+                call    inside_block
+dfspace:        call    cmp_space
                 jr      nz, hit_floor
                 ld      hl, blocky      ; straight through, keep going
                 ld      a, (hl)
@@ -1845,6 +1903,7 @@ clru:           db      0
 clrd:           db      0
 clrbtn:         db      0
 atemp:          db      0
+fwdkind:        db      0
 blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0

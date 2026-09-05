@@ -57,7 +57,8 @@ def main(argv):
     cpu.mem[sym['tilerow']] = (row * 10 + sym['tiles']) & 0xff
     cpu.mem[sym['tilerow'] + 1] = ((row * 10 + sym['tiles']) >> 8) & 0xff
 
-    watch = ('charx', 'chary', 'blocky', 'charact', 'frame', 'facing')
+    watch = ('charx', 'chary', 'blocky', 'charact', 'frame', 'facing',
+             'jstkx', 'jstky', 'clrf', 'clru')
     print('%-5s ' % 'frame' + ' '.join('%-7s' % w for w in watch)
           + ' %-7s %-4s keys' % ('basex', 'блок'))
     script = runtap.parse(keys)
