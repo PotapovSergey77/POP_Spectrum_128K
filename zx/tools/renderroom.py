@@ -240,6 +240,89 @@ class Room:
                 self.draw_front(st)
                 preced, spreced = ids[i], specs[i]
 
+        self.hatch_walls(ids)
+
+    # Hatching laid over the finished room.
+    #
+    # The wall face $83 carries three courses of brick.  The top one is a
+    # brick per tile, its joint falling on the tile boundary; the middle one
+    # is offset by half a brick, its joint sitting at columns 14..17, so a
+    # brick there straddles two tiles.  A course is given here as the rows it
+    # occupies in the face, the columns of the tile a brick fills, and how
+    # many of those columns are shadow rather than hatch.  The top course is
+    # rows 1..20, columns 0..25, stopping short of the two columns of shadow
+    # a brick already throws down its right hand side.  The middle course is
+    # rows 22..41, columns 16..27 -- the joint to the tile edge -- and the
+    # last of those is blacked out, since the half brick beside the rubble
+    # has no neighbour to cast the shadow it needs.
+    #
+    # The hatch itself is the rubble's own diagonal, but two dots in four
+    # rather than the rubble's one, which leaves it darker than the brick
+    # beside it and lighter than the shadow it stands against.  Its phase
+    # comes from the screen row, which is the only way the diagonals line up
+    # with the rubble's -- so this works on the assembled canvas, and every
+    # wall it does not name keeps the brick it was drawn with.
+
+    FACE_HEIGHT = 60
+    BRICK_DENSITY = 2                   # dots per four, against the brick's 3
+
+    TOPCOURSE = (1, 21, 0, 26, 0)
+    MIDCOURSE = (22, 42, 16, 28, 1)
+
+    # The middle floor: the second and fourth brick of its top course,
+    # counted from the right hand end of the wall.
+    FLOOR_HATCH = (1, TOPCOURSE, (2, 4))
+
+    def hatch_walls(self, ids):
+        """Beside the rubble, and wherever FLOOR_HATCH names a brick."""
+        for row in range(3):
+            for col in range(9):
+                if (ids[row * 10 + col] == bg.block and
+                        ids[row * 10 + col + 1] == bg.rubble):
+                    self.hatch(row, col, self.MIDCOURSE)
+
+        row, course, bricks = self.FLOOR_HATCH
+        run = self.wall_run(ids, row)
+        if run:
+            lo, hi = run
+            for n in bricks:
+                if hi - n + 1 >= lo:
+                    self.hatch(row, hi - n + 1, course)
+
+    @staticmethod
+    def wall_run(ids, row):
+        """The rightmost run of two or more wall blocks in a block row."""
+        col = 9
+        while col >= 0:
+            if ids[row * 10 + col] != bg.block:
+                col -= 1
+                continue
+            hi = col
+            while col >= 0 and ids[row * 10 + col] == bg.block:
+                col -= 1
+            if hi - col >= 2:
+                return col + 1, hi
+        return None
+
+    def hatch(self, row, col, course):
+        r0, r1, x0, x1, shadow = course
+        top = BLOCKBOT[row + 1] - 3 - self.FACE_HEIGHT + 1
+        for r in range(r0, r1):
+            y = top + r
+            if not 0 <= y < HEIGHT:
+                continue
+            line = self.canvas[y]
+            for c in range(x0, x1):
+                x = col * BLOCK_PX + c
+                if not 0 <= x < WIDTH_BYTES * 7:
+                    continue
+                lit = (c < x1 - shadow and
+                       (x - 2 * y) % 4 < self.BRICK_DENSITY)
+                if lit:
+                    line[x // 7] |= 1 << (x % 7)
+                else:
+                    line[x // 7] &= ~(1 << (x % 7)) & 0xff
+
     def to_pixels(self):
         """The assembled room as 192 rows of 280 zero/one values."""
         rows = []
