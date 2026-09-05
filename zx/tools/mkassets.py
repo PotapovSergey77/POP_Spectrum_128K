@@ -167,7 +167,10 @@ def main(argv):
     room = renderroom.Room('DUN')
     room.build(level, ROOM[1])
     px = renderroom.normalise_hatch(room.to_pixels(), level, ROOM[1])
-    px = renderroom.seam_pass(px, level, ROOM[1])
+    # The seam pass -- the light edge and its shadow along the join between
+    # floor tiles -- is not wanted after all.  It stays in renderroom.py, but
+    # the floor goes out as the original draws it.
+    # px = renderroom.seam_pass(px, level, ROOM[1])
     screen = zxscreen.build(zxscreen.window(px, CAMERA), 0x05)
 
     types, _ = level.screen(ROOM[1])
