@@ -14,6 +14,7 @@ Usage: tileatlas.py [out.png]
 import os
 import sys
 
+import pngwrite
 import poplevel
 import renderroom
 import zxscreen
@@ -36,8 +37,7 @@ class Atlas:
 
 
 def main(argv):
-    out = argv[1] if len(argv) > 1 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), '..', 'build', 'atlas.png')
+    out = argv[1] if len(argv) > 1 else pngwrite.build_png('atlas.png')
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 
     room = renderroom.Room('DUN')

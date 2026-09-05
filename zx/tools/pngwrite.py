@@ -1,4 +1,5 @@
 """Minimal 1-bit-expanded-to-grey PNG writer (stdlib only)."""
+import os
 import struct
 import zlib
 
@@ -35,3 +36,9 @@ def write_rgb(path, width, height, rows):
                        struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)))
         f.write(_chunk(b'IDAT', zlib.compress(bytes(raw), 9)))
         f.write(_chunk(b'IEND', b''))
+
+
+def build_png(name):
+    """Diagnostic pictures all land in build/png, next to nothing else."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        '..', 'build', 'png', name)

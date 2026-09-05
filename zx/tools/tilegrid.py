@@ -5,6 +5,7 @@ Each type is rendered in a standard context -- floor to its left and right,
 floor along the row below -- so its B section (drawn by the block to its
 right) and C section (drawn by the block below and left) both appear.  The
 grid covers the tile's full block: 28 columns across, and the 63 scanlines
+import pngwrite
 from the top of the block down to its floor line.
 
 Row numbers are screen scanlines, columns are 0..27 within the tile, which is
@@ -84,8 +85,7 @@ def main(argv):
     if len(argv) > 2:
         print(compare(1, int(argv[2])))
         return 0
-    out = argv[1] if len(argv) > 1 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), '..', 'build', 'tiles.txt')
+    out = argv[1] if len(argv) > 1 else pngwrite.build_png('tiles.txt')
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, 'w') as f:
         f.write(__doc__.strip() + '\n\n')

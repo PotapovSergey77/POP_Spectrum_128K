@@ -323,7 +323,7 @@ def main(argv):
         return 1
     level = poplevel.Level(argv[1])
     scrnum = int(argv[2]) if len(argv) > 2 else level.kid_start[0]
-    out = argv[3] if len(argv) > 3 else 'room.png'
+    out = argv[3] if len(argv) > 3 else pngwrite.build_png('room.png')
     room = Room('DUN')
     room.build(level, scrnum)
     room.to_png(out)

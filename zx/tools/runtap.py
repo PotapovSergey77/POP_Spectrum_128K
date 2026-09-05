@@ -7,13 +7,14 @@ checked before it goes anywhere near a real Spectrum.
 
 Keys are given as a list of names, held down for the whole run:
 
-    runtap.py build/pop_game.tap out.png 8 left
+    runtap.py build/pop.tap out.png 8 left
 
 Usage: runtap.py <tap> [out.png] [frames] [key ...]
 """
 import struct
 import sys
 
+import pngwrite
 import z80
 import zxscreen
 
@@ -74,7 +75,7 @@ def main(argv):
     if len(argv) < 2:
         print(__doc__)
         return 1
-    out = argv[2] if len(argv) > 2 else 'run.png'
+    out = argv[2] if len(argv) > 2 else pngwrite.build_png('run.png')
     frames = int(argv[3]) if len(argv) > 3 else 4
     held = argv[4:]
 

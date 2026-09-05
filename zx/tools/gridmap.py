@@ -36,8 +36,7 @@ def main(argv):
     level = poplevel.Level(argv[1])
     scrnum = int(argv[2]) if len(argv) > 2 else level.kid_start[0]
     camera = int(argv[3]) if len(argv) > 3 else 12
-    out = argv[4] if len(argv) > 4 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), '..', 'build', 'gridmap.png')
+    out = argv[4] if len(argv) > 4 else pngwrite.build_png('gridmap.png')
 
     room = renderroom.Room('DUN')
     room.build(level, scrnum)

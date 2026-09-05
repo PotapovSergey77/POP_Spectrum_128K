@@ -23,8 +23,7 @@ def main(argv):
         print(__doc__)
         return 1
     level = poplevel.Level(argv[1])
-    out = argv[2] if len(argv) > 2 else os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), '..', 'build', 'contact.png')
+    out = argv[2] if len(argv) > 2 else pngwrite.build_png('contact.png')
 
     W, H = zxscreen.WIDTH, zxscreen.HEIGHT
     rows_n = (24 + COLS - 1) // COLS
