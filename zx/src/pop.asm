@@ -127,6 +127,7 @@ start:          di
                 call    step_seq
                 call    draw_prince
                 call    page_art
+                call    hide_floor
                 call    hide_behind
                 call    show_rect
                 call    keep_rect
@@ -147,6 +148,7 @@ mainwait:       halt
                 call    do_fall
                 call    draw_prince
                 call    page_art
+                call    hide_floor
                 call    hide_behind
                 call    show_rect
                 call    keep_rect
@@ -1797,6 +1799,123 @@ mrev2:          ld      h, 0
 ; columns those are never changes, so the map is built offline, one row of 32
 ; per block row.
 
+; QUICKFLOOR in CTRLSUBS.S, with DRAWFLOOR and DRAWHALF out of FRAMEADV.S.
+;
+; A character who is falling, hanging or climbing reaches up into the floor
+; above him, and POP marks those floorpieces so that they are laid down again
+; after he has been drawn.  What they cover is not a rectangle: the floor's
+; near edge is drawn in perspective, so the piece is a wedge, and without it
+; he shows through the triangle at the end of the tile.
+;
+; Climbing up has its own, shorter wedge -- DRAWHALF -- which leaves the
+; hands he has on the ledge showing.  Standing and running mark nothing, so
+; his own floor never covers his feet.
+;
+; Out: HL = the mask to lay down, or zero.
+
+quickfloor:     ld      hl, halfmask
+                ld      a, (frame)      ; the climbup frames
+                cp      135
+                jr      c, qfact
+                cp      149
+                ret     c
+qfact:          ld      hl, floormask
+                ld      a, (charact)
+                cp      1
+                jr      nz, qfair
+                ld      a, (frame)      ; on the ground, only the two frames
+                cp      78              ; of stepping off an edge
+                jr      c, qfnone
+                cp      80
+                ret     c
+                jr      qfnone
+qfair:          cp      2               ; hanging, in the air, free fall,
+                ret     z               ; hanging straight
+                cp      3
+                ret     z
+                cp      4
+                ret     z
+                cp      6
+                ret     z
+qfnone:         ld      hl, 0
+                ret
+
+; The mask is carried for the fifteen rows of each floor band only; floorband
+; says which row of it a scanline is, or -1 for the rest of the screen.
+
+hide_floor:     call    quickfloor
+                ld      a, h
+                or      l
+                ret     z
+                ld      (fmaskp), hl
+                ld      a, (newh)
+                ld      b, a
+                ld      a, (newtop)
+                ld      (rowy), a
+hfrow:          push    bc
+                ld      a, (rowy)
+                cp      192
+                jr      nc, hfskip
+                ld      l, a
+                ld      h, 0
+                ld      de, floorband
+                add     hl, de
+                ld      a, (hl)
+                inc     a
+                jr      z, hfskip       ; nothing of the floor on this row
+                dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl          ; thirty two bytes to the row
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                ld      de, (fmaskp)
+                add     hl, de
+                ld      a, (newcol)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (fmrow), hl
+                ld      a, (rowy)
+                call    scraddr
+                ld      (hfadr), hl
+                ld      a, (neww)
+                ld      (hfcnt), a
+hfcol:          ld      hl, (fmrow)
+                ld      a, (hl)
+                or      a
+                jr      z, hfnext
+                ld      c, a
+                ld      hl, (hfadr)
+                ld      de, room - SCREEN
+                add     hl, de
+                ld      a, (hl)
+                and     c               ; the floorpiece's own pixels
+                ld      b, a
+                ld      hl, (hfadr)
+                ld      de, work - SCREEN
+                add     hl, de
+                ld      a, c
+                cpl
+                and     (hl)            ; what the prince may keep
+                or      b
+                ld      (hl), a
+hfnext:         ld      hl, hfadr       ; a screen row never crosses a page
+                inc     (hl)
+                ld      hl, (fmrow)     ; the mask's rows can, so this one
+                inc     hl              ; goes the long way round
+                ld      (fmrow), hl
+                ld      hl, hfcnt
+                dec     (hl)
+                jr      nz, hfcol
+hfskip:         ld      hl, rowy
+                inc     (hl)
+                pop     bc
+                djnz    hfrow
+                ret
+
 ; Put the foreground back over the prince.  foremask has a bit per pixel,
 ; set where a front piece covers, and it sits at the same offsets as the
 ; screen, so one lookup gives both the mask and the room byte to restore.
@@ -2112,6 +2231,10 @@ oldw:           db      0
 oldh:           db      0
 
 hideadr:        dw      0
+fmaskp:         dw      0
+fmrow:          dw      0
+hfadr:          dw      0
+hfcnt:          db      0
 hidecnt:        db      0
 hidebits:       db      0
 shcol:          db      0
@@ -2132,6 +2255,9 @@ cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
 blocktop:       incbin  "blocktop.bin"
+floorband:      incbin  "floorband.bin"
+floormask:      incbin  "floormask.bin"
+halfmask:       incbin  "halfmask.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"
 forespan:       incbin  "forespan.bin"

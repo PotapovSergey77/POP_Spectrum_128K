@@ -401,9 +401,37 @@ def main(argv):
     blocktop = bytes(v & 0xff for v in popframe.BLOCK_TOP)
     open(os.path.join(binout, 'blocktop.bin'), 'wb').write(blocktop)
 
+    # DRAWFLOOR and DRAWHALF: what the floorpieces put back over a character
+    # who is falling, hanging or climbing.  Only the fifteen rows a floor
+    # band occupies are carried -- that is where the perspective wedge is,
+    # and the tall pieces above it (the posts) are already in the foreground
+    # mask.  One index over the rows, then the two masks a row apiece.
+    floorpx, halfpx = renderroom.floor_covers(level, ROOM[1])
+    floorpx = zxscreen.window(floorpx, CAMERA)
+    halfpx = zxscreen.window(halfpx, CAMERA)
+    band = []
+    for r in range(3):
+        dy = renderroom.BLOCKBOT[r + 1]
+        band += [y for y in range(dy - 14, dy + 1) if 0 <= y < 192]
+    index = bytearray([0xff]) * 192
+    fmask, hmask = bytearray(), bytearray()
+    for i, y in enumerate(band):
+        index[y] = i
+        for row, out in ((floorpx[y], fmask), (halfpx[y], hmask)):
+            for x in range(32):
+                b = 0
+                for bit in range(8):
+                    if row[x * 8 + bit]:
+                        b |= 0x80 >> bit
+                out.append(b)
+    open(os.path.join(binout, 'floorband.bin'), 'wb').write(bytes(index))
+    open(os.path.join(binout, 'floormask.bin'), 'wb').write(bytes(fmask))
+    open(os.path.join(binout, 'halfmask.bin'), 'wb').write(bytes(hmask))
+
     print('tiles.bin   типы блоков: %s' % ' '.join('%d' % t for t in ids[:10]))
     print('floory.bin  %s' % ' '.join('%d' % f for f in floory))
     print('blocktop.bin %s' % ' '.join('%d' % f for f in blocktop))
+    print('floormask   %d рядов пола, %d байт на маску' % (len(band), len(fmask)))
     print('frontrect   %d прямоугольников переднего плана, %d байт'
           % (rects[0], len(rects)))
     print('START_X=%d START_Y=%d'

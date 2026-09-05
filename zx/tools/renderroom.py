@@ -340,6 +340,97 @@ class Room:
                             [bytes(255 if p else 0 for p in r) for r in rows])
 
 
+# -- what the floorpieces put back over a character -------------------------
+#
+# DRAWFLOOR and DRAWHALF in FRAMEADV.S.  A character who is falling, hanging
+# or climbing reaches up into the floor above him, and QUICKFLOOR marks those
+# floorpieces so that they are laid down again after he has been drawn.  What
+# they cover is not a rectangle: the floor's near edge is drawn in
+# perspective, so the piece is a wedge, and without it he shows through the
+# triangle at the end of the tile.
+#
+# DRAWHALF is climbup's own version, a shorter wedge, which leaves the hands
+# he has on the ledge showing.  In the dungeon set only floor, torch, the
+# down pressplate and the exit have a half piece; anything else falls back to
+# the whole floorpiece, exactly as FRAMEADV.S does.
+
+HALFPIECE = (1, 19, 5, 16)              # floor, torch, dpressplate, exit
+
+
+class Cover(Room):
+    """A room drawn only for what it would cover, a bit per pixel."""
+
+    def __init__(self, bgset='DUN'):
+        Room.__init__(self, bgset)
+        self.mask = [bytearray(WIDTH_BYTES) for _ in range(HEIGHT)]
+        self.recording = False
+
+    def draw(self, imgnum, xco, yco, op):
+        if self.recording and imgnum:
+            table = self.tab2 if imgnum & 0x80 else self.tab1
+            img = table.get(imgnum & 0x7f)
+            if img is not None:
+                top = yco - img.height + 1
+                for r in range(img.height):
+                    y = top + r
+                    if not 0 <= y < HEIGHT:
+                        continue
+                    row, out = img.row(r), self.mask[y]
+                    for c in range(img.width):
+                        x = xco + c
+                        if not 0 <= x < WIDTH_BYTES:
+                            continue
+                        b = row[c] & 0x7f
+                        # an AND hides whatever it clears, an ORA whatever it
+                        # sets, and an STA the whole of its rectangle
+                        out[x] |= 0x7f if op == STA else (
+                            ~b & 0x7f if op in (AND, MASK) else b)
+        return Room.draw(self, imgnum, xco, yco, op)
+
+    def floorpiece(self, st, half):
+        """drawfloor, or drawhalf when there is a half piece for the tile."""
+        objid = st['objid']
+        if half and objid in HALFPIECE:
+            self.draw(bg.CUmask, st['xco'], st['Ay'], AND)
+            self.draw(bg.CUpiece, st['xco'], st['Ay'], ORA)
+        else:
+            if bg.maska[objid]:                     # addamask
+                self.draw(bg.maska[objid], st['xco'], st['Ay'], AND)
+            if objid == bg.loose:                   # adda
+                y = st['state'] & 0x7f if st['state'] & 0x80 else 0
+                img = bg.loosea[min(y, len(bg.loosea) - 1)]
+            else:
+                img = bg.piecea[objid]
+            if img:
+                self.draw(img, st['xco'], st['Ay'] + bg.pieceay[objid], ORA)
+        self.draw_d(st)
+
+
+def floor_covers(level, scrnum, bgset='DUN'):
+    """(floor, half): 192 rows of 280 pixels, set where the floor covers."""
+    types, specs = level.screen(scrnum)
+    ids = [b & poplevel.IDMASK for b in types]
+    out = []
+    for half in (False, True):
+        cov = Cover(bgset)
+        cov.recording = True
+        for row in range(3):
+            Dy = BLOCKBOT[row + 1]
+            for col in range(10):
+                i = row * 10 + col
+                cov.floorpiece({'objid': ids[i], 'state': specs[i],
+                                'xco': col * 4, 'Dy': Dy, 'Ay': Dy - 3}, half)
+        rows = []
+        for line in cov.mask:
+            px = bytearray()
+            for b in line:
+                for bit in range(7):
+                    px.append((b >> bit) & 1)
+            rows.append(px)
+        out.append(rows)
+    return out
+
+
 # -- hybrid dither pass ---------------------------------------------------
 
 DITHER_DX, DITHER_DY = 1, 1
