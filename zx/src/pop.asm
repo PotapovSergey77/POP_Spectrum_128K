@@ -21,7 +21,6 @@ SCREEN          equ     16384
 BUFW            equ     8               ; widest sprite plus the shift byte
 FRAME_WAIT      equ     3               ; 50Hz frames per game frame
 BLOCK_PX        equ     28
-WALL_DEPTH      equ     12              ; how far into a wall's tile he goes
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
 X_MIN           equ     40
@@ -346,33 +345,17 @@ moveblocked:    ld      a, 1
 
 ; A = a screen x.  Out: NZ if he may stand there.
 ;
-; The room is drawn in perspective, and that cuts both ways.  A floor's
-; far corner is empty, so his leading foot must have something under it or
-; he looks like he is standing on air.  A wall, on the other hand, stands
-; at the BACK of its own tile: he can walk most of the way into that tile,
-; with the brick drawn over his leading shoulder, before he meets it.
+; Only a wall stops him.  Running out of floor does not: that is what makes
+; him fall, and check_floor deals with it.  A wall stands at the back of its
+; own tile, and the block lookup already accounts for the perspective, so no
+; fudge is needed here -- he stops with the brick drawn over his shoulder.
 
-check_spot:     ld      (spotx), a
-                call    tile_flags
-                bit     1, a
-                jr      nz, spotwall
-                ld      a, 1            ; open ground: he may go there, and if
-                or      a               ; the floor has run out he falls.
-                ret                     ; `ld a` leaves the flags alone, so
-                                        ; say so for the caller's jr nz
-
-spotwall:       ld      a, (facing)     ; leaning into the wall's tile is
-                or      a               ; fine while his weight is behind
-                ld      a, (spotx)
-                jr      nz, spotback
-                add     a, WALL_DEPTH
-                jr      spotcheck
-spotback:       sub     WALL_DEPTH
-spotcheck:      call    tile_flags
-                bit     1, a
+check_spot:     call    tile_flags
+                and     TILE_SOLID
                 jr      nz, spotno
-                and     TILE_FLOOR
-                ret
+                ld      a, 1            ; `and` above left the flags saying
+                or      a               ; "wall", so say "clear" for the
+                ret                     ; caller's jr nz
 spotno:         xor     a
                 ret
 
@@ -990,7 +973,6 @@ blocky:         db      0
 tilerow:        dw      0
 yvel:           db      0
 falling:        db      0
-spotx:          db      0
 wanted:         db      0
 
 curw:           db      0

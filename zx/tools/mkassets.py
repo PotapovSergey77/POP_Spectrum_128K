@@ -100,9 +100,12 @@ ORDER = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn',
 CHAR_ANCHOR = 7
 
 # A block is drawn at canvas x = 28*b, so on screen it runs 28*b - CAMERA to
-# 28*b + 27 - CAMERA, and the block a screen pixel belongs to is simply
-# (px + CAMERA) / 28.  The collision map has to agree with where the blocks
-# actually are, or the prince stops half a block away from what he can see.
+# 28*b + 27 - CAMERA -- but the block a character is ON is not simply the one
+# his coordinate lands in.  CharX is BlockEdge[b+5] + angle + 7, which is the
+# far edge of his own block, and GETBLOCKXP in CTRLSUBS.S takes `angle` back
+# off before the lookup, putting him at the middle of the block instead.  That
+# is a whole 14 pixels on screen, and without it he walks half a block past
+# the edge of the floor before he notices it has gone.
 BLOCK_PX = 28
 TILE_FLOOR, TILE_SOLID = 1, 2
 
@@ -241,8 +244,9 @@ def main(argv):
     open(os.path.join(out, 'foremask.bin'), 'wb').write(bytes(fore))
 
     blockof = bytearray(256)            # screen pixel -> block column
+    angle_px = 2 * popframe.ANGLE       # logic units are half pixels
     for x in range(256):
-        b = (x + CAMERA) // BLOCK_PX
+        b = (x + CAMERA - angle_px) // BLOCK_PX
         blockof[x] = b if 0 <= b <= 9 else 0xFF
     open(os.path.join(out, 'blockof.bin'), 'wb').write(bytes(blockof))
 

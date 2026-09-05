@@ -11,8 +11,9 @@ import sys
 import runtap
 import z80
 
-WATCH = ('charx', 'chary', 'blocky', 'yvel', 'falling', 'seqid', 'frame',
-         'facing', 'blocked')
+WATCH = ('charx', 'chary', 'blocky', 'falling', 'seqid', 'frame', 'newcol',
+         'neww', 'newtop', 'newh',
+         'facing')
 
 
 def main(argv):
