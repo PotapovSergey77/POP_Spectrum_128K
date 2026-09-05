@@ -127,23 +127,16 @@ def build_sprites(frames_used):
         if len(banks[-1]) + len(data) > BANK_SIZE - 2:
             banks.append(bytearray())   # this one will not fit: start the next
         e = n * 6
-        # SETUPCHAR: the picture sits at CharX + Fdx, applied the way he
-        # faces.  Fdx is per frame and was not being applied at all, so the
-        # figure did not move within a sequence the way it should.
-        #
-        # CHAR_ANCHOR on top of it is not POP's, and it should not have to be:
-        # GETEDGES read straight says the image's left edge sits at CharX
-        # facing left, which puts the figure to the right of the tile he is
-        # standing on.  That is not what the screen shows, so my reading of it
-        # is still wrong somewhere, and the constant holds the place until
-        # that is found.
+        # The foot has to land where the logic says it does.  GETBASEX puts
+        # it at CharX + Fdx - footmark, applied the way he faces, and the
+        # footmark counts in from the LEFT edge of the image -- so facing
+        # left the image's left edge goes at CharX - Fdx, and facing right,
+        # where it is mirrored inside its buffer, at CharX + Fdx less the
+        # buffer's width.  Both then have the foot in the same place, which
+        # one constant for the two of them could never manage.
         dx = 2 * frames[n].dx
-        # Facing right the image is mirrored inside its own byte buffer, so
-        # the offset has to mirror with it: content at p ends up at
-        # width*8-1-p, and the two facings have to come out as reflections of
-        # each other about the middle of the block he stands on.
-        table[e:e + 4] = bytes([width, height, (-CHAR_ANCHOR - dx) & 0xff,
-                                (dx - width * 8 - 8) & 0xff])
+        table[e:e + 4] = bytes([width, height, (-dx) & 0xff,
+                                (dx - width * 8) & 0xff])
         table[e + 4:e + 6] = (((len(banks) - 1) << BANK_SHIFT)
                               | len(banks[-1])).to_bytes(2, 'little')
         banks[-1] += data
@@ -269,9 +262,15 @@ def main(argv):
     open(os.path.join(binout, 'bank_art.bin'), 'wb').write(art + SIG_ART)
 
     blockof = bytearray(256)            # screen pixel -> block column
+    # GETBLOCKXP takes `angle` off the base coordinate before the lookup.
+    # That is the whole of it: a character stands on the TOP surface of his
+    # tile, which the perspective draws half a tile right of its front face,
+    # and `angle` is what carries him there.  The figure looking right of the
+    # tile it belongs to is the drawing being right, not wrong.
     angle_px = 2 * popframe.ANGLE       # logic units are half pixels
+    shift = CAMERA - angle_px
     for x in range(256):
-        b = (x + CAMERA - angle_px) // BLOCK_PX
+        b = (x + shift) // BLOCK_PX
         blockof[x] = b if 0 <= b <= 9 else 0xFF
     open(os.path.join(binout, 'blockof.bin'), 'wb').write(bytes(blockof))
 
@@ -280,7 +279,7 @@ def main(argv):
     # judgement about edges is made in those units, so the table comes along.
     distof = bytearray(256)
     for x in range(256):
-        distof[x] = ((x + CAMERA - angle_px) % BLOCK_PX) // 2
+        distof[x] = ((x + shift) % BLOCK_PX) // 2
     open(os.path.join(binout, 'distof.bin'), 'wb').write(bytes(distof))
 
     seq, code, entry = build_sequences()

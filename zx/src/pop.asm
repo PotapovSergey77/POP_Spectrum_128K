@@ -723,7 +723,9 @@ jhmed:          call    get_fwd_dist
 jumphigh:       ld      a, SQ_HIGHJUMP
                 jp      jumpseq
 
-do_standjump:   ld      a, SQ_STANDJUMP
+do_standjump:   call    clrall          ; or the up press is still waiting
+                ld      (clru), a       ; when he lands, and he jumps again
+                ld      a, SQ_STANDJUMP
                 jp      jumpseq
 
 do_runjump:     call    clrall
