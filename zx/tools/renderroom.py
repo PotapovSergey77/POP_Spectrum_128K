@@ -250,9 +250,10 @@ class Room:
     # brick there straddles two tiles.  A course is given here as the rows it
     # occupies in the face, the columns of the tile a brick fills, and how
     # many of those columns are shadow rather than hatch.  The top course is
-    # rows 1..20 and the whole tile, of which the last three columns are
-    # blacked out: the shadow the original throws is two columns and wants a
-    # third here, so that it reads the same beside a brick this much darker.  The middle course is
+    # rows 1..20 and the whole tile, of which the last two columns are
+    # blacked out -- the shadow the original throws -- with a third before
+    # them at a dot every fourth row, which carries the eye from the hatch
+    # into the shadow instead of dropping it straight in.  The middle course is
     # rows 22..41, columns 16..27 -- the joint to the tile edge -- and the
     # last of those is blacked out, since the half brick beside the rubble
     # has no neighbour to cast the shadow it needs.
@@ -267,8 +268,8 @@ class Room:
     FACE_HEIGHT = 60
     BRICK_DENSITY = 2                   # dots per four, against the brick's 3
 
-    TOPCOURSE = (1, 21, 0, 28, 3)
-    MIDCOURSE = (22, 42, 16, 28, 1)
+    TOPCOURSE = (1, 21, 0, 28, 2, 1)
+    MIDCOURSE = (22, 42, 16, 28, 1, 0)
 
     # The middle floor: the second and fourth brick of its top course,
     # counted from the right hand end of the wall.
@@ -306,7 +307,7 @@ class Room:
         return None
 
     def hatch(self, row, col, course):
-        r0, r1, x0, x1, shadow = course
+        r0, r1, x0, x1, shadow, thin = course
         top = BLOCKBOT[row + 1] - 3 - self.FACE_HEIGHT + 1
         for r in range(r0, r1):
             y = top + r
@@ -317,8 +318,12 @@ class Room:
                 x = col * BLOCK_PX + c
                 if not 0 <= x < WIDTH_BYTES * 7:
                     continue
-                lit = (c < x1 - shadow and
-                       (x - 2 * y) % 4 < self.BRICK_DENSITY)
+                if c >= x1 - shadow:
+                    lit = False                 # the shadow itself
+                elif c >= x1 - shadow - thin:
+                    lit = (x - 2 * y) % 8 < 2   # a dot every fourth row
+                else:
+                    lit = (x - 2 * y) % 4 < self.BRICK_DENSITY
                 if lit:
                     line[x // 7] |= 1 << (x % 7)
                 else:
