@@ -19,6 +19,34 @@
 ; in another, paged in for the part of the frame that reads them.
 
                 org     24576
+PAGEPORT        equ     0x7FFD
+
+; The tape's BASIC loader cannot page banks itself -- OUT is the one statement
+; this build cannot try out before it ships -- so it calls in here instead.
+; Each of these is four bytes, so the loader knows where they are: 24576 for
+; the first, then every four, and the last one starts the game.
+;
+;   10 CLEAR 24575
+;   20 LOAD ""CODE : REM the program
+;   30 RANDOMIZE USR 24576 : REM page a bank in
+;   40 LOAD ""CODE : REM into it at 49152
+;   ...
+;   RANDOMIZE USR 24592 : REM go
+
+stubs:          ld      a, BANK_ART
+                jr      dopage
+                ld      a, BANK_SPR1
+                jr      dopage
+                ld      a, BANK_SPR2
+                jr      dopage
+                ld      a, BANK_SPR3
+                jr      dopage
+                jp      start
+
+dopage:         or      0x10            ; bit 4 keeps the 48K ROM
+                ld      bc, PAGEPORT
+                out     (c), a
+                ret
 
                 include "assets.inc"
 
@@ -31,7 +59,6 @@ STEP_OFF_FWD    equ     3               ; CTRL.S
 STEP_OFF_BACK   equ     8
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
-PAGEPORT        equ     0x7FFD
 ; The room runs from block 0 to block 9, and a character on block b has his
 ; anchor between 28b+2 and 28b+29.  Only walls should stop him inside that --
 ; these are just to keep him on the map.

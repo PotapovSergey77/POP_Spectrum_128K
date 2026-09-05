@@ -70,7 +70,7 @@ def boot(path):
         bank = m.get('bank')
         if bank is None:
             cpu.mem[addr:addr + len(payload)] = payload
-            start = addr
+            start = m.get('entry', addr)
         else:
             off = addr - 0xC000
             cpu.banks[bank][off:off + len(payload)] = payload
