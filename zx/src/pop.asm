@@ -74,6 +74,7 @@ FRAME_WAIT      equ     4
 BLOCK_PX        equ     28
 STEP_OFF_FWD    equ     3               ; CTRL.S
 STEP_OFF_BACK   equ     8
+JUMP_BACK_THRES equ     6
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
 ; The room runs from block 0 to block 9, and a character on block b has his
@@ -696,17 +697,61 @@ stjumpup:       ld      a, (jstkx)
                 jp      m, do_standjump
                 ret
 
+; CHECKLEDGE.  In: A = the block to hold on to, C = the one that has to be
+; clear above him.  Out: NZ if he can grab it.
+
+check_ledge:    ld      b, a
+                ld      a, (blockid)
+                cp      BLK_BLOCK
+                jr      z, clno
+                call    cmp_space
+                jr      nz, clno        ; not clear over his head
+                ld      a, b
+                jp      cmp_space       ; and the ledge has to be solid
+clno:           xor     a
+                ret
+
+; DoJumpup.  A ledge above and in front is grabbed where he stands; failing
+; that, POP asks whether he could reach the one directly overhead from a step
+; back, and takes the step.  That second question was missing here, and it is
+; the one that gets him back up the way he came down.
+
 do_up:          call    clrall
                 ld      (clru), a
                 ld      a, (jstkx)
                 or      a
                 jp      m, do_standjump
-                call    above_flags     ; CHECKLEDGE: clear over his head,
-                call    cmp_space       ; and something to grab in front
-                jr      nz, jumphigh
+
+                call    above_flags     ; must be clear over his head
+                ld      (blockid), a
                 call    abovefront_flags
-                call    cmp_space
+                call    check_ledge
+                jp      nz, do_jumphang
+
+                call    abovebehind_flags
+                ld      (blockid), a
+                call    above_flags
+                call    check_ledge
                 jr      z, jumphigh
+
+                call    get_dist        ; step back and take that one
+                cp      JUMP_BACK_THRES
+                jr      c, jumphigh     ; too far to fudge
+                call    behind_flags
+                call    cmp_space
+                jr      z, do_jumpedge  ; no floor behind: jump backwards
+                call    get_dist
+                sub     14
+                call    move_by
+                jp      do_jumphang
+
+; His back is to the ledge, so he jumps backwards on to it.
+
+do_jumpedge:    call    get_dist
+                sub     10
+                call    move_by
+                ld      a, SQ_JUMPBACKHANG
+                jp      jumpseq
 
 ; DoJumphang.  Which of the two reaches the ledge best, and then his X is
 ; fudged so it comes out exactly -- without that he grabs on with the empty
@@ -1194,6 +1239,15 @@ behind_flags:   ld      a, (facing)
 
 above_flags:    call    base_x
                 jr      arow
+abovebehind_flags:
+                call    base_x
+                ld      b, a
+                ld      a, (facing)
+                or      a
+                ld      a, b
+                jr      nz, afleft      ; behind is the other way round
+                jr      afright
+
 abovefront_flags:
                 call    base_x
                 ld      b, a
@@ -1201,6 +1255,7 @@ abovefront_flags:
                 or      a
                 ld      a, b
                 jr      z, afleft
+afright:
                 add     a, BLOCK_PX
                 jr      c, ffnone
                 jr      arow
@@ -1904,6 +1959,7 @@ clrd:           db      0
 clrbtn:         db      0
 atemp:          db      0
 fwdkind:        db      0
+blockid:        db      0
 blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0
