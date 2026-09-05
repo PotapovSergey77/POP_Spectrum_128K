@@ -250,8 +250,9 @@ class Room:
     # brick there straddles two tiles.  A course is given here as the rows it
     # occupies in the face, the columns of the tile a brick fills, and how
     # many of those columns are shadow rather than hatch.  The top course is
-    # rows 1..20, columns 0..25, stopping short of the two columns of shadow
-    # a brick already throws down its right hand side.  The middle course is
+    # rows 1..20 and the whole tile, of which the last three columns are
+    # blacked out: the shadow the original throws is two columns and wants a
+    # third here, so that it reads the same beside a brick this much darker.  The middle course is
     # rows 22..41, columns 16..27 -- the joint to the tile edge -- and the
     # last of those is blacked out, since the half brick beside the rubble
     # has no neighbour to cast the shadow it needs.
@@ -266,7 +267,7 @@ class Room:
     FACE_HEIGHT = 60
     BRICK_DENSITY = 2                   # dots per four, against the brick's 3
 
-    TOPCOURSE = (1, 21, 0, 26, 0)
+    TOPCOURSE = (1, 21, 0, 28, 3)
     MIDCOURSE = (22, 42, 16, 28, 1)
 
     # The middle floor: the second and fourth brick of its top course,
