@@ -260,10 +260,17 @@ artbank:        db      BANK_ART
 
 ; ---------------------------------------------------------------- input
 ;
-; CTRL.S, as far as the prince is concerned.  POP reads a joystick, so the
-; keys are turned into one first: JSTKX is which way he is being pushed
-; RELATIVE TO THE WAY HE FACES -- forward is -1, back is +1 -- JSTKY is -1 up
-; and +1 down, and `btn` is the button, which is caps shift here.
+; CTRL.S.  POP reads a joystick, so the keys are turned into one first:
+;
+;   JSTKX   which way he is pushed RELATIVE TO THE WAY HE FACES,
+;           forward negative, back +1, centred 0
+;   JSTKY   -1 up, +1 down, 0 centred
+;   btn     the button, caps shift here
+;
+; and on top of that the "smart input" of GENCTRL: clrF, clrB, clrU, clrD and
+; clrbtn, which are -1 on a FRESH press, 0 while nothing is pushed, and 1 once
+; a handler has used the press.  Without them a held key repeats its action
+; every frame, which is not how the game plays at all.
 ;
 ;   left    key 5, row F7FE bit 4        up      key 7, row EFFE bit 3
 ;   right   key 8, row EFFE bit 2        down    key 6, row EFFE bit 4
@@ -278,12 +285,12 @@ read_input:     ld      bc, 0xF7FE
 
                 xor     a               ; JSTKY
                 bit     3, e
-                jr      nz, riy1
-                dec     a               ; up
-riy1:           bit     4, e
+                jr      nz, riydn
+                dec     a
+                jr      riy2
+riydn:          bit     4, e
                 jr      nz, riy2
                 inc     a
-                inc     a               ; down, and up cancels it
 riy2:           ld      (jstky), a
 
                 ld      a, (facing)     ; JSTKX, in his own terms: pushing
@@ -308,6 +315,77 @@ rix2:           ld      (jstkx), a
                 cpl
                 and     1
                 ld      (btn), a
+
+; CLRJSTK in SPECIALK.S.  A flag already at -1 stays there until someone uses
+; it; otherwise it goes to 0 when the key is up, and to -1 the frame the key
+; goes down, unless it is still at 1 from the last time.
+
+                ld      a, (jstkx)      ; forward
+                or      a
+                ld      c, 0
+                jp      p, cjf
+                dec     c
+cjf:            ld      hl, clrf
+                call    clr_one
+
+                ld      a, (jstkx)      ; back
+                dec     a
+                ld      c, 0
+                jr      nz, cjb
+                dec     c
+cjb:            ld      hl, clrb
+                call    clr_one
+
+                ld      a, (jstky)      ; up
+                or      a
+                ld      c, 0
+                jp      p, cju
+                dec     c
+cju:            ld      hl, clru
+                call    clr_one
+
+                ld      a, (jstky)      ; down
+                dec     a
+                ld      c, 0
+                jr      nz, cjd
+                dec     c
+cjd:            ld      hl, clrd
+                call    clr_one
+
+                ld      a, (btn)        ; the button
+                or      a
+                ld      c, 0
+                jr      z, cjbt
+                dec     c
+cjbt:           ld      hl, clrbtn
+                jr      clr_one
+
+; HL = the flag, C = 0xFF while the key is down.
+
+clr_one:        ld      a, (hl)
+                or      a
+                ret     m               ; a press already waiting
+                ld      b, a
+                ld      a, c
+                or      a
+                jr      nz, clrdown
+                ld      (hl), 0
+                ret
+clrdown:        ld      a, b
+                or      a
+                ret     nz              ; the press was used already
+                ld      (hl), 0xff
+                ret
+
+; clrall: forget every pending press.  A handler calls it and then marks the
+; one it used with 1, so the key has to be let go before it counts again.
+
+clrall:         xor     a
+                ld      (clrf), a
+                ld      (clrb), a
+                ld      (clru), a
+                ld      (clrd), a
+                ld      a, 1
                 ret
 
 ; A run that has run out of floor or hit a wall skids to a halt.
@@ -315,22 +393,25 @@ rix2:           ld      (jstkx), a
 input_step:     call    read_input
                 ld      a, (blocked)
                 or      a
-                jp      z, ctrl
+                jr      z, ctrl
                 ld      a, (frame)
                 cp      7
-                jp      z, tostopnow
+                jr      z, tostopnow
                 cp      11
                 jp      nz, ctrl
 tostopnow:      ld      a, SQ_RUNSTOP
                 jp      jumpseq
 
-; What is he doing now?  CTRL.S asks CharPosn, the frame he was last drawn
-; in, and so do we.
+; GENCTRL.  Falling and being bumped are not under control; otherwise what he
+; does next depends on what he is doing now, which CTRL.S reads off CharPosn,
+; the frame he was last drawn in.
 
 ctrl:           ld      a, (charact)
-                cp      4               ; falling: not under control
+                cp      4               ; falling
                 ret     z
-                cp      5
+                cp      5               ; mid-bump
+                ret     z
+                cp      3               ; in the air: his sequence has it
                 ret     z
                 cp      2               ; hanging, either kind
                 jp      z, hanging
@@ -348,8 +429,8 @@ ctrl:           ld      a, (charact)
                 jp      c, standing     ; turn 7-8-9 and the crouch
 ctrl0:          cp      4
                 jp      c, starting     ; run 4-5-6
-                cp      67
-                jp      nc, ctrl4
+                cp      67              ; 6502 carry is the other way round:
+                jp      c, ctrl4        ; bcc means below, which is jr c here
                 cp      70
                 jp      c, stjumpup
 ctrl4:          cp      15
@@ -362,45 +443,55 @@ ctrl4:          cp      15
 
 standing:       ld      a, (btn)
                 or      a
-                jr      z, stnobtn
+                jp      z, stnobtn
 
-                ld      a, (jstkx)      ; button down
+                ld      a, (clrb)       ; button down
                 or      a
-                jr      z, stbtnud
-                jp      m, do_stepfwd   ; forward: a careful step
-                jp      do_turn         ; back
-stbtnud:        ld      a, (jstky)
+                jp      m, do_turn
+                ld      a, (clru)
                 or      a
-                ret     z
-                jp      m, do_jumpup
-                jp      do_down
+                jp      m, do_up
+                ld      a, (clrd)
+                or      a
+                jp      m, do_down
+                ld      a, (jstkx)
+                or      a
+                ret     p
+                ld      a, (clrf)
+                or      a
+                ret     p
+                jp      do_stepfwd
 
-stnobtn:        ld      a, (jstkx)      ; button up
+stnobtn:        ld      a, (clrf)       ; button up
                 or      a
-                jr      z, stnox
-                jp      m, stfwd
-                jp      do_turn
-stfwd:          ld      a, (jstky)      ; forward and up is a standing jump
+                jp      m, do_startrun
+                ld      a, (clrb)
                 or      a
-                jp      m, do_standjump
-                ld      a, SQ_STARTRUN  ; DoStartrun
-                jp      startrun
-stnox:          ld      a, (jstky)
+                jp      m, do_turn
+                ld      a, (clru)
                 or      a
-                ret     z
-                jp      m, do_jumpup
-                jp      do_down
+                jp      m, do_up
+                ld      a, (clrd)
+                or      a
+                jp      m, do_down
+                ld      a, (jstkx)      ; or simply held forward
+                or      a
+                ret     p
+                jp      do_startrun
 
 ; No point starting a run into a wall, or he twitches on the spot.
 
-startrun:       ld      b, a
+do_startrun:    call    clrall
+                ld      (clrf), a
                 call    front_flags
                 and     TILE_SOLID
                 ret     nz
-                ld      a, b
+                ld      a, SQ_STARTRUN
                 jp      jumpseq
 
-do_turn:        ld      a, SQ_TURN
+do_turn:        call    clrall
+                ld      (clrb), a
+                ld      a, SQ_TURN
                 jp      jumpseq
 
 ; ------------------------------------------------------------------ turning
@@ -414,7 +505,7 @@ turning:        ld      a, (btn)
                 ld      a, (jstky)
                 or      a
                 ret     m
-                ld      a, SQ_TURNRUN   ; convert the turn into a running one
+                ld      a, SQ_TURNRUN   ; make it a running turn
                 jp      jumpseq
 
 ; ------------------------------------------------------------------ running
@@ -434,18 +525,31 @@ running:        ld      a, (jstkx)
 
                 ld      a, (jstky)      ; forward: keep running
                 or      a
-                jp      m, do_runjump
-                ret
+                jp      m, runjumpq
+                ld      a, (clrd)
+                or      a
+                ret     p
+                ld      a, SQ_RDIVEROLL ; down: dive and roll
+                jp      jumpseq
+
+runjumpq:       ld      a, (clru)
+                or      a
+                ret     p
+                jp      do_runjump
 
 runstop:        ld      a, (frame)      ; only on run-10 and run-14
                 cp      7
                 jr      z, runstop1
                 cp      11
                 ret     nz
-runstop1:       ld      a, SQ_RUNSTOP
+runstop1:       call    clrall
+                ld      (clrf), a
+                ld      a, SQ_RUNSTOP
                 jp      jumpseq
 
-runturn:        ld      a, SQ_RUNTURN
+runturn:        call    clrall
+                ld      (clrb), a
+                ld      a, SQ_RUNTURN
                 jp      jumpseq
 
 ; ------------------------------------------------------------------ hanging
@@ -455,8 +559,8 @@ hanging:        ld      a, (jstky)
                 jp      m, hangup       ; up: climb
                 ld      a, (btn)
                 or      a
-                jr      z, hangdrop     ; let go
-
+                jr      z, hangdrop     ; let go of the button, let go of the
+                                        ; ledge
                 ld      a, (charact)    ; hanging on the side of a block is
                 cp      6               ; hanging straight
                 ret     z
@@ -466,7 +570,9 @@ hanging:        ld      a, (jstky)
                 ld      a, SQ_HANGSTRAIGHT
                 jp      jumpseq
 
-hangup:         call    above_flags     ; is there anything to pull up onto?
+hangup:         call    clrall
+                ld      (clru), a
+                call    above_flags     ; anything to pull up onto?
                 and     TILE_FLOOR
                 jr      z, hangfail
                 ld      a, SQ_CLIMBUP
@@ -474,7 +580,9 @@ hangup:         call    above_flags     ; is there anything to pull up onto?
 hangfail:       ld      a, SQ_CLIMBFAIL
                 jp      jumpseq
 
-hangdrop:       ld      a, SQ_HANGDROP
+hangdrop:       call    clrall
+                ld      (clrd), a
+                ld      a, SQ_HANGDROP
                 jp      jumpseq
 
 ; ------------------------------------------------------------------ crouching
@@ -484,21 +592,28 @@ crouching:      ld      a, (jstky)      ; still holding down?
                 jr      z, crawlmaybe
                 ld      a, SQ_STANDUP
                 jp      jumpseq
-crawlmaybe:     ld      a, (jstkx)
+crawlmaybe:     ld      a, (clrf)
                 or      a
                 ret     p
+                call    clrall
+                ld      (clrf), a
                 ld      a, SQ_CRAWL
                 jp      jumpseq
 
 ; --------------------------------------------------------------- jumping up
-
-; DoJumpup.  A ledge overhead he can reach is worth grabbing; otherwise it is
-; a jump on the spot.  POP also tries a step back first, which needs the
-; block behind and above; that comes later.
+;
+; DoJumpup.  A ledge overhead within reach is worth grabbing; up with the
+; stick pushed forward is a standing jump instead; otherwise he jumps on the
+; spot.  POP also tries a step back first, which comes later.
 
 stjumpup:       ret                     ; the first frames of a jump up
 
-do_jumpup:      call    above_flags     ; must be clear over his head
+do_up:          call    clrall
+                ld      (clru), a
+                ld      a, (jstkx)
+                or      a
+                jp      m, do_standjump
+                call    above_flags     ; must be clear over his head
                 and     TILE_GROUND
                 jr      nz, jumphigh
                 call    abovefront_flags
@@ -512,7 +627,9 @@ jumphigh:       ld      a, SQ_HIGHJUMP
 do_standjump:   ld      a, SQ_STANDJUMP
                 jp      jumpseq
 
-do_runjump:     ld      a, SQ_RUNJUMP
+do_runjump:     call    clrall
+                ld      (clru), a
+                ld      a, SQ_RUNJUMP
                 jp      jumpseq
 
 ; ------------------------------------------------------------------ down
@@ -522,7 +639,9 @@ do_runjump:     ld      a, SQ_RUNJUMP
 ; out of CTRL.S, and the way round it goes matters: you climb down backwards,
 ; holding the ledge you were standing on.
 
-do_down:        call    front_flags
+do_down:        call    clrall
+                ld      (clrd), a
+                call    front_flags
                 and     TILE_GROUND
                 jr      nz, downback    ; no cliff in front of him
                 call    get_dist
@@ -555,7 +674,9 @@ do_crouch:      ld      a, SQ_STOOP
 ; of his own block and no further; anything he can walk on means a full step.
 ; POP keeps fourteen sequences so that a step always ends where it should.
 
-do_stepfwd:     call    front_flags
+do_stepfwd:     call    clrall
+                ld      (clrf), a
+                call    front_flags
                 ld      c, a
                 and     TILE_SOLID
                 jr      nz, stepedge
@@ -853,9 +974,39 @@ set_row:        ld      a, (blocky)
                 ld      (tilerow), hl
                 ret
 
+; GETBASEX in CTRLSUBS.S: the point POP measures everything from.  Not his
+; coordinate but where his weight is -- the frame's own Fdx, less the footmark
+; in the low bits of its Fcheck, applied the way he faces.
+
+base_x:         ld      a, (frame)
+                ld      l, a
+                ld      h, 0
+                ld      d, h
+                ld      e, l
+                ld      bc, fcheck
+                add     hl, bc
+                ld      a, (hl)
+                and     F_FOOTMARK
+                ld      b, a
+                ld      hl, fdx
+                add     hl, de
+                ld      a, (hl)
+                sub     b               ; Fdx - footmark, in logic units
+                add     a, a            ; two screen pixels to the unit
+                ld      b, a
+                ld      a, (facing)
+                or      a
+                ld      a, b
+                jr      nz, bxfwd
+                neg
+bxfwd:          ld      b, a
+                ld      a, (charx)
+                add     a, b
+                ret
+
 ; Out: A = the flags of the tile he is standing on.
 
-under_flags:    ld      a, (charx)
+under_flags:    call    base_x
                 jr      tile_flags
 
 ; Out: A = the flags of the block one along, the way he faces or the way he
@@ -865,14 +1016,14 @@ under_flags:    ld      a, (charx)
 front_flags:    ld      a, (facing)
                 or      a
                 jr      z, ffback
-fffwd:          ld      a, (charx)
+fffwd:          call    base_x
                 add     a, BLOCK_PX
                 jr      c, ffnone
-                jr      tile_flags
-ffback:         ld      a, (charx)
+                jp      tile_flags
+ffback:         call    base_x
                 sub     BLOCK_PX
                 jr      c, ffnone
-                jr      tile_flags
+                jp      tile_flags
 ffnone:         xor     a
                 ret
 
@@ -883,12 +1034,14 @@ behind_flags:   ld      a, (facing)
 
 ; GETABOVE and GETABOVEINF: the same, a block row higher.
 
-above_flags:    ld      a, (charx)
+above_flags:    call    base_x
                 jr      arow
 abovefront_flags:
+                call    base_x
+                ld      b, a
                 ld      a, (facing)
                 or      a
-                ld      a, (charx)
+                ld      a, b
                 jr      z, afleft
                 add     a, BLOCK_PX
                 jr      c, ffnone
@@ -908,7 +1061,7 @@ arow:           ld      b, a
 ; two pixels, measured the way he faces.  Standing in the middle of a block
 ; is offset 7, so seven units to the edge behind and six to the one ahead.
 
-get_dist:       ld      a, (charx)
+get_dist:       call    base_x
                 ld      l, a
                 ld      h, 0
                 ld      de, distof
@@ -947,6 +1100,14 @@ check_floor:    ld      a, (charact)
                 cp      3               ; in the air already
                 ret     z
                 cp      4
+                ret     z
+                ld      a, (frame)      ; does this frame look for floor?
+                ld      l, a
+                ld      h, 0
+                ld      de, fcheck
+                add     hl, de
+                ld      a, (hl)
+                and     F_CHECK
                 ret     z
                 call    under_flags
                 and     TILE_GROUND
@@ -1502,6 +1663,11 @@ seqptr:         dw      0
 jstkx:          db      0
 jstky:          db      0
 btn:            db      0
+clrf:           db      0
+clrb:           db      0
+clru:           db      0
+clrd:           db      0
+clrbtn:         db      0
 blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0
@@ -1550,6 +1716,8 @@ tiles:          incbin  "tiles.bin"
 floory:         incbin  "floory.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"
+fcheck:         incbin  "fcheck.bin"
+fdx:            incbin  "fdx.bin"
 frontrect:      incbin  "frontrect.bin"
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $

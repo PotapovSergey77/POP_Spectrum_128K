@@ -244,6 +244,21 @@ def main(argv):
 
     used = seq.walk(KID_SEQS)
     table, blobs = build_sprites(used)
+
+    # Every judgement about edges is made from GETBASEX, not from CharX: the
+    # frame's own Fdx and the footmark in the low bits of Fcheck say where his
+    # weight is.  Bit 6 of Fcheck says whether to look for floor under him at
+    # all, which is how a step can swing out over a drop without falling.
+    fr = popframe.load()
+    top = len(table) // 6
+    fcheck = bytearray(top)
+    fdx = bytearray(top)
+    for n in range(top):
+        if n in fr:
+            fcheck[n] = fr[n].check
+            fdx[n] = fr[n].dx & 0xff
+    open(os.path.join(binout, 'fcheck.bin'), 'wb').write(bytes(fcheck))
+    open(os.path.join(binout, 'fdx.bin'), 'wb').write(bytes(fdx))
     # The index stays in fixed memory -- it is walked every frame -- and only
     # the pixels go in banks.  The first rides at 0xC000 in the tape image and
     # so needs no copying, only a signature to say which bank it landed in.
@@ -296,6 +311,8 @@ def main(argv):
         f.write('BANK_ART    equ %d' % BANK_ART + chr(10))
         for i, n in enumerate(BANK_SPR):
             f.write('BANK_SPR%d   equ %d' % (i + 1, n) + chr(10))
+        f.write('F_CHECK     equ %d' % 0x40 + chr(10))
+        f.write('F_FOOTMARK  equ %d' % 0x1f + chr(10))
         f.write('TILE_FLOOR  equ %d' % TILE_FLOOR + chr(10))
         f.write('TILE_SOLID  equ %d' % TILE_SOLID + chr(10))
 
