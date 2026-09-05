@@ -45,6 +45,17 @@ FLOOR_Y = [SCRN_BOT - 3 * BLOCK_HEIGHT - VERT_DIST,
            SCRN_BOT - VERT_DIST,
            SCRN_BOT + BLOCK_HEIGHT - VERT_DIST]
 
+# BlockTop, from the same table: the scanline a block row starts on, indexed
+# by block row + 1.  CROPCHAR cuts a character off at his own row's, so the
+# floor above covers him rather than the other way round.
+BLOCK_TOP = [SCRN_BOT + 1 - 4 * BLOCK_HEIGHT,
+             SCRN_BOT + 1 - 3 * BLOCK_HEIGHT,
+             SCRN_BOT + 1 - 2 * BLOCK_HEIGHT,
+             SCRN_BOT + 1 - 1 * BLOCK_HEIGHT,
+             SCRN_BOT + 1]
+
+FLOOR_HEIGHT = 15               # GAMEEQ.S floorheight
+
 
 def block_edge(block):
     """BlockEdge: the left edge of a block, in the 140-wide logic space."""

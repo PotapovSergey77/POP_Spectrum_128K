@@ -77,6 +77,7 @@ STEP_OFF_BACK   equ     8
 JUMP_BACK_THRES equ     6
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
+FLOOR_HEIGHT    equ     15              ; GAMEEQ.S, the thickness of a floor
 ; The room runs from block 0 to block 9, and a character on block b has his
 ; anchor between 28b+2 and 28b+29.  Only walls should stop him inside that --
 ; these are just to keep him on the map.
@@ -1177,6 +1178,115 @@ set_row:        ld      a, (blocky)
                 ld      (tilerow), hl
                 ret
 
+; ---------------------------------------------------------------- crop
+;
+; CROPCHAR in CTRLSUBS.S -- the half of it that keeps a character out of the
+; floor above.  Drawn plainly he is laid over the finished room and shows
+; through anything higher up; POP cuts his picture off at the top of his own
+; block row instead, and the floor is left covering him.
+;
+; It crops only when both the blocks his picture reaches into up there are
+; solid, and when he has got no further into them than a floor is thick.
+; Beyond that he is climbing into the room above for real, and cutting him
+; off would take his head with it.
+
+crop_char:      xor     a
+                ld      (charcu), a
+
+                ld      a, (newtop)     ; topej -- the row his picture starts
+                call    get_blocky
+                ld      (croprow), a
+
+                ld      a, (croprow)
+                ld      c, a
+                ld      a, (curleft)
+                call    tile_in_row
+                call    crop_solid
+                ret     z               ; open over his left: leave him be
+
+                ld      a, (charact)    ; CROPCHAR is more lenient about a
+                or      a               ; character jumping up to touch the
+                jr      nz, cropboth    ; ceiling: his left block is enough
+                ld      a, (frame)
+                cp      79
+                jr      z, cropyes
+                cp      81
+                jr      z, cropyes
+
+cropboth:       ld      a, (croprow)
+                ld      c, a
+                ld      a, (curleft)    ; and the block over his right
+                ld      b, a
+                ld      a, (curw)
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, b
+                jr      c, cropwide     ; his picture runs off the screen
+                dec     a
+                jr      cropright
+cropwide:       ld      a, 255
+cropright:      call    tile_in_row
+                call    crop_solid
+                ret     z
+
+cropyes:        ld      a, (blocky)     ; BlockTop of his own row
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blocktop
+                add     hl, de
+                ld      a, (hl)
+                ld      (croptop), a
+                ld      a, (blocky)
+                or      a
+                jr      z, cropset      ; the top row is cut at the screen
+
+                ld      a, (croptop)    ; the floor has to be above his feet
+                ld      hl, fchary
+                cp      (hl)
+                ret     nc
+                ld      a, (croptop)    ; and he no further than a floor into
+                sub     FLOOR_HEIGHT    ; it
+                ld      hl, newtop
+                cp      (hl)
+                ret     nc
+
+cropset:        ld      a, (croptop)
+                ld      (charcu), a
+                ret
+
+; In: A = a block type.  Out: Z when it is open -- the test CROPCHAR makes,
+; where a solid block counts as solid rather than as the space cmp_space
+; calls it.
+
+crop_solid:     cp      BLK_BLOCK
+                jr      z, cropsolid1
+                jp      cmp_space
+cropsolid1:     or      a
+                ret
+
+; GETBLOCKY in CTRLSUBS.S.  In: A = a scanline.  Out: A = the block row it
+; falls in, 3 below the room and -1 above it.
+
+get_blocky:     ld      c, a
+                ld      b, 3
+                ld      hl, blocktop + 4
+gby:            ld      a, c
+                cp      (hl)
+                jr      nc, gbyhit
+                dec     hl
+                djnz    gby
+                ld      a, c
+                cp      (hl)
+                jr      nc, gbytop
+                ld      a, 0xff
+                ret
+gbytop:         xor     a
+                ret
+gbyhit:         ld      a, b
+                ret
+
 ; GETBASEX in CTRLSUBS.S: the point POP measures everything from.  Not his
 ; coordinate but where his weight is -- the frame's own Fdx, less the footmark
 ; in the low bits of its Fcheck, applied the way he faces.
@@ -1469,6 +1579,7 @@ dpxoff:         ld      a, (hl)
                 ld      a, (curoff)
                 add     a, b
                 ld      b, a
+                ld      (curleft), a    ; CROPCHAR wants the picture's edges
                 and     7
                 ld      (curshift), a
                 ld      a, b
@@ -1488,6 +1599,7 @@ dpxoff:         ld      a, (hl)
                 add     hl, de
                 ld      a, (chary)
                 add     a, (hl)
+                ld      (fchary), a
                 ld      b, a            ; top row = that, less the height
                 ld      a, (curh)
                 ld      c, a
@@ -1523,7 +1635,9 @@ dpxoff:         ld      a, (hl)
                 ld      (neww), a
                 ld      a, (curh)
                 ld      (newh), a
+                call    crop_char
 
+                ld      a, (newh)       ; crop_char has had A
                 ld      b, a
                 ld      hl, (curdat)
                 ld      a, (newtop)
@@ -1536,7 +1650,11 @@ drawrow:        push    bc
                 cp      192
                 jr      nc, drawskip
                 ld      c, a
-                ld      a, (newcol)
+                ld      a, (charcu)     ; cut off by the floor above?
+                cp      c
+                jr      c, drawgo
+                jr      nz, drawskip
+drawgo:         ld      a, (newcol)
                 ld      e, a
                 ld      a, c
                 call    scraddr
@@ -1963,6 +2081,11 @@ blockid:        db      0
 blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0
+charcu:         db      0               ; FCharCU, the row his picture is cut at
+fchary:         db      0
+curleft:        db      0
+croprow:        db      0
+croptop:        db      0
 yvel:           db      0
 charact:        db      1
 wanted:         db      0
@@ -2008,6 +2131,7 @@ tiles:          incbin  "tiles.bin"
 cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
+blocktop:       incbin  "blocktop.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"
 forespan:       incbin  "forespan.bin"

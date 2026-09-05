@@ -398,9 +398,12 @@ def main(argv):
     # FloorY, indexed by block row + 1: the plane his feet rest on.
     floory = bytes(v & 0xff for v in popframe.FLOOR_Y)
     open(os.path.join(binout, 'floory.bin'), 'wb').write(floory)
+    blocktop = bytes(v & 0xff for v in popframe.BLOCK_TOP)
+    open(os.path.join(binout, 'blocktop.bin'), 'wb').write(blocktop)
 
     print('tiles.bin   типы блоков: %s' % ' '.join('%d' % t for t in ids[:10]))
     print('floory.bin  %s' % ' '.join('%d' % f for f in floory))
+    print('blocktop.bin %s' % ' '.join('%d' % f for f in blocktop))
     print('frontrect   %d прямоугольников переднего плана, %d байт'
           % (rects[0], len(rects)))
     print('START_X=%d START_Y=%d'
