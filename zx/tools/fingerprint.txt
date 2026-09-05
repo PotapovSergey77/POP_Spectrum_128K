@@ -4,14 +4,14 @@ walk left 3 278 19 15 3 41
 walk left 4 305 18 15 4 41
 walk left 5 366 18 16 4 40
 walk left 6 377 18 17 4 39
-walk left 7 382 17 18 5 38
-walk left 8 344 16 18 5 38
-walk left 9 384 15 17 5 39
-walk left 10 460 14 16 6 40
+walk left 7 394 17 18 5 38
+walk left 8 362 16 18 5 38
+walk left 9 388 15 17 5 39
+walk left 10 461 14 16 6 40
 walk left 11 470 14 16 6 40
-walk left 12 372 13 17 5 39
-walk left 13 402 12 18 5 38
-walk left 14 426 11 16 6 40
+walk left 12 373 13 17 5 39
+walk left 13 410 12 18 5 38
+walk left 14 435 11 16 6 40
 walk left 15 391 11 16 6 40
 walk left 16 315 12 17 4 39
 walk left 17 333 11 17 5 39
@@ -57,10 +57,10 @@ walk right 7 274 18 15 3 41
 walk right 8 302 17 15 4 41
 walk right 9 364 17 16 4 40
 walk right 10 378 17 17 4 39
-walk right 11 389 17 18 5 38
-walk right 12 319 18 18 5 38
-walk right 13 366 19 17 5 39
-walk right 14 457 19 16 6 40
+walk right 11 392 17 18 5 38
+walk right 12 338 18 18 5 38
+walk right 13 390 19 17 5 39
+walk right 14 461 19 16 6 40
 walk right 15 438 19 16 6 40
 walk right 16 559 21 17 5 39
 walk right 17 663 22 18 5 38
@@ -112,14 +112,14 @@ fall 3 278 19 15 3 41
 fall 4 305 18 15 4 41
 fall 5 366 18 16 4 40
 fall 6 377 18 17 4 39
-fall 7 382 17 18 5 38
-fall 8 344 16 18 5 38
-fall 9 384 15 17 5 39
-fall 10 460 14 16 6 40
+fall 7 394 17 18 5 38
+fall 8 362 16 18 5 38
+fall 9 388 15 17 5 39
+fall 10 461 14 16 6 40
 fall 11 470 14 16 6 40
-fall 12 372 13 17 5 39
-fall 13 402 12 18 5 38
-fall 14 426 11 16 6 40
+fall 12 373 13 17 5 39
+fall 13 410 12 18 5 38
+fall 14 435 11 16 6 40
 fall 15 391 11 16 6 40
 fall 16 315 12 17 4 39
 fall 17 333 11 17 5 39
@@ -175,11 +175,11 @@ jump up 17 289 19 16 3 40
 jump up 18 296 19 16 3 40
 jump up 19 308 19 16 4 40
 jump up 20 314 19 16 4 40
-jump up 21 318 19 17 5 39
+jump up 21 335 19 17 5 39
 jump up 22 309 19 18 4 38
 jump up 23 271 19 20 4 36
-jump up 24 307 18 21 4 35
-jump up 25 294 18 18 4 38
+jump up 24 293 18 21 4 35
+jump up 25 295 18 18 4 38
 jump up 26 311 18 6 4 47
 jump up 27 290 18 252 4 50
 jump up 28 277 18 248 4 50
@@ -201,7 +201,7 @@ crouch 4 260 19 15 3 41
 crouch 5 260 19 15 3 41
 crouch 6 260 19 15 3 41
 crouch 7 260 19 15 3 41
-crouch 8 271 18 27 4 29
+crouch 8 260 18 27 4 29
 crouch 9 235 18 33 4 23
 crouch 10 218 18 37 4 19
 crouch 11 218 18 37 4 19
@@ -211,13 +211,13 @@ crouch 14 218 18 37 4 19
 crouch 15 218 18 37 4 19
 crouch 16 251 18 36 4 20
 crouch 17 273 18 34 4 22
-crouch 18 299 17 32 5 24
+crouch 18 306 17 32 5 24
 crouch 19 322 17 30 5 26
-crouch 20 348 17 27 5 29
+crouch 20 350 17 27 5 29
 crouch 21 331 17 26 5 30
 crouch 22 334 17 23 5 33
-crouch 23 311 17 21 4 35
-crouch 24 283 17 18 4 38
+crouch 23 312 17 21 4 35
+crouch 24 290 17 18 4 38
 crouch 25 262 18 17 3 39
 crouch 26 266 18 15 3 41
 crouch 27 266 18 15 3 41

@@ -276,9 +276,8 @@ nextrow:        ld      de, ROOM_BYTES - 32
 ; would set it stepping back and forth.
 ;
 ; A step does not repaint the working copy: the screen is redrawn from the
-; room itself, and the only part of the working copy anything reads after
-; that is the rectangle he is about to be drawn in -- which the draw puts the
-; room back under first.  Where he was is forgotten; it is in the old view.
+; room itself, and the only parts of the working copy anything reads are the
+; two rectangles the erases put the room back under anyway.
 
 camera:         ld      a, (cam)
                 ld      b, a
@@ -305,7 +304,6 @@ camset:         ld      a, b
                 ld      (cam), a
                 ld      a, 1
                 ld      (fullshow), a
-                ld      (camstep), a
                 ret
 
 ; Every bank is signed at its end, and a red border says one did not arrive:
@@ -2030,17 +2028,15 @@ covernext:      inc     hl
 erase_prince:   ld      hl, oldcol
                 jr      eraseset
 
-; The view has moved, so the room under where he is about to be drawn is a
-; byte out.  The erase has already put back where he was; this does where he
-; is going, and between them the working copy is right everywhere the screen
-; is about to read it.
+; The room under where he is about to be drawn, put back before he is.
+;
+; Only two rectangles of the working copy are ever read -- where he was, which
+; the erase above has just done, and where he is going, which is this one.
+; Everywhere else it holds whatever was there last, and after the view has
+; moved that is the room a byte out; walk him into it and the background
+; under him comes out shifted.  So both go back from the room, every frame.
 
-erase_new:      ld      a, (camstep)
-                or      a
-                ret     z
-                xor     a
-                ld      (camstep), a
-                ld      hl, newcol
+erase_new:      ld      hl, newcol
 
 eraseset:       ld      de, ercol       ; col, top, width, height, in order
                 ld      bc, 4
@@ -2366,7 +2362,6 @@ workp:          dw      0
 roomp:          dw      0
 rowptr:         dw      0
 linecol:        db      0
-camstep:        db      0
 ercol:          db      0
 ertop:          db      0
 erw:            db      0
