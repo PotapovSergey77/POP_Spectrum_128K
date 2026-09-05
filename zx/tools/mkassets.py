@@ -127,8 +127,20 @@ def build_sprites(frames_used):
         if len(banks[-1]) + len(data) > BANK_SIZE - 2:
             banks.append(bytearray())   # this one will not fit: start the next
         e = n * 6
-        table[e:e + 4] = bytes([width, height, (-CHAR_ANCHOR) & 0xff,
-                                (-CHAR_ANCHOR - (apple_bytes - 1) * 7) & 0xff])
+        # SETUPCHAR: the picture sits at CharX + Fdx, applied the way he
+        # faces.  Fdx is per frame and was not being applied at all, so the
+        # figure did not move within a sequence the way it should.
+        #
+        # CHAR_ANCHOR on top of it is not POP's, and it should not have to be:
+        # GETEDGES read straight says the image's left edge sits at CharX
+        # facing left, which puts the figure to the right of the tile he is
+        # standing on.  That is not what the screen shows, so my reading of it
+        # is still wrong somewhere, and the constant holds the place until
+        # that is found.
+        dx = 2 * frames[n].dx
+        table[e:e + 4] = bytes([width, height, (-CHAR_ANCHOR - dx) & 0xff,
+                                (-CHAR_ANCHOR + dx
+                                 - (apple_bytes - 1) * 7) & 0xff])
         table[e + 4:e + 6] = (((len(banks) - 1) << BANK_SHIFT)
                               | len(banks[-1])).to_bytes(2, 'little')
         banks[-1] += data
