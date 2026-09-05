@@ -280,12 +280,17 @@ def main(argv):
     top = len(table) // 6
     fcheck = bytearray(top)
     fdx = bytearray(top)
+    fdy = bytearray(top)
     for n in range(top):
         if n in fr:
             fcheck[n] = fr[n].check
             fdx[n] = fr[n].dx & 0xff
+            fdy[n] = fr[n].dy & 0xff
     open(os.path.join(binout, 'fcheck.bin'), 'wb').write(bytes(fcheck))
     open(os.path.join(binout, 'fdx.bin'), 'wb').write(bytes(fdx))
+    # SETUPCHAR: FCharY = CharY + Fdy.  Without it every frame of a sequence
+    # is drawn at the same height and the climb looks like it teleports.
+    open(os.path.join(binout, 'fdy.bin'), 'wb').write(bytes(fdy))
     # The index stays in fixed memory -- it is walked every frame -- and only
     # the pixels go in banks.  The first rides at 0xC000 in the tape image and
     # so needs no copying, only a signature to say which bank it landed in.

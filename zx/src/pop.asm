@@ -141,6 +141,7 @@ mainwait:       halt
                 call    erase_prince
                 call    input_step
                 call    step_seq
+                call    check_barr
                 call    check_floor
                 call    do_fall
                 call    draw_prince
@@ -634,14 +635,13 @@ hanging:        ld      a, (jstky)
                 ld      a, SQ_HANGSTRAIGHT
                 jp      jumpseq
 
+; :climbup in CTRL.S reads the block above but only to refuse a mirror, a
+; slicer or a gate that is not open far enough.  There is no "is there floor
+; up there" test -- he is holding the ledge, so there is.
+
 hangup:         call    clrall
                 ld      (clru), a
-                call    above_flags     ; anything to pull up onto?
-                and     TILE_FLOOR
-                jr      z, hangfail
                 ld      a, SQ_CLIMBUP
-                jp      jumpseq
-hangfail:       ld      a, SQ_CLIMBFAIL
                 jp      jumpseq
 
 hangdrop:       call    clrall
@@ -683,8 +683,28 @@ do_up:          call    clrall
                 call    abovefront_flags
                 and     TILE_FLOOR
                 jr      z, jumphigh
+
+; DoJumphang.  Which of the two reaches the ledge best, and then his X is
+; fudged so it comes out exactly -- without that he grabs on with the empty
+; block still counting as his own, and cannot pull up onto anything.
+
+do_jumphang:    call    get_dist
+                ld      (atemp), a
+                cp      4
+                jr      c, jhmed
+jhlong:         ld      a, (atemp)
+                sub     4               ; Long adds four of its own
+                call    move_by
+                ld      a, SQ_JUMPHANGLONG
+                jp      jumpseq
+jhmed:          call    get_fwd_dist
+                cp      4
+                jr      c, jhlong       ; too close to the wall for Med
+                ld      a, (atemp)
+                call    move_by
                 ld      a, SQ_JUMPHANGMED
                 jp      jumpseq
+
 jumphigh:       ld      a, SQ_HIGHJUMP
                 jp      jumpseq
 
@@ -734,23 +754,28 @@ do_crouch:      ld      a, SQ_STOOP
 
 ; ------------------------------------------------------------ careful step
 ;
-; GETFWDDIST in COLL.S.  A wall or a drop ahead means he steps up to the edge
-; of his own block and no further; anything he can walk on means a full step.
-; POP keeps fourteen sequences so that a step always ends where it should.
+; GETFWDDIST in COLL.S: how far he may safely go forward.  A wall or a drop
+; ahead means as far as the edge of his own block and no further; anything he
+; can walk on means a whole one.
+
+get_fwd_dist:   call    front_flags
+                ld      c, a
+                and     TILE_SOLID
+                jr      nz, fwdedge
+                ld      a, c
+                and     TILE_FLOOR
+                jr      z, fwdedge
+                ld      a, 14
+                ret
+fwdedge:        jp      get_dist
+
+; POP keeps fourteen step sequences so that a step always ends where it
+; should: against the wall, or with his toes exactly on the edge.
 
 do_stepfwd:     call    clrall
                 ld      (clrf), a
-                call    front_flags
-                ld      c, a
-                and     TILE_SOLID
-                jr      nz, stepedge
-                ld      a, c
-                and     TILE_FLOOR
-                jr      z, stepedge
-                ld      a, 14
-                jr      stepgo
-stepedge:       call    get_dist
-stepgo:         or      a
+                call    get_fwd_dist
+                or      a
                 jr      z, steptest     ; nothing left to step: test his foot
                 dec     a
                 add     a, SQ_STEP1
@@ -923,54 +948,38 @@ moverange:      ld      a, l
 movetop:        cp      X_MAX
                 jr      c, movestore
                 ld      l, X_MAX
-; The prince may only stand where there is floor, and never inside a wall.
-; blockof turns a screen pixel into a block column and tiles says what is in
-; it, both built offline from the room's BLUETYPE.
+; ADDCHARX, and nothing more.  A chx in the byte code just moves him: POP
+; does not test anything here, and neither may we -- climbup steps five units
+; forward while his own block is still the wall he is climbing, and a test in
+; the middle of the sequence refuses that and leaves him hanging in the air.
+; Collisions are a pass of their own, below.
 
-; A step that runs into something does not simply fail: he goes as far as
-; he can and stops there, so he ends up against the wall rather than a
-; whole stride short of it.
-
-movestore:      ld      c, l            ; C = where he would end up
-                ld      a, l
-                ld      (wanted), a
-movetry:        ld      a, c
-                call    check_spot
-                jr      nz, moveok
-                ld      a, (charx)      ; back off a pixel towards himself
-                cp      c
-                jr      z, moveblocked
-                jr      c, movedec
-                inc     c
-                jr      movetry
-movedec:        dec     c
-                jr      movetry
-moveok:         ld      a, c
+movestore:      ld      a, l
                 ld      (charx), a
-                ld      hl, wanted      ; a shortened step still counts as
-                cp      (hl)            ; running into something
-                jr      nz, moveblocked
-                xor     a
-                ld      (blocked), a
-                ret
-moveblocked:    ld      a, 1
-                ld      (blocked), a
                 ret
 
-; A = a screen x.  Out: NZ if he may stand there.
-;
-; Only a wall stops him.  Running out of floor does not: that is what makes
-; him fall, and check_floor deals with it.  A wall stands at the back of its
-; own tile, and the block lookup already accounts for the perspective, so no
-; fudge is needed here -- he stops with the brick drawn over his shoulder.
+; CHECKBARR: having moved, he may be standing in a wall.  Push him back out
+; the way he came, a pixel at a time, and say he was blocked -- which is what
+; turns a run into a skid.
 
-check_spot:     call    tile_flags
+check_barr:     xor     a
+                ld      (blocked), a
+                ld      b, 32           ; he cannot be deeper in than this
+cbtry:          ld      a, (charx)      ; his own coordinate, not his foot:
+                call    tile_flags      ; the wall stops his body
                 and     TILE_SOLID
-                jr      nz, spotno
-                ld      a, 1            ; `and` above left the flags saying
-                or      a               ; "wall", so say "clear" for the
-                ret                     ; caller's jr nz
-spotno:         xor     a
+                ret     z
+                ld      a, 1
+                ld      (blocked), a
+                ld      a, (facing)
+                or      a
+                ld      a, (charx)
+                jr      z, cbback
+                dec     a               ; facing right: back is left
+                jr      cbset
+cbback:         inc     a
+cbset:          ld      (charx), a
+                djnz    cbtry
                 ret
 
 ; A = a screen x.  Out: A = the tile's flags there, zero off the room.
@@ -1296,8 +1305,17 @@ dpxoff:         ld      a, (hl)
                 and     31
                 ld      (newcol), a
 
-                ld      a, (chary)      ; top row = CharY - height + 1
-                ld      b, a
+; SETUPCHAR: the picture sits at CharY + Fdy, not at CharY.  Every frame of a
+; sequence has its own, and that is what carries him up and down within it.
+
+                ld      a, (frame)
+                ld      l, a
+                ld      h, 0
+                ld      de, fdy
+                add     hl, de
+                ld      a, (chary)
+                add     a, (hl)
+                ld      b, a            ; top row = that, less the height
                 ld      a, (curh)
                 ld      c, a
                 ld      a, b
@@ -1766,6 +1784,7 @@ clrb:           db      0
 clru:           db      0
 clrd:           db      0
 clrbtn:         db      0
+atemp:          db      0
 blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0
@@ -1819,6 +1838,7 @@ forespan:       incbin  "forespan.bin"
 rowaddr:        incbin  "rowaddr.bin"
 fcheck:         incbin  "fcheck.bin"
 fdx:            incbin  "fdx.bin"
+fdy:            incbin  "fdy.bin"
 frontrect:      incbin  "frontrect.bin"
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
