@@ -26,11 +26,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BASELINE = os.path.join(HERE, 'fingerprint.txt')
 
 SCENES = [
-    ('walk left',  120, ['left@2-200']),
-    ('walk right', 180, ['right@2-200']),
-    ('fall',       120, ['left@2-60', 'down@80-100']),
-    ('jump up',    100, ['up@40-60']),
-    ('crouch',      90, ['down@20-40']),
+    ('walk left',   50, ['left@1-60']),
+    ('walk right',  60, ['right@1-60']),
+    ('fall',        50, ['left@1-20', 'down@26-34']),
+    ('jump up',     40, ['up@14-20']),
+    ('crouch',      30, ['down@7-14']),
 ]
 
 
@@ -42,9 +42,11 @@ def counts(tap, sym):
         script = runtap.parse(keys)
         rows = []
         for n in range(1, frames):
-            runtap.play(cpu, 1, [(k, a - n + 1, b - n + 1) for k, a, b in script])
+            runtap.game_frame(cpu, sym['main'], runtap.held(script, n))
+            # The screen is written at the top of a frame and composed after,
+            # so what is on it is the rectangle keep_rect has just filed away.
             col, top, w, h = (cpu.mem[sym[k]]
-                              for k in ('newcol', 'newtop', 'neww', 'newh'))
+                              for k in ('oldcol', 'oldtop', 'oldw', 'oldh'))
             ink = 0
             for j in range(h):
                 y = (top + j) & 0xff

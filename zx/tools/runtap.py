@@ -133,6 +133,33 @@ def play(cpu, frames, script, limit=3000000):
     return steps
 
 
+def game_frame(cpu, main, keys=(), limit=2000000):
+    """
+    Run one turn of the main loop with `keys` held down.
+
+    play() counts interrupts, and a game frame is several of those -- more
+    than FRAME_WAIT of them when the view moves -- so anything sampled per
+    interrupt catches the screen halfway through being written, which reads
+    as damage that is not there.  This stops at the top of the loop, where a
+    frame is whole.
+    """
+    release(cpu)
+    for name in keys:
+        row, bit = KEYS[name]
+        cpu.ports[row] &= ~(1 << bit) & 0xFF
+    cpu.step()
+    n = 0
+    while cpu.pc != main and n < limit:
+        cpu.step()
+        n += 1
+    return n
+
+
+def held(script, n):
+    """Which keys of a parsed script are down on game frame `n`."""
+    return [name for name, a, b in script if a <= n <= b]
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)

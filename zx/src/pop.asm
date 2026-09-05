@@ -129,17 +129,25 @@ start:          di
                 call    page_art
                 call    hide_floor
                 call    hide_behind
-                call    show_rect
-                call    keep_rect
                 ei
 
 ; ---------------------------------------------------------------- main
+
+; The screen is written the moment the interrupt returns, while the beam is
+; still in the border above the room.  Everything else -- rubbing him out,
+; reading the keys, running his sequence, drawing him -- happens afterwards,
+; into the working copy, and reaches the screen at the top of the next frame.
+; A frame's worth of lag, and nothing torn: the beam never catches the blit
+; halfway through him.
 
 main:           ld      b, FRAME_WAIT
 mainwait:       halt
                 djnz    mainwait
 
                 call    page_art
+                call    show_rect
+                call    keep_rect
+
                 call    camera
                 call    erase_prince
                 call    input_step
@@ -151,8 +159,6 @@ mainwait:       halt
                 call    page_art
                 call    hide_floor
                 call    hide_behind
-                call    show_rect
-                call    keep_rect
                 jr      main
 
 ; ---------------------------------------------------------------- paging
@@ -300,9 +306,7 @@ camset:         ld      a, b
                 ld      a, 1
                 ld      (fullshow), a
                 ld      (camstep), a
-                xor     a               ; where he was is in the old view and
-                ld      (oldw), a       ; the screen is about to be redrawn
-                ret                     ; whole, so there is nothing to rub out
+                ret
 
 ; Every bank is signed at its end, and a red border says one did not arrive:
 ; a black screen leaves nothing to go on.
@@ -2161,22 +2165,64 @@ mastercol:      ld      b, a
 show_rect:      ld      a, (fullshow)
                 or      a
                 jr      z, showpart
+
+; The view has moved and the whole screen is being redrawn from the room --
+; six kilobytes, which is longer than the beam takes to cross the screen, so
+; it is seen while it happens.  His own bytes therefore go down with the row
+; they belong to rather than in a pass of their own: a row is never on screen
+; without him, and the tear that is left is the room sliding, nothing more.
+
                 xor     a
                 ld      (fullshow), a
                 ld      (rowy), a
+                ld      (linecol), a
+                call    startrows
                 call    roomwin
                 ld      (roomp), hl
                 ld      b, 192
 fsrow:          push    bc
-                ld      e, 0
-                ld      a, (rowy)
-                call    scraddr
+                call    line_addr
                 ex      de, hl
                 ld      hl, (roomp)
                 call    copy32
+                push    hl              ; the room, past its thirty two
+                ld      hl, (rowptr)
+                call    fs_sprite
+                pop     hl
                 call    nextrow
                 pop     bc
                 djnz    fsrow
+                ret
+
+; In: HL = the screen address of column zero on this row.  Puts down the part
+; of the sprite that falls on it, if any.
+
+fs_sprite:      ld      a, (neww)
+                or      a
+                ret     z
+                ld      a, (rowy)
+                ld      b, a
+                ld      a, (newtop)
+                neg
+                add     a, b            ; how far into him this row is
+                ld      b, a
+                ld      a, (newh)
+                cp      b
+                ret     c
+                ret     z
+                ld      a, (newcol)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      d, h
+                ld      e, l            ; DE = screen
+                ld      bc, work - SCREEN
+                add     hl, bc          ; HL = working copy
+                ld      a, (neww)
+                ld      c, a
+                ld      b, 0
+                ldir
+                ret
 
 ; Two rectangles reach the screen, not the box around them: where he was and
 ; where he is.  The box would take in corners neither of them covers, and the
