@@ -1718,13 +1718,12 @@ dpxoff:         ld      a, (hl)
 
                 ld      a, (newh)       ; the calls above have had A
                 ld      b, a
+                ld      a, (newcol)     ; before HL is loaded: startrows has it
+                ld      (linecol), a
+                call    startrows
                 ld      hl, (curdat)
                 ld      a, (newtop)
                 ld      (rowy), a
-
-                ld      a, (newcol)
-                ld      (linecol), a
-                call    startrows
 drawrow:        push    bc
                 call    build_row       ; HL walks over the source row
                 push    hl
