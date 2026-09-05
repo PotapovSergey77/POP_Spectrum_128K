@@ -15,8 +15,8 @@ import sys
 
 import runtap
 
-WATCH = ('charx', 'chary', 'blocky', 'charact', 'seqid', 'frame', 'facing',
-         'blocked')
+WATCH = ('charx', 'chary', 'blocky', 'charact', 'frame', 'facing',
+         'jstkx', 'jstky', 'btn', 'blocked')
 
 
 def main(argv):

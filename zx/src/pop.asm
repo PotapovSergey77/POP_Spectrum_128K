@@ -47,32 +47,9 @@ start:          di
                 xor     a
                 out     (254), a
 
-                call    find_spr        ; which bank the tape put them in
-                call    pick_banks      ; and free ones for the rest
-
-                ld      a, (banktab + 1); frames past the first bank
-                call    pageset
-                ld      bc, SPR2_LEN
-                ld      a, b
-                or      c
-                jr      z, nospr2
-                ld      hl, stage_spr2
-                ld      de, sprblob
-                ldir
-nospr2:
-                call    page_art
-                ld      hl, stage_art
-                ld      de, room
-                ld      bc, ART_LEN
-                ldir
-
                 call    build_fore
 
-                ld      hl, (SIG_ART_AT); a bank that did not arrive leaves a
-                ld      de, SIG_ART     ; black screen and nothing to go on
-                or      a
-                sbc     hl, de
-                jp      nz, badload
+                call    check_banks
 
                 ld      hl, room        ; the screen and the working copy both
                 ld      de, SCREEN      ; start out as the bare room
@@ -83,7 +60,6 @@ nospr2:
                 ld      bc, 6144
                 ldir
 
-                include "seqfix.inc"    ; turn sequence offsets into addresses
 
                 ld      a, START_X
                 ld      (charx), a
@@ -95,14 +71,12 @@ nospr2:
                 xor     a
                 ld      (yvel), a
                 ld      (facing), a
-                ld      (seqid), a
                 ld      (oldw), a       ; nothing to erase on the first pass
-                ld      (pendchx), a
                 ld      a, revtab / 256 ; the reversal table's page
                 ld      (mrev1 + 1), a
                 ld      (mrev2 + 1), a
-                ld      hl, seqs + SQ_STAND
-                ld      (seqptr), hl
+                ld      a, SQ_STAND
+                call    jumpseq
 
                 call    step_seq
                 call    draw_prince
@@ -213,47 +187,47 @@ frxw:           db      0
 fry:            db      0
 frrow:          dw      0
 
-; The tape loaded the sprites through the window at 0xC000, into whichever
-; bank the loader had paged there -- bank 0 on a machine that has just been
-; reset, but there is no need to take that on trust.  Page each bank in turn
-; and look for the signature the sprites end with.
+; Every bank is signed at its end, and a red border says one did not arrive:
+; a black screen leaves nothing to go on.
 
-find_spr:       ld      c, 0
-fsloop:         ld      a, c
+check_banks:    ld      a, BANK_ART
                 call    pageset
-                ld      hl, (SPR_SIG_AT)
-                ld      de, SIG_SPR
+                ld      hl, (SIG_ART_AT)
+                ld      de, SIG_ART
                 or      a
                 sbc     hl, de
-                jr      z, fsfound
-                inc     c
-                ld      a, c
-                cp      8
-                jr      c, fsloop
-                jr      badload
-fsfound:        ld      a, c
-                ld      (banktab), a
-                ret
-
-; The rest of the sprites and the room need banks of their own.  Take them
-; from the uncontended ones, skipping whichever the tape happened to use.
-
-pick_banks:     ld      hl, bankcand
-                ld      de, banktab + 1
-                ld      b, 2
-pbloop:         ld      a, (hl)
+                jp      nz, badload
+                ld      hl, sigtab
+                ld      b, 3
+cbloop:         push    bc
+                ld      a, (hl)
                 inc     hl
-                ld      c, a
-                ld      a, (banktab)
-                cp      c               ; that is where the tape put the first
-                jr      z, pbloop
-                ld      a, c
-                ld      (de), a
-                inc     de
-                djnz    pbloop
-                ret
+                call    pageset
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                push    hl
+                ex      de, hl
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                ld      hl, SIG_SPR
+                or      a
+                sbc     hl, de
+                pop     hl
+                pop     bc
+                jp      nz, badload
+                djnz    cbloop
+                ld      a, BANK_ART
+                jp      pageset
 
-bankcand:       db      6, 4, 1
+sigtab:         db      BANK_SPR1
+                dw      SIG_SPR1_AT
+                db      BANK_SPR2
+                dw      SIG_SPR2_AT
+                db      BANK_SPR3
+                dw      SIG_SPR3_AT
 
 ; A bank that did not arrive: red border, and nothing else is going to work.
 
@@ -281,169 +255,307 @@ pageset:        or      0x10            ; bit 4 keeps the 48K ROM, which is
 
 ; [0] where the tape left the first bank of sprites, [1] the rest of them,
 ; [2] the room and its mask.
-banktab:        db      0, 0, 0
-artbank         equ     banktab + 2
+banktab:        db      BANK_SPR1, BANK_SPR2, BANK_SPR3
+artbank:        db      BANK_ART
 
 ; ---------------------------------------------------------------- input
 ;
-; Cursor left is key 5, row F7FE bit 4; cursor right is key 8, row EFFE
-; bit 2.  Out: A = 0 none, 1 left, 2 right.
+; CTRL.S, as far as the prince is concerned.  POP reads a joystick, so the
+; keys are turned into one first: JSTKX is which way he is being pushed
+; RELATIVE TO THE WAY HE FACES -- forward is -1, back is +1 -- JSTKY is -1 up
+; and +1 down, and `btn` is the button, which is caps shift here.
+;
+;   left    key 5, row F7FE bit 4        up      key 7, row EFFE bit 3
+;   right   key 8, row EFFE bit 2        down    key 6, row EFFE bit 4
+;   button  caps shift, row FEFE bit 0
 
-read_keys:      ld      bc, 0xF7FE
+read_input:     ld      bc, 0xF7FE
                 in      a, (c)
-                bit     4, a
-                jr      nz, keyright
-                ld      a, 1
-                ret
-keyright:       ld      bc, 0xEFFE
+                ld      d, a            ; D = the 1-5 half row
+                ld      bc, 0xEFFE
                 in      a, (c)
-                bit     2, a
-                jr      nz, keynone
-                ld      a, 2
-                ret
-keynone:        xor     a
-                ret
+                ld      e, a            ; E = the 6-0 half row
 
-; Cursor up is key 7, row EFFE bit 3.  Out: NZ if it is down.
+                xor     a               ; JSTKY
+                bit     3, e
+                jr      nz, riy1
+                dec     a               ; up
+riy1:           bit     4, e
+                jr      nz, riy2
+                inc     a
+                inc     a               ; down, and up cancels it
+riy2:           ld      (jstky), a
 
-read_up:        ld      bc, 0xEFFE
-                in      a, (c)
-                cpl
-                and     8
-                ret
+                ld      a, (facing)     ; JSTKX, in his own terms: pushing
+                ld      c, a            ; the way he faces is forward, which
+                xor     a               ; POP counts as negative
+                bit     4, d
+                jr      nz, rix1
+                ld      a, c            ; left pressed
+                add     a, a
+                dec     a               ; facing left -1, facing right +1
+rix1:           bit     2, e
+                jr      nz, rix2
+                ld      b, a
+                ld      a, 1            ; right pressed
+                sub     c
+                sub     c               ; facing left +1, facing right -1
+                add     a, b
+rix2:           ld      (jstkx), a
 
-; Caps shift is row FEFE bit 0.  POP calls it the button; held with a
-; direction it turns a run into a single careful step.
-
-read_shift:     ld      bc, 0xFEFE
+                ld      bc, 0xFEFE
                 in      a, (c)
                 cpl
                 and     1
+                ld      (btn), a
                 ret
-
-; Cursor down is key 6, the same half row, bit 4.
-
-read_down:      ld      bc, 0xEFFE
-                in      a, (c)
-                cpl
-                and     16
-                ret
-
-; Standing and running listen to the keys; turning, stopping and turning on
-; the run play out to their end, as they do in the original.
 
 ; A run that has run out of floor or hit a wall skids to a halt.
 
-input_step:     ld      a, (charact)
-                cp      2               ; hanging: up climbs, down lets go
-                jp      z, fromhang
-                cp      6
-                jp      z, fromhang
-                cp      3               ; no steering in the air
-                ret     z
-                cp      4
-                ret     z
-                ld      a, (seqid)
-                cp      ID_CROUCH
-                jp      z, fromcrouch
+input_step:     call    read_input
                 ld      a, (blocked)
                 or      a
-                jp      z, inputkeys
-                ld      a, (seqid)
-                cp      ID_RUNCYC
+                jp      z, ctrl
+                ld      a, (frame)
+                cp      7
                 jp      z, tostopnow
-                cp      ID_STARTRUN
-                jp      nz, inputkeys
-tostopnow:      ld      hl, seqs + SQ_RUNSTOP
-                jp      setseq
+                cp      11
+                jp      nz, ctrl
+tostopnow:      ld      a, SQ_RUNSTOP
+                jp      jumpseq
 
-fromhang:       call    read_up
-                jr      z, fhdrop
-                ld      hl, seqs + SQ_CLIMBUP
-                jp      setseq
-fhdrop:         call    read_down
+; What is he doing now?  CTRL.S asks CharPosn, the frame he was last drawn
+; in, and so do we.
+
+ctrl:           ld      a, (charact)
+                cp      4               ; falling: not under control
                 ret     z
-                ld      hl, seqs + SQ_HANGDROP
-                jp      setseq
+                cp      5
+                ret     z
+                cp      2               ; hanging, either kind
+                jp      z, hanging
+                cp      6
+                jp      z, hanging
 
-; CTRL.S stands him up the moment down is let go, which is why a short fall
-; leaves him crouched for a breath and then upright without being asked.
-
-fromcrouch:     call    read_down
-                ret     nz
-                ld      hl, seqs + SQ_STANDUP
-                jp      setseq
-
-inputkeys:      call    read_keys
-                ld      b, a
-                ld      a, (seqid)
-                cp      ID_STAND
-                jp      z, fromstand
-                cp      ID_STARTRUN
-                jp      z, fromrun
-                cp      ID_RUNCYC
-                jp      z, fromrun
+                ld      a, (frame)
+                cp      15
+                jp      z, standing
+                cp      48
+                jp      z, turning
+                cp      50
+                jp      c, ctrl0
+                cp      53
+                jp      c, standing     ; turn 7-8-9 and the crouch
+ctrl0:          cp      4
+                jp      c, starting     ; run 4-5-6
+                cp      67
+                jp      nc, ctrl4
+                cp      70
+                jp      c, stjumpup
+ctrl4:          cp      15
+                jp      c, running      ; run 8-17
+                cp      109
+                jp      z, crouching
                 ret
 
-; Down, standing.  Facing a cliff and close to it, he steps off it; with his
-; BACK to one and close to that, he lowers himself over it; otherwise he
-; crouches.  Straight out of CTRL.S, and the way round it goes matters: you
-; climb down backwards, holding the ledge you were standing on.
+; ------------------------------------------------------------------ standing
 
-fromstand:      push    bc
-                call    read_down
-                pop     bc
-                jr      z, fsnodown
+standing:       ld      a, (btn)
+                or      a
+                jr      z, stnobtn
 
+                ld      a, (jstkx)      ; button down
+                or      a
+                jr      z, stbtnud
+                jp      m, do_stepfwd   ; forward: a careful step
+                jp      do_turn         ; back
+stbtnud:        ld      a, (jstky)
+                or      a
+                ret     z
+                jp      m, do_jumpup
+                jp      do_down
+
+stnobtn:        ld      a, (jstkx)      ; button up
+                or      a
+                jr      z, stnox
+                jp      m, stfwd
+                jp      do_turn
+stfwd:          ld      a, (jstky)      ; forward and up is a standing jump
+                or      a
+                jp      m, do_standjump
+                ld      a, SQ_STARTRUN  ; DoStartrun
+                jp      startrun
+stnox:          ld      a, (jstky)
+                or      a
+                ret     z
+                jp      m, do_jumpup
+                jp      do_down
+
+; No point starting a run into a wall, or he twitches on the spot.
+
+startrun:       ld      b, a
                 call    front_flags
+                and     TILE_SOLID
+                ret     nz
+                ld      a, b
+                jp      jumpseq
+
+do_turn:        ld      a, SQ_TURN
+                jp      jumpseq
+
+; ------------------------------------------------------------------ turning
+
+turning:        ld      a, (btn)
+                or      a
+                ret     nz
+                ld      a, (jstkx)
+                or      a
+                ret     p               ; not still pushed forward
+                ld      a, (jstky)
+                or      a
+                ret     m
+                ld      a, SQ_TURNRUN   ; convert the turn into a running one
+                jp      jumpseq
+
+; ------------------------------------------------------------------ running
+
+starting:       ld      a, (jstky)      ; the first frames of a run
+                or      a
+                ret     p
+                ld      a, (jstkx)
+                or      a
+                ret     p
+                jp      do_runjump
+
+running:        ld      a, (jstkx)
+                or      a
+                jr      z, runstop
+                jp      p, runturn
+
+                ld      a, (jstky)      ; forward: keep running
+                or      a
+                jp      m, do_runjump
+                ret
+
+runstop:        ld      a, (frame)      ; only on run-10 and run-14
+                cp      7
+                jr      z, runstop1
+                cp      11
+                ret     nz
+runstop1:       ld      a, SQ_RUNSTOP
+                jp      jumpseq
+
+runturn:        ld      a, SQ_RUNTURN
+                jp      jumpseq
+
+; ------------------------------------------------------------------ hanging
+
+hanging:        ld      a, (jstky)
+                or      a
+                jp      m, hangup       ; up: climb
+                ld      a, (btn)
+                or      a
+                jr      z, hangdrop     ; let go
+
+                ld      a, (charact)    ; hanging on the side of a block is
+                cp      6               ; hanging straight
+                ret     z
+                call    under_flags
+                and     TILE_SOLID
+                ret     z
+                ld      a, SQ_HANGSTRAIGHT
+                jp      jumpseq
+
+hangup:         call    above_flags     ; is there anything to pull up onto?
+                and     TILE_FLOOR
+                jr      z, hangfail
+                ld      a, SQ_CLIMBUP
+                jp      jumpseq
+hangfail:       ld      a, SQ_CLIMBFAIL
+                jp      jumpseq
+
+hangdrop:       ld      a, SQ_HANGDROP
+                jp      jumpseq
+
+; ------------------------------------------------------------------ crouching
+
+crouching:      ld      a, (jstky)      ; still holding down?
+                cp      1
+                jr      z, crawlmaybe
+                ld      a, SQ_STANDUP
+                jp      jumpseq
+crawlmaybe:     ld      a, (jstkx)
+                or      a
+                ret     p
+                ld      a, SQ_CRAWL
+                jp      jumpseq
+
+; --------------------------------------------------------------- jumping up
+
+; DoJumpup.  A ledge overhead he can reach is worth grabbing; otherwise it is
+; a jump on the spot.  POP also tries a step back first, which needs the
+; block behind and above; that comes later.
+
+stjumpup:       ret                     ; the first frames of a jump up
+
+do_jumpup:      call    above_flags     ; must be clear over his head
                 and     TILE_GROUND
-                jr      nz, fdback      ; no cliff in front of him
+                jr      nz, jumphigh
+                call    abovefront_flags
+                and     TILE_FLOOR
+                jr      z, jumphigh
+                ld      a, SQ_JUMPHANGMED
+                jp      jumpseq
+jumphigh:       ld      a, SQ_HIGHJUMP
+                jp      jumpseq
+
+do_standjump:   ld      a, SQ_STANDJUMP
+                jp      jumpseq
+
+do_runjump:     ld      a, SQ_RUNJUMP
+                jp      jumpseq
+
+; ------------------------------------------------------------------ down
+;
+; Facing a cliff and close to it, he steps off it; with his BACK to one and
+; close to that, he lowers himself over it; otherwise he crouches.  Straight
+; out of CTRL.S, and the way round it goes matters: you climb down backwards,
+; holding the ledge you were standing on.
+
+do_down:        call    front_flags
+                and     TILE_GROUND
+                jr      nz, downback    ; no cliff in front of him
                 call    get_dist
                 cp      STEP_OFF_FWD
-                jr      nc, fdback      ; not close enough to the edge
+                jr      nc, downback    ; not close enough to the edge
                 ld      a, 5            ; step off it; the fall follows
                 jp      move_by
 
-fdback:         call    behind_flags
+downback:       call    behind_flags
                 and     TILE_GROUND
-                jr      nz, tostoop     ; no cliff behind him either
+                jr      nz, do_crouch   ; no cliff behind him either
                 call    get_dist
                 cp      STEP_OFF_BACK
-                jr      c, tostoop      ; not backed up to the edge
+                jr      c, do_crouch    ; not backed up to the edge
                 call    under_flags     ; and there has to be a ledge to hold
                 and     TILE_FLOOR
-                jr      z, tostoop
+                jr      z, do_crouch
                 call    get_dist        ; line him up with it
                 sub     9
                 call    move_by
-                ld      hl, seqs + SQ_CLIMBDOWN
-                jp      setseq
+                ld      a, SQ_CLIMBDOWN
+                jp      jumpseq
 
-tostoop:        ld      hl, seqs + SQ_STOOP
-                jp      setseq
+do_crouch:      ld      a, SQ_STOOP
+                jp      jumpseq
 
-fsnodown:       ld      a, b
-                or      a
-                ret     z
-                dec     a               ; 0 = left, 1 = right
-                ld      c, a
-                ld      a, (facing)
-                cp      c
-                jr      z, facingit
-                ld      hl, seqs + SQ_TURN
-                jp      setseq
-
-facingit:       push    bc
-                call    read_shift
-                pop     bc
-                jp      z, tostartrun
-                ; fall through: a careful step
-
+; ------------------------------------------------------------ careful step
+;
 ; GETFWDDIST in COLL.S.  A wall or a drop ahead means he steps up to the edge
 ; of his own block and no further; anything he can walk on means a full step.
-; POP keeps fourteen sequences so the step always ends where it should.
+; POP keeps fourteen sequences so that a step always ends where it should.
 
-do_step:        call    front_flags
+do_stepfwd:     call    front_flags
                 ld      c, a
                 and     TILE_SOLID
                 jr      nz, stepedge
@@ -454,90 +566,119 @@ do_step:        call    front_flags
                 jr      stepgo
 stepedge:       call    get_dist
 stepgo:         or      a
-                ret     z               ; already there: nothing to step
+                jr      z, steptest     ; nothing left to step: test his foot
                 dec     a
-                add     a, a
-                ld      l, a
-                ld      h, 0
-                ld      de, steptab
-                add     hl, de
-                ld      a, (hl)
-                inc     hl
-                ld      h, (hl)
-                ld      l, a
-                jp      setseq
-; No point starting a run into a wall or off the edge, or he twitches on the
-; spot: stand still instead.
-
-tostartrun:     ld      a, (charx)
-                ld      b, a
-                ld      a, (facing)
-                or      a
-                ld      a, b
-                jr      nz, trright
-                sub     BLOCK_PX
-                jr      trtest
-trright:        add     a, BLOCK_PX
-trtest:         call    tile_flags
-                bit     1, a
-                ret     nz
-                bit     0, a
-                ret     z
-                ld      hl, seqs + SQ_STARTRUN
-                jp      setseq
-
-fromrun:        ld      a, b
-                or      a
-                jr      z, torunstop
-                dec     a
-                ld      c, a
-                ld      a, (facing)
-                cp      c
-                ret     z
-                ld      hl, seqs + SQ_RUNTURN
-                jp      setseq
-torunstop:      ld      hl, seqs + SQ_RUNSTOP
-setseq:         ld      (seqptr), hl
-                xor     a               ; a new sequence starts from a stop
-                ld      (pendchx), a
-                ret
+                add     a, SQ_STEP1
+                jp      jumpseq
+steptest:       ld      a, SQ_TESTFOOT
+                jp      jumpseq
 
 ; ---------------------------------------------------------------- sequence
 ;
-; Read byte code until a frame comes out, which is this game frame's picture.
-;
-; The chx written beside a frame in SEQTABLE.S belongs to the step out of it,
-; not into it: the interpreter stops on the frame byte and only moves on the
-; next pass.  That matters at an about face, where the move and the turn have
-; to happen together for the anchor swapping ends to cancel out.
+; ANIMCHAR out of COLL.S: read the byte code until a frame number comes out,
+; which is this game frame's picture.  Everything under 0xF1 is a frame; the
+; fifteen values above it are the instructions, exactly as SEQDATA.S numbers
+; them.  A chx written beside a frame therefore belongs to the step OUT of it
+; -- the reader stops on the frame and picks the chx up next time round.
 
-step_seq:       ld      a, (pendchx)
-                or      a
-                jr      z, seqnopend
-                call    move_by
-                xor     a
-                ld      (pendchx), a
-seqnopend:      ld      hl, (seqptr)
-seqloop:        ld      a, (hl)
-                inc     hl
-                cp      SEQ_GOTO
-                jr      nz, seqnogoto
+SEQ_GOTO        equ     0xFF
+SEQ_FACE        equ     0xFE
+SEQ_UP          equ     0xFD
+SEQ_DOWN        equ     0xFC
+SEQ_CHX         equ     0xFB
+SEQ_CHY         equ     0xFA
+SEQ_ACT         equ     0xF9
+SEQ_SETFALL     equ     0xF8
+SEQ_IFWTLESS    equ     0xF7
+SEQ_EFFECT      equ     0xF3
+SEQ_TAP         equ     0xF2
+SEQ_FIRSTOP     equ     0xF1
+
+; A = one of POP's sequence numbers.  Start it.
+
+jumpseq:        ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      de, seqtab
+                add     hl, de
                 ld      e, (hl)
                 inc     hl
                 ld      d, (hl)
-                ex      de, hl
+seqbase:        ld      hl, seqs        ; the table holds offsets, not
+                add     hl, de          ; addresses, so nothing has to be
+                ld      (seqptr), hl    ; relocated at startup
+                ret
+
+step_seq:       ld      hl, (seqptr)
+seqloop:        ld      a, (hl)
+                inc     hl
+                cp      SEQ_FIRSTOP
+                jr      c, seqframe
+
+                cp      SEQ_GOTO
+                jr      z, sqgoto
+                cp      SEQ_FACE
+                jr      z, sqface
+                cp      SEQ_UP
+                jr      z, sqrowup
+                cp      SEQ_DOWN
+                jr      z, sqrowdn
+                cp      SEQ_CHX
+                jr      z, sqchx
+                cp      SEQ_CHY
+                jr      z, sqchy
+                cp      SEQ_ACT
+                jr      z, sqact
+                cp      SEQ_SETFALL
+                jr      z, sqsetfall
+                cp      SEQ_IFWTLESS
+                jr      z, sqskip2
+                cp      SEQ_EFFECT
+                jr      z, sqskip1
+                cp      SEQ_TAP
+                jr      z, sqskip1
+                jr      seqloop         ; die, jaru, jard, nextlevel: no data
+
+seqframe:       ld      (frame), a
+                ld      (seqptr), hl
+                ret
+
+sqgoto:         ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                ld      hl, seqs
+                add     hl, de
                 jr      seqloop
-seqnogoto:      cp      SEQ_FACE
-                jr      nz, seqnoface
-                push    hl
+
+sqface:         push    hl
                 ld      a, (facing)
                 xor     1
                 ld      (facing), a
                 pop     hl
                 jr      seqloop
-seqnoface:      cp      SEQ_CHY
-                jr      nz, seqnochy
-                ld      a, (hl)
+
+sqrowup:        push    hl
+                ld      hl, blocky
+                dec     (hl)
+                call    set_row
+                pop     hl
+                jr      seqloop
+
+sqrowdn:        push    hl
+                ld      hl, blocky
+                inc     (hl)
+                call    set_row
+                pop     hl
+                jr      seqloop
+
+sqchx:          ld      a, (hl)
+                inc     hl
+                push    hl
+                call    move_by
+                pop     hl
+                jr      seqloop
+
+sqchy:          ld      a, (hl)
                 inc     hl
                 push    hl
                 ld      hl, chary
@@ -545,55 +686,21 @@ seqnoface:      cp      SEQ_CHY
                 ld      (hl), a
                 pop     hl
                 jr      seqloop
-seqnochy:       cp      SEQ_ACT
-                jr      nz, seqnoact
-                ld      a, (hl)
+
+sqact:          ld      a, (hl)
                 inc     hl
                 ld      (charact), a
-                jr      seqloop
-seqnoact:       cp      SEQ_UP
-                jr      nz, seqnoup
-                push    hl
-                ld      hl, blocky
-                dec     (hl)
-                call    set_row
-                pop     hl
-                jr      seqloop
-seqnoup:        cp      SEQ_DOWN
-                jr      nz, seqnodown
-                push    hl
-                ld      hl, blocky
-                inc     (hl)
-                call    set_row
-                pop     hl
-                jr      seqloop
-seqnodown:      cp      SEQ_SETFALL
-                jr      nz, seqnosetf
-                inc     hl              ; the X velocity, which we do not use
+                jp      seqloop
+
+sqsetfall:      inc     hl              ; the X velocity, which we do not use
                 ld      a, (hl)
                 inc     hl
                 ld      (yvel), a
-                jr      seqloop
-seqnosetf:      cp      SEQ_CHX
-                jr      nz, seqnoid
-                ld      a, (hl)
-                inc     hl
-                push    hl
-                call    move_by
-                pop     hl
-                jr      seqloop
-seqnoid:        cp      SEQ_ID
-                jr      nz, seqframe
-                ld      a, (hl)
-                inc     hl
-                ld      (seqid), a
-                jr      seqloop
-seqframe:       ld      (frame), a
-                ld      a, (hl)
-                inc     hl
-                ld      (pendchx), a
-                ld      (seqptr), hl
-                ret
+                jp      seqloop
+
+sqskip2:        inc     hl              ; ifwtless: never weightless here
+sqskip1:        inc     hl
+                jp      seqloop
 
 ; A = chx in logic units, signed.  A logic unit is two screen pixels, and the
 ; sign follows whichever way the prince faces.
@@ -699,6 +806,36 @@ tile_flags:     ld      l, a
 tilenone:       xor     a
                 ret
 
+; In: A = a screen x, C = a block row.  Out: A = that tile's flags.  The row
+; is free here, which tile_flags cannot afford -- it runs inside movetry.
+
+tile_in_row:    ld      l, a
+                ld      h, 0
+                ld      de, blockof
+                add     hl, de
+                ld      a, (hl)
+                cp      10
+                jr      nc, tilenone
+                ld      b, a
+                ld      a, c
+                cp      3
+                jr      nc, tilenone
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de          ; ten tiles to the row
+                ld      e, b
+                ld      d, 0
+                add     hl, de
+                ld      de, tiles
+                add     hl, de
+                ld      a, (hl)
+                ret
+
 ; Ten tiles to a block row.  Worked out only when the row changes, so that
 ; tile_flags stays short and leaves C alone for movetry.
 
@@ -743,6 +880,29 @@ behind_flags:   ld      a, (facing)
                 or      a
                 jr      z, fffwd
                 jr      ffback
+
+; GETABOVE and GETABOVEINF: the same, a block row higher.
+
+above_flags:    ld      a, (charx)
+                jr      arow
+abovefront_flags:
+                ld      a, (facing)
+                or      a
+                ld      a, (charx)
+                jr      z, afleft
+                add     a, BLOCK_PX
+                jr      c, ffnone
+                jr      arow
+afleft:         sub     BLOCK_PX
+                jr      c, ffnone
+arow:           ld      b, a
+                ld      a, (blocky)
+                or      a
+                jr      z, ffnone       ; nothing above the top row
+                dec     a
+                ld      c, a
+                ld      a, b
+                jp      tile_in_row
 
 ; GETDIST: how far he is from the edge of his own block, in POP's units of
 ; two pixels, measured the way he faces.  Standing in the middle of a block
@@ -798,11 +958,8 @@ check_floor:    ld      a, (charact)
                 ld      (charact), a
                 xor     a
                 ld      (yvel), a
-                ld      hl, seqs + SQ_STEPFALL
-                ld      (seqptr), hl
-                xor     a
-                ld      (pendchx), a
-                ret
+                ld      a, SQ_STEPFALL
+                jp      jumpseq
 
 ; GRAVITY and ADDFALL, then the floor plane test of `falling`.  stepfall
 ; carries its own chy for the first four frames and gravity only takes over
@@ -840,12 +997,10 @@ hit_floor:      call    floor_plane
                 ld      (chary), a
                 xor     a
                 ld      (yvel), a
-                ld      (pendchx), a
                 ld      a, 1
                 ld      (charact), a
-                ld      hl, seqs + SQ_SOFTLAND
-                ld      (seqptr), hl
-                ret
+                ld      a, SQ_SOFTLAND
+                jp      jumpseq
 
 ; ---------------------------------------------------------------- frames
 ;
@@ -1337,22 +1492,16 @@ scraddr:        ld      b, a
 
 ; ---------------------------------------------------------------- data
 
-steptab:        dw      seqs + SQ_STEP1,  seqs + SQ_STEP2
-                dw      seqs + SQ_STEP3,  seqs + SQ_STEP4
-                dw      seqs + SQ_STEP5,  seqs + SQ_STEP6
-                dw      seqs + SQ_STEP7,  seqs + SQ_STEP8
-                dw      seqs + SQ_STEP9,  seqs + SQ_STEP10
-                dw      seqs + SQ_STEP11, seqs + SQ_STEP12
-                dw      seqs + SQ_STEP13, seqs + SQ_STEP14
 
 
 charx:          db      0
 chary:          db      0
 facing:         db      0               ; 0 left, 1 right
 frame:          db      0
-seqid:          db      0
 seqptr:         dw      0
-pendchx:        db      0
+jstkx:          db      0
+jstky:          db      0
+btn:            db      0
 blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0
@@ -1396,6 +1545,7 @@ tbuf:           ds      BUFW * 2
 stack:
 
 seqs:           incbin  "seqs.bin"
+seqtab:         incbin  "seqtab.bin"
 tiles:          incbin  "tiles.bin"
 floory:         incbin  "floory.bin"
 blockof:        incbin  "blockof.bin"
@@ -1419,19 +1569,10 @@ codeend:
 ; The working copy is never loaded, only written, so it goes over the room
 ; image once that has been moved out of the way.
 
+; The working copy is never loaded, only written, so it lives past the end of
+; the tape image rather than taking six kilobytes of loading time.  It mirrors
+; the bitmap and not the attributes, which nothing here touches.
+
 work            equ     codeend
-
-stage_art:      incbin  "bank_art.bin"
-stage_end:
-ART_LEN         equ     stage_end - stage_art
-
-stage_spr2:     incbin  "bank_spr2.bin"         ; frames past the first bank
-spr2_end:
-SPR2_LEN        equ     spr2_end - stage_spr2
-
-                ds      0xC000 - $              ; the sprites load in a bank
-stage_spr:      incbin  "bank_spr.bin"
-spr_end:
-SPR_SIG_AT      equ     spr_end - 2
 
                 end     start

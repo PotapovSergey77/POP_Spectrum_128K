@@ -11,6 +11,8 @@ Keys are given as name@first-last in game frames, or bare for the whole run:
 
 Usage: runtap.py <tap> [out.png] [frames] [key ...]
 """
+import json
+import os
 import struct
 import sys
 
@@ -55,12 +57,25 @@ def code_blocks(path):
 
 
 def boot(path):
-    """A CPU with the tape's CODE loaded and no key held."""
+    """
+    A CPU with the tape loaded the way its BASIC loader would.  Blocks bound
+    for a RAM bank are named in the .banks.json the build writes, since we do
+    not run the loader itself.
+    """
+    manifest = os.path.splitext(path)[0] + '.banks.json'
+    banks = json.load(open(manifest)) if os.path.exists(manifest) else []
     cpu = z80.Z80()
     start = None
-    for addr, payload in code_blocks(path):
-        cpu.mem[addr:addr + len(payload)] = payload
-        start = addr
+    for (addr, payload), m in zip(code_blocks(path), banks or [{}] * 99):
+        bank = m.get('bank')
+        if bank is None:
+            cpu.mem[addr:addr + len(payload)] = payload
+            start = addr
+        else:
+            off = addr - 0xC000
+            cpu.banks[bank][off:off + len(payload)] = payload
+    if banks:
+        cpu.mem[0xC000:] = cpu.banks[cpu.page]
     cpu.pc = start
     release(cpu)
     return cpu
