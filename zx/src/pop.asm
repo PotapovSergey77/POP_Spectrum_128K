@@ -96,11 +96,7 @@ start:          di
                 call    check_banks     ; before anything is written, and it
                                         ; leaves the art bank in
 
-                ld      hl, SCREEN + 6144   ; one colour over the whole room,
-                ld      de, SCREEN + 6145   ; so the attributes need not be
-                ld      bc, 767             ; carried
-                ld      (hl), 0x05
-                ldir
+                call    set_attrs
 
                 xor     a               ; the view starts at the room's left
                 ld      (cam), a
@@ -1250,6 +1246,184 @@ set_row:        ld      a, (blocky)
                 ld      (tilerow), hl
                 ret
 
+; ---------------------------------------------------------------- flames
+;
+; A torch burns.  MOVER.S gives every one of them a state and animtorch picks
+; the next at random each frame; FRAMEADV.S draws that frame as the B section
+; of the block to the torch's RIGHT, one byte in and 43 scanlines above that
+; block's A section -- which is why a torch in the last column has none.
+;
+; The room is baked here rather than drawn block by block, so each of the
+; nine frames is baked with the room already behind it and goes down as one
+; rectangle: nothing to rub out first.  It goes down before the prince, so he
+; passes in front of it, as he does in POP.
+
+; RND in GRAFIX.S: the seed times five, and twenty three on top.
+
+rnd:            ld      a, (rndseed)
+                add     a, a
+                add     a, a
+                ld      b, a
+                ld      a, (rndseed)
+                add     a, b
+                add     a, 23
+                ld      (rndseed), a
+                ret
+
+; GETFLAMEFRAME in MOVER.S.  In and out: A = the torch's state.  A fresh
+; number if it is in range and not the one it is already on, otherwise the
+; next one round.
+
+flameframe:     ld      (fstate), a
+                call    rnd
+                ld      b, a
+                ld      a, (fstate)
+                cp      b
+                jr      z, ffnext
+                ld      a, b
+                cp      18
+                ret     c
+                ld      a, (fstate)
+ffnext:         inc     a
+                cp      18
+                ret     c
+                xor     a
+                ret
+
+draw_flames:    ld      a, (torches)
+                or      a
+                ret     z
+                ld      (flleft), a
+                ld      hl, torches + 1
+                ld      (flrec), hl
+                ld      hl, flstate
+                ld      (flst), hl
+flnext:         call    flame_one
+                ld      hl, flleft
+                dec     (hl)
+                jr      nz, flnext
+                ret
+
+; One torch: its next frame, and that frame laid into the working copy.
+; A record is column, top, width, height, the size of one frame, and where
+; the nine of them start.
+
+flame_one:      ld      hl, (flrec)
+                ld      de, flrect
+                ld      bc, 4
+                ldir
+                ld      a, (hl)
+                ld      (flstride), a
+                inc     hl
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      (flrec), hl
+                ld      hl, flames      ; the record carries an offset
+                add     hl, de
+                ld      (flsrc), hl
+
+                ld      hl, (flst)
+                ld      a, (hl)
+                push    hl
+                call    flameframe
+                pop     hl
+                ld      (hl), a
+                inc     hl
+                ld      (flst), hl
+
+                ld      hl, flametab    ; which of the nine that state is
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      b, (hl)
+                ld      hl, (flsrc)
+                ld      a, b
+                or      a
+                jr      z, flgot
+                ld      d, 0
+                ld      a, (flstride)
+                ld      e, a
+flmul:          add     hl, de
+                djnz    flmul
+flgot:          ld      (flsrc), hl
+
+                ld      a, (flrect)     ; the camera says where that lands
+                ld      b, a
+                ld      a, (cam)
+                neg
+                add     a, b
+                ld      (linecol), a
+                call    startrows
+                ld      a, (flrect + 1)
+                ld      (rowy), a
+                ld      a, (flrect + 3)
+                ld      b, a
+flrow:          push    bc
+                call    line_addr
+                ld      de, work - SCREEN
+                add     hl, de
+                ex      de, hl
+                ld      hl, (flsrc)
+                ld      a, (flrect + 2)
+                ld      c, a
+                ld      b, 0
+                ldir
+                ld      (flsrc), hl
+                ld      hl, rowy
+                inc     (hl)
+                pop     bc
+                djnz    flrow
+                ret
+
+; Colour, which the Spectrum keeps in cells of eight pixels by eight.  The
+; map is the room's width and the camera slides over it in whole cells, so
+; the window is simply copied out -- again when the view moves.
+
+set_attrs:      ld      hl, attrs
+                ld      a, (cam)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      de, SCREEN + 6144
+                ld      b, 24
+saloop:         push    bc
+                ld      bc, 32
+                ldir
+                ld      bc, ROOM_BYTES - 32
+                add     hl, bc
+                pop     bc
+                djnz    saloop
+                ret
+
+; And on to the screen, wherever the view has put them.
+
+show_flames:    ld      a, (torches)
+                or      a
+                ret     z
+                ld      (flleft), a
+                ld      hl, torches + 1
+                ld      (flrec), hl
+sfnext:         ld      hl, (flrec)
+                ld      de, shcol
+                ld      bc, 4
+                ldir
+                ld      de, 3
+                add     hl, de
+                ld      (flrec), hl
+                ld      a, (shcol)
+                ld      b, a
+                ld      a, (cam)
+                neg
+                add     a, b
+                ld      (shcol), a
+                call    showgo
+                ld      hl, flleft
+                dec     (hl)
+                jr      nz, sfnext
+                ret
+
 ; ---------------------------------------------------------------- crop
 ;
 ; CROPCHAR in CTRLSUBS.S -- the half of it that keeps a character out of the
@@ -1712,6 +1886,7 @@ dpxoff:         ld      a, (hl)
                 ld      (newh), a
                 call    crop_char
                 call    erase_new
+                call    draw_flames     ; background, so before he is drawn
 
 ; Only now: everything above reads the room and the tables, and the sprite's
 ; bank goes over the top of the room.
@@ -2188,7 +2363,8 @@ fsrow:          push    bc
                 call    nextrow
                 pop     bc
                 djnz    fsrow
-                ret
+                call    set_attrs       ; the colour slides with the view
+                jp      show_flames
 
 ; In: HL = the screen address of column zero on this row.  Puts down the part
 ; of the sprite that falls on it, if any.
@@ -2230,6 +2406,8 @@ showpart:       ld      a, (oldw)
                 ld      hl, oldcol
                 call    show_one
 shownew:        ld      hl, newcol
+                call    show_one
+                jp      show_flames
 
 show_one:       ld      de, shcol       ; col, top, width, height, in order
                 ld      bc, 4
@@ -2361,6 +2539,15 @@ coverb:         dw      0
 workp:          dw      0
 roomp:          dw      0
 rowptr:         dw      0
+rndseed:        db      37
+fstate:         db      0
+flleft:         db      0
+flrec:          dw      0
+flst:           dw      0
+flsrc:          dw      0
+flstride:       db      0
+flrect:         ds      4
+flstate:        ds      8
 linecol:        db      0
 ercol:          db      0
 ertop:          db      0
@@ -2387,6 +2574,10 @@ cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
 blocktop:       incbin  "blocktop.bin"
 floorband:      incbin  "floorband.bin"
+torches:        incbin  "torches.bin"
+flametab:       incbin  "flametab.bin"
+flames:         incbin  "flames.bin"
+attrs:          incbin  "attrs.bin"
 foreband:       incbin  "foreband.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"

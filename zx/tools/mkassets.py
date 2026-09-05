@@ -66,6 +66,19 @@ ROOM = ('LEVEL1', 1)
 # the view slides over it a byte at a time.  Four positions cover the 24
 # pixel difference, so every part of the room can be brought on screen.
 ROOM_BYTES = 35
+
+# Torch flames.  MOVER.S gives every torch a state and picks the next one at
+# random; FRAMEADV.S draws that frame as the B section of the block to the
+# torch's RIGHT -- XCO = blockxco + 1, YCO = Ay - 43 -- which is why a torch
+# in the last column has no flame.  GAMEBG.S holds the order.
+TORCH = 19
+FLAME_FRAMES = [0x52, 0x53, 0x54, 0x55, 0x56, 0x61, 0x62, 0x63, 0x64]
+FLAME_TABLE = [0x52, 0x53, 0x54, 0x55, 0x56, 0x61, 0x62, 0x63, 0x64,
+               0x52, 0x54, 0x56, 0x63, 0x61, 0x55, 0x53, 0x64, 0x62]
+FLAME_UP = 43
+
+INK_ROOM = 0x05                 # cyan on black, the whole room
+INK_FLAME = 0x02                # and red where a torch burns
 ROOM_PX = ROOM_BYTES * 8
 CAM_MAX = ROOM_BYTES - 32
 
@@ -319,6 +332,59 @@ def main(argv):
         distof[x] = ((x - angle_px) % BLOCK_PX) // 2
     open(os.path.join(binout, 'distof.bin'), 'wb').write(bytes(distof))
 
+    # Each frame is baked with the room already behind it, so a flame goes
+    # down as one rectangle and there is nothing to rub out first.  The
+    # rectangle is the same for all nine, whichever of them is the widest.
+    torches, flames = bytearray(), bytearray()
+    for row in range(3):
+        ay = renderroom.BLOCKBOT[row + 1] - 3
+        for col in range(10):
+            if ids[row * 10 + col] != TORCH or col == 9:
+                continue
+            x0 = ((col + 1) * 4 + 1) * 7
+            ybot = ay - FLAME_UP
+            imgs = [room.tab1.get(n) for n in FLAME_FRAMES]
+            wide = max(i.px_width for i in imgs)
+            tall = max(i.height for i in imgs)
+            c0 = x0 // 8
+            cw = (x0 % 8 + wide + 7) // 8
+            top = ybot - tall + 1
+            torches += bytes([c0, top, cw, tall, cw * tall,
+                              len(flames) & 0xff, len(flames) >> 8])
+            for img in imgs:
+                pix = list(img.pixels())
+                for y in range(top, ybot + 1):
+                    line = bytearray(cw)
+                    for b in range(cw):
+                        for bit in range(8):
+                            x = (c0 + b) * 8 + bit
+                            if (x0 <= x < x0 + img.px_width
+                                    and ybot - img.height < y <= ybot):
+                                v = pix[y - (ybot - img.height + 1)][x - x0]
+                            else:
+                                v = px[y][x] if x < ROOM_PX else 0
+                            if v:
+                                line[b] |= 0x80 >> bit
+                    flames += line
+    open(os.path.join(binout, 'torches.bin'), 'wb').write(
+        bytes([len(torches) // 7]) + bytes(torches))
+    open(os.path.join(binout, 'flames.bin'), 'wb').write(bytes(flames))
+    open(os.path.join(binout, 'flametab.bin'), 'wb').write(
+        bytes(FLAME_FRAMES.index(n) for n in FLAME_TABLE))
+
+    # Colour.  One attribute to a character cell is all the Spectrum gives,
+    # so the room is a single ink and only the cells a flame burns in are
+    # another.  The map is the room's width, and the camera slides over it in
+    # whole cells -- a byte is eight pixels either way -- so nothing has to be
+    # worked out at run time.
+    attrs = bytearray([INK_ROOM]) * (ROOM_BYTES * 24)
+    for t in range(len(torches) // 7):
+        c0, top, cw, tall = torches[t * 7:t * 7 + 4]
+        for r in range(top // 8, (top + tall - 1) // 8 + 1):
+            for c in range(c0, c0 + cw):
+                attrs[r * ROOM_BYTES + c] = INK_FLAME
+    open(os.path.join(binout, 'attrs.bin'), 'wb').write(bytes(attrs))
+
     seq, code, entry = build_sequences()
     open(os.path.join(binout, 'seqs.bin'), 'wb').write(code)
     open(os.path.join(binout, 'seqtab.bin'), 'wb').write(entry)
@@ -441,6 +507,8 @@ def main(argv):
                                              len(foremask)))
     print('floor masks %d rows, %d bytes each' % (len(band), len(fmask)))
     print('art bank    %d of %d bytes' % (len(art) + 2, BANK_SIZE))
+    print('torches     %d, %d bytes of flame, %d of colour'
+          % (len(torches) // 7, len(flames), len(attrs)))
     print('START_X=%d START_Y=%d'
           % (popframe.screen_x(popframe.char_x(START_COL)),
              popframe.char_y(START_ROW)))
