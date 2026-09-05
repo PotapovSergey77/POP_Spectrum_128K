@@ -25,6 +25,7 @@ KEYS = {
     'up': (0xEFFE, 3),          # key 7
     'down': (0xEFFE, 4),        # key 6
     'space': (0x7FFE, 0),
+    'shift': (0xFEFE, 0),
 }
 
 
@@ -85,7 +86,7 @@ def parse(args):
     return out
 
 
-def play(cpu, frames, script, limit=400000):
+def play(cpu, frames, script, limit=3000000):
     """Run `frames` game frames, holding each key over its own span."""
     steps = 0
     for n in range(frames):

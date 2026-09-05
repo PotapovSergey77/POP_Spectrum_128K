@@ -45,11 +45,11 @@ CHY, SETFALL, ACT, UP, DOWN = 0xFB, 0xFA, 0xF9, 0xF8, 0xF7
 # told apart from the landing itself, so the list stands on its own.
 IDS = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn',
        'stepfall', 'freefall', 'softland', 'crouch', 'standup',
-       'climbdown', 'hang', 'climbup', 'hangdrop', 'stoop']
+       'climbdown', 'hang', 'climbup', 'hangdrop', 'stoop', 'step']
 (ID_STAND, ID_STARTRUN, ID_RUNCYC, ID_TURN, ID_RUNSTOP, ID_RUNTURN,
  ID_STEPFALL, ID_FREEFALL, ID_SOFTLAND, ID_CROUCH, ID_STANDUP,
  ID_CLIMBDOWN, ID_HANG, ID_CLIMBUP, ID_HANGDROP,
- ID_STOOP) = range(len(IDS))
+ ID_STOOP, ID_STEP) = range(len(IDS))
 
 SEQUENCES = {
     'stand':    [('id', ID_STAND), ('act', 1), (15, 0), ('goto', 'stand')],
@@ -112,9 +112,26 @@ SEQUENCES = {
                  (81, 0), (82, 0), ('act', 5), (83, 0), ('act', 1),
                  (84, 0), (85, 0), ('chx', 3), ('goto', 'stand')],
 }
+# POP carries fourteen careful steps, one per distance, so that a step
+# always finishes exactly where it should -- against a wall, or with his toes
+# on the edge.  They differ in one chx: the frames add up to eleven units and
+# the odd one makes up the rest.  SEQTABLE.S writes them all out; we do not
+# have to.  The swing carries him eleven units forward and the odd chx pulls
+# him back, so the middle of a step can hang well over a drop: it says "in the
+# air" until his foot is down, which is what POP's per frame floor check flag
+# is saying too.
+for _n in range(1, 15):
+    SEQUENCES['step%d' % _n] = [
+        ('id', ID_STEP), ('act', 3),
+        (121, 1), (122, 1), (123, 3), (124, 4), (125, 3), (126, -1),
+        ('chx', _n - 11), ('act', 1),
+        (127, 0), (128, 0), (129, 0), (130, 0), (131, 0), (132, 0),
+        ('goto', 'stand')]
+
 ORDER = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn',
          'stepfall', 'freefall', 'softland', 'standup',
          'climbdown', 'hang', 'climbup', 'hangdrop', 'stoop']
+ORDER += ['step%d' % n for n in range(1, 15)]
 
 # POP anchors a character by his leading edge: facing left that is the left
 # edge of the image, facing right it is the leftmost pixel of the RIGHTMOST
@@ -278,11 +295,14 @@ def main(argv):
     # POP draws the foreground pieces after the characters, which is what
     # lets a wall or a post stand in front of the prince.  Those pieces are
     # listed in `fronti`, positioned by `frontx` (in bytes) and `fronty`, and
-    # the room never changes -- so the area they cover is worked out here as a
-    # bitmask, one bit a pixel, and simply put back from the room after he is
-    # drawn.  The whole rectangle is masked, not just the lit pixels, or he
-    # would show through the gaps in the dither.
-    fore = bytearray(6144)
+    # the room never changes -- so the area they cover goes back over him
+    # after he is drawn.  The whole rectangle is covered, not just the lit
+    # pixels, or he would show through the gaps in the dither.
+    #
+    # It is a bitmask at run time, a bit a pixel, but it does not travel as
+    # one: six kilobytes of tape and of staging room for a handful of
+    # rectangles.  The rectangles travel instead and the program paints them.
+    rects = bytearray()
     for row in range(3):
         ay = renderroom.BLOCKBOT[row + 1] - 3
         for col in range(10):
@@ -295,18 +315,20 @@ def main(argv):
                 continue
             x0 = (col * 4 + renderroom.bg.frontx[t]) * 7 - CAMERA
             ybot = ay + renderroom.bg.fronty[t]
-            for y in range(ybot - img.height + 1, ybot + 1):
-                if not 0 <= y < 192:
-                    continue
-                for x in range(x0, x0 + img.width * 7):
-                    if not 0 <= x < 256:
-                        continue
-                    off = zxscreen.bitmap_offset(x >> 3, y)
-                    fore[off] |= 0x80 >> (x & 7)
+            ytop = ybot - img.height + 1
+            x1, y1 = x0 + img.width * 7 - 1, ybot
+            x0, y0 = max(0, x0), max(0, ytop)
+            x1, y1 = min(255, x1), min(191, ybot)
+            if x1 < x0 or y1 < y0:
+                continue
+            rects += bytes([x0, x1 - x0 + 1, y0, y1 - y0 + 1])
+    rects = bytes([len(rects) // 4]) + rects
+    open(os.path.join(binout, 'frontrect.bin'), 'wb').write(rects)
+
     # The art bank: the room first, then the foreground mask behind it, and a
     # signature the program checks -- a bank that did not load leaves a black
     # screen and nothing to go on, so it is worth two bytes to say so.
-    art = screen + bytes(fore)
+    art = screen
     open(os.path.join(binout, 'bank_art.bin'), 'wb').write(art + SIG_ART)
 
     blockof = bytearray(256)            # screen pixel -> block column
@@ -315,6 +337,14 @@ def main(argv):
         b = (x + CAMERA - angle_px) // BLOCK_PX
         blockof[x] = b if 0 <= b <= 9 else 0xFF
     open(os.path.join(binout, 'blockof.bin'), 'wb').write(bytes(blockof))
+
+    # GETDIST in CTRLSUBS.S works in OFFSET, the position within the block in
+    # POP's 140-wide space -- 0 to 13, two screen pixels to the unit.  Every
+    # judgement about edges is made in those units, so the table comes along.
+    distof = bytearray(256)
+    for x in range(256):
+        distof[x] = ((x + CAMERA - angle_px) % BLOCK_PX) // 2
+    open(os.path.join(binout, 'distof.bin'), 'wb').write(bytes(distof))
 
     used = []
     for name in ORDER:
@@ -365,7 +395,7 @@ def main(argv):
         f.write('; generated by mkassets.py -- do not edit\n')
         f.write('sprblob     equ %d' % PAGE_WINDOW + chr(10))
         f.write('room        equ %d' % PAGE_WINDOW + chr(10))
-        f.write('foremask    equ %d' % (PAGE_WINDOW + len(screen)) + chr(10))
+        f.write('foremask    equ %d' % (PAGE_WINDOW + len(screen) + 2) + chr(10))
         f.write('SIG_ART_AT  equ %d' % (PAGE_WINDOW + len(art)) + chr(10))
         f.write('SIG_ART     equ %d' % int.from_bytes(SIG_ART, 'little') + chr(10))
         f.write('SIG_SPR     equ %d' % int.from_bytes(SIG_SPR, 'little') + chr(10))
@@ -396,8 +426,7 @@ def main(argv):
             f.write('                ld      hl, seqs + %-3d  ; %s' % (labels[name], name) + chr(10))
             f.write('                ld      (seqs + %d), hl\n' % at)
 
-    print('bank_art    %d байт (комната %d + маска %d)'
-          % (len(screen) + len(fore), len(screen), len(fore)))
+    print('bank_art    %d байт (комната)' % len(art))
     for i, b in enumerate(blobs):
         print('bank_spr%-3d %d байт  (свободно в банке %d)'
               % (i + 1, len(b), BANK_SIZE - len(b) - (2 if not i else 0)))
@@ -410,8 +439,8 @@ def main(argv):
 
     print('tiles.bin   %s' % ' '.join('%d' % f for f in flags))
     print('floory.bin  %s' % ' '.join('%d' % f for f in floory))
-    print('foremask    %d байт, закрыто %d пикселей'
-          % (len(fore), sum(bin(b).count('1') for b in fore)))
+    print('frontrect   %d прямоугольников переднего плана, %d байт'
+          % (rects[0], len(rects)))
     print('START_X=%d START_Y=%d'
           % (popframe.screen_x(popframe.char_x(START_COL)) - CAMERA,
              popframe.char_y(START_ROW)))

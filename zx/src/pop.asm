@@ -27,6 +27,8 @@ BUFW            equ     8               ; widest sprite plus the shift byte
 FRAME_WAIT      equ     3               ; 50Hz frames per game frame
 BLOCK_PX        equ     28
 TILE_GROUND     equ     TILE_FLOOR | TILE_SOLID   ; anything but space
+STEP_OFF_FWD    equ     3               ; CTRL.S
+STEP_OFF_BACK   equ     8
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
 PAGEPORT        equ     0x7FFD
@@ -63,6 +65,8 @@ nospr2:
                 ld      de, room
                 ld      bc, ART_LEN
                 ldir
+
+                call    build_fore
 
                 ld      hl, (SIG_ART_AT); a bank that did not arrive leaves a
                 ld      de, SIG_ART     ; black screen and nothing to go on
@@ -133,6 +137,81 @@ mainwait:       halt
 ; its foreground mask, and the prince's pixels.  Each lives in its own bank at
 ; 0xC000 and is paged in for the part of the frame that wants it.  Bit 4 keeps
 ; the 48K ROM, which is what the interrupt handler at 0x38 is.
+
+; The foreground is a handful of rectangles, not six kilobytes: they travel
+; on the tape and the mask is painted from them, with the art bank in.
+
+build_fore:     ld      hl, foremask
+                ld      de, foremask + 1
+                ld      bc, 6143
+                ld      (hl), 0
+                ldir
+
+                ld      hl, frontrect
+                ld      a, (hl)
+                inc     hl
+                or      a
+                ret     z
+                ld      b, a
+bfrect:         push    bc
+                ld      a, (hl)
+                ld      (frx0), a
+                inc     hl
+                ld      a, (hl)
+                ld      (frxw), a
+                inc     hl
+                ld      a, (hl)
+                ld      (fry), a
+                inc     hl
+                ld      a, (hl)
+                inc     hl
+                ld      b, a
+                push    hl
+bfrow:          push    bc
+                ld      e, 0            ; the row's leftmost byte
+                ld      a, (fry)
+                call    scraddr
+                ld      de, foremask - SCREEN
+                add     hl, de
+                ld      (frrow), hl
+                ld      a, (frx0)
+                ld      c, a
+                ld      a, (frxw)
+                ld      b, a
+bfpix:          ld      a, c            ; which byte of the row
+                srl     a
+                srl     a
+                srl     a
+                ld      e, a
+                ld      d, 0
+                ld      hl, (frrow)
+                add     hl, de
+                ld      a, c            ; and which bit of it
+                and     7
+                inc     a
+                ld      e, 0x80
+bfbit:          dec     a
+                jr      z, bfset
+                srl     e
+                jr      bfbit
+bfset:          ld      a, (hl)
+                or      e
+                ld      (hl), a
+                inc     c
+                djnz    bfpix
+                ld      hl, fry
+                inc     (hl)
+                pop     bc
+                djnz    bfrow
+                pop     hl
+                pop     bc
+                djnz    bfrect
+                ret
+
+frx0:           db      0
+frxw:           db      0
+fry:            db      0
+frrow:          dw      0
 
 ; The tape loaded the sprites through the window at 0xC000, into whichever
 ; bank the loader had paged there -- bank 0 on a machine that has just been
@@ -233,6 +312,15 @@ read_up:        ld      bc, 0xEFFE
                 and     8
                 ret
 
+; Caps shift is row FEFE bit 0.  POP calls it the button; held with a
+; direction it turns a run into a single careful step.
+
+read_shift:     ld      bc, 0xFEFE
+                in      a, (c)
+                cpl
+                and     1
+                ret
+
 ; Cursor down is key 6, the same half row, bit 4.
 
 read_down:      ld      bc, 0xEFFE
@@ -248,24 +336,24 @@ read_down:      ld      bc, 0xEFFE
 
 input_step:     ld      a, (charact)
                 cp      2               ; hanging: up climbs, down lets go
-                jr      z, fromhang
+                jp      z, fromhang
                 cp      6
-                jr      z, fromhang
+                jp      z, fromhang
                 cp      3               ; no steering in the air
                 ret     z
                 cp      4
                 ret     z
                 ld      a, (seqid)
                 cp      ID_CROUCH
-                jr      z, fromcrouch
+                jp      z, fromcrouch
                 ld      a, (blocked)
                 or      a
-                jr      z, inputkeys
+                jp      z, inputkeys
                 ld      a, (seqid)
                 cp      ID_RUNCYC
-                jr      z, tostopnow
+                jp      z, tostopnow
                 cp      ID_STARTRUN
-                jr      nz, inputkeys
+                jp      nz, inputkeys
 tostopnow:      ld      hl, seqs + SQ_RUNSTOP
                 jp      setseq
 
@@ -278,8 +366,11 @@ fhdrop:         call    read_down
                 ld      hl, seqs + SQ_HANGDROP
                 jp      setseq
 
-fromcrouch:     call    read_up
-                ret     z
+; CTRL.S stands him up the moment down is let go, which is why a short fall
+; leaves him crouched for a breath and then upright without being asked.
+
+fromcrouch:     call    read_down
+                ret     nz
                 ld      hl, seqs + SQ_STANDUP
                 jp      setseq
 
@@ -287,34 +378,47 @@ inputkeys:      call    read_keys
                 ld      b, a
                 ld      a, (seqid)
                 cp      ID_STAND
-                jr      z, fromstand
+                jp      z, fromstand
                 cp      ID_STARTRUN
-                jr      z, fromrun
+                jp      z, fromrun
                 cp      ID_RUNCYC
-                jr      z, fromrun
+                jp      z, fromrun
                 ret
 
-fromstand:      push    bc              ; down, at an edge, climbs over it
+; Down, standing.  Facing a cliff and close to it, he steps off it; with his
+; BACK to one and close to that, he lowers himself over it; otherwise he
+; crouches.  Straight out of CTRL.S, and the way round it goes matters: you
+; climb down backwards, holding the ledge you were standing on.
+
+fromstand:      push    bc
                 call    read_down
                 pop     bc
                 jr      z, fsnodown
-                ld      a, (charx)
-                ld      c, a
-                ld      a, (facing)
-                or      a
-                ld      a, c
-                jr      nz, fdright
-                sub     BLOCK_PX
-                jr      fdtest
-fdright:        add     a, BLOCK_PX
-fdtest:         call    tile_flags
+
+                call    front_flags
+                and     TILE_GROUND
+                jr      nz, fdback      ; no cliff in front of him
+                call    get_dist
+                cp      STEP_OFF_FWD
+                jr      nc, fdback      ; not close enough to the edge
+                ld      a, 5            ; step off it; the fall follows
+                jp      move_by
+
+fdback:         call    behind_flags
+                and     TILE_GROUND
+                jr      nz, tostoop     ; no cliff behind him either
+                call    get_dist
+                cp      STEP_OFF_BACK
+                jr      c, tostoop      ; not backed up to the edge
+                call    under_flags     ; and there has to be a ledge to hold
                 and     TILE_FLOOR
-                jr      nz, tostoop     ; floor ahead: he just crouches
-                call    below_flags     ; and there has to be somewhere to
-                and     TILE_SOLID      ; hang: a wall under the ledge is not
-                jr      nz, tostoop
+                jr      z, tostoop
+                call    get_dist        ; line him up with it
+                sub     9
+                call    move_by
                 ld      hl, seqs + SQ_CLIMBDOWN
                 jp      setseq
+
 tostoop:        ld      hl, seqs + SQ_STOOP
                 jp      setseq
 
@@ -325,8 +429,42 @@ fsnodown:       ld      a, b
                 ld      c, a
                 ld      a, (facing)
                 cp      c
-                jr      z, tostartrun
+                jr      z, facingit
                 ld      hl, seqs + SQ_TURN
+                jp      setseq
+
+facingit:       push    bc
+                call    read_shift
+                pop     bc
+                jp      z, tostartrun
+                ; fall through: a careful step
+
+; GETFWDDIST in COLL.S.  A wall or a drop ahead means he steps up to the edge
+; of his own block and no further; anything he can walk on means a full step.
+; POP keeps fourteen sequences so the step always ends where it should.
+
+do_step:        call    front_flags
+                ld      c, a
+                and     TILE_SOLID
+                jr      nz, stepedge
+                ld      a, c
+                and     TILE_FLOOR
+                jr      z, stepedge
+                ld      a, 14
+                jr      stepgo
+stepedge:       call    get_dist
+stepgo:         or      a
+                ret     z               ; already there: nothing to step
+                dec     a
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, steptab
+                add     hl, de
+                ld      a, (hl)
+                inc     hl
+                ld      h, (hl)
+                ld      l, a
                 jp      setseq
 ; No point starting a run into a wall or off the edge, or he twitches on the
 ; spot: stand still instead.
@@ -583,26 +721,45 @@ set_row:        ld      a, (blocky)
 under_flags:    ld      a, (charx)
                 jr      tile_flags
 
-; Out: A = the flags of the tile one row below his feet, zero past the
-; bottom of the room.  Climbing down needs somewhere to hang into.
+; Out: A = the flags of the block one along, the way he faces or the way he
+; came -- GETINFRONT and GETBEHIND.  Off the map reads as space, which is
+; what it looks like.
 
-below_flags:    ld      a, (blocky)
-                cp      2
-                jr      nc, belownone
-                ld      hl, (tilerow)
-                ld      de, 10
-                add     hl, de
-                ld      (tilerow), hl
-                ld      a, (charx)
-                call    tile_flags
-                ld      c, a
-                ld      hl, (tilerow)
-                ld      de, -10
-                add     hl, de
-                ld      (tilerow), hl
-                ld      a, c
+front_flags:    ld      a, (facing)
+                or      a
+                jr      z, ffback
+fffwd:          ld      a, (charx)
+                add     a, BLOCK_PX
+                jr      c, ffnone
+                jr      tile_flags
+ffback:         ld      a, (charx)
+                sub     BLOCK_PX
+                jr      c, ffnone
+                jr      tile_flags
+ffnone:         xor     a
                 ret
-belownone:      xor     a
+
+behind_flags:   ld      a, (facing)
+                or      a
+                jr      z, fffwd
+                jr      ffback
+
+; GETDIST: how far he is from the edge of his own block, in POP's units of
+; two pixels, measured the way he faces.  Standing in the middle of a block
+; is offset 7, so seven units to the edge behind and six to the one ahead.
+
+get_dist:       ld      a, (charx)
+                ld      l, a
+                ld      h, 0
+                ld      de, distof
+                add     hl, de
+                ld      b, (hl)
+                ld      a, (facing)
+                or      a
+                ld      a, b
+                ret     z
+                ld      a, 13
+                sub     b
                 ret
 
 ; Out: A = FloorY for the row below his feet -- the plane he lands on.
@@ -1180,6 +1337,15 @@ scraddr:        ld      b, a
 
 ; ---------------------------------------------------------------- data
 
+steptab:        dw      seqs + SQ_STEP1,  seqs + SQ_STEP2
+                dw      seqs + SQ_STEP3,  seqs + SQ_STEP4
+                dw      seqs + SQ_STEP5,  seqs + SQ_STEP6
+                dw      seqs + SQ_STEP7,  seqs + SQ_STEP8
+                dw      seqs + SQ_STEP9,  seqs + SQ_STEP10
+                dw      seqs + SQ_STEP11, seqs + SQ_STEP12
+                dw      seqs + SQ_STEP13, seqs + SQ_STEP14
+
+
 charx:          db      0
 chary:          db      0
 facing:         db      0               ; 0 left, 1 right
@@ -1233,6 +1399,8 @@ seqs:           incbin  "seqs.bin"
 tiles:          incbin  "tiles.bin"
 floory:         incbin  "floory.bin"
 blockof:        incbin  "blockof.bin"
+distof:         incbin  "distof.bin"
+frontrect:      incbin  "frontrect.bin"
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"

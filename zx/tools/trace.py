@@ -36,7 +36,7 @@ def main(argv):
             row, bit = runtap.KEYS[name]
             cpu.ports[row] &= ~(1 << bit) & 0xFF
         before = cpu.frames
-        steps = cpu.run(1, limit=400000)
+        steps = cpu.run(1, limit=3000000)
         vals = [cpu.mem[sym[w]] for w in WATCH]
         line = '%-5d ' % n + ' '.join('%-7d' % v for v in vals) + ' ' + ','.join(down)
         if cpu.frames == before:
