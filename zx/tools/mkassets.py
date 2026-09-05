@@ -16,6 +16,8 @@ with a little byte code of its own.  Ours keeps the same shape:
     0xFE         about face
     0xFD d       move without changing frame
     0xFC n       say which sequence we are in, so the keys know what to do
+    0xFB d       drop by d screen lines
+    0xFA x y     set the falling velocities
     f    d       show frame f and move by d
 
 `d` is chx, in the 140-wide logic space, so a screen pixel is half a unit; the
@@ -32,10 +34,18 @@ import renderroom
 import zxscreen
 
 GOTO, FACE, CHX, SEQID = 0xFF, 0xFE, 0xFD, 0xFC
+CHY, SETFALL = 0xFB, 0xFA
 
 # Straight out of SEQTABLE.S.  A plain number is a frame, a tuple is a frame
 # with its chx, and the strings are the byte code above.
-ID_STAND, ID_STARTRUN, ID_RUNCYC, ID_TURN, ID_RUNSTOP, ID_RUNTURN = range(6)
+# The ids the keys read.  Most are a sequence's name, but not all: the
+# crouch a soft landing ends in is part of `softland` and still has to be
+# told apart from the landing itself, so the list stands on its own.
+IDS = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn',
+       'stepfall', 'freefall', 'softland', 'crouch', 'standup']
+(ID_STAND, ID_STARTRUN, ID_RUNCYC, ID_TURN, ID_RUNSTOP, ID_RUNTURN,
+ ID_STEPFALL, ID_FREEFALL, ID_SOFTLAND, ID_CROUCH,
+ ID_STANDUP) = range(len(IDS))
 
 SEQUENCES = {
     'stand':    [('id', ID_STAND), (15, 0), ('goto', 'stand')],
@@ -54,8 +64,25 @@ SEQUENCES = {
                  (53, 1), (54, 8), (55, 0), (56, 7), (57, 3),
                  (58, 1), (59, 0), (60, 2), (61, -1), (62, 0), (63, 0),
                  (64, -1), (65, -14), ('face',), ('goto', 'runcyc5')],
+    # The floor runs out and he tips over the edge.  The chy beside a frame
+    # is the drop out of it, exactly as chx is the step; the setfall at the
+    # end hands him to gravity with a Y velocity already wound up.
+    'stepfall': [('id', ID_STEPFALL), ('chx', 1), ('chy', 3),
+                 (102, 2, 6), (103, -1, 9), (104, 0, 12), (105, -2),
+                 ('setfall', 1, 15), ('goto', 'freefall')],
+    'freefall': [('id', ID_FREEFALL), ('label', 'ff'), (106, 0),
+                 ('goto', 'ff')],
+    # A one storey drop: he takes it on his hands and stays crouched until
+    # he is told to get up.
+    'softland': [('id', ID_SOFTLAND), ('chx', 1), (107, 2), (108, 0),
+                 ('label', 'crouch'), ('id', ID_CROUCH), (109, 0),
+                 ('goto', 'crouch')],
+    'standup':  [('id', ID_STANDUP), ('chx', 1),
+                 (110, 0), (111, 2), (112, 0), (113, 1), (114, 0), (115, 0),
+                 (116, -4), (117, 0), (118, 0), (119, 0), ('goto', 'stand')],
 }
-ORDER = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn']
+ORDER = ['stand', 'startrun', 'runcyc', 'turn', 'runstop', 'runturn',
+         'stepfall', 'freefall', 'softland', 'standup']
 
 # POP anchors a character by his leading edge: facing left that is the left
 # edge of the image, facing right it is the leftmost pixel of the RIGHTMOST
@@ -141,10 +168,16 @@ def build_sequences(index):
                 code.append(FACE)
             elif step[0] == 'chx':
                 code += bytes([CHX, step[1] & 0xff])
+            elif step[0] == 'chy':
+                code += bytes([CHY, step[1] & 0xff])
+            elif step[0] == 'setfall':
+                code += bytes([SETFALL, step[1] & 0xff, step[2] & 0xff])
             elif step[0] == 'id':
                 code += bytes([SEQID, step[1]])
             else:
                 code += bytes([index[step[0]], step[1] & 0xff])
+                if len(step) > 2:       # a drop belongs to the step out of
+                    code += bytes([CHY, step[2] & 0xff])    # the frame too
     return labels, code, fixups
 
 
@@ -167,7 +200,11 @@ def main(argv):
     ids = [b & poplevel.IDMASK for b in types]
     flags = bytearray(30)
     for i, t in enumerate(ids):
-        if t in renderroom.SEAM_TYPES or t == renderroom.bg.posts:
+        # A tile has a floor when its D section is one of the floor tops --
+        # the renderer's own test -- plus the loose floor, whose top is drawn
+        # by its movable piece instead.
+        if (renderroom.bg.pieced[t] in renderroom.FLOOR_TOPS
+                or t == renderroom.bg.loose):
             flags[i] |= TILE_FLOOR      # something to stand on
         if t == renderroom.bg.block:
             flags[i] |= TILE_SOLID      # and nothing to walk through
@@ -253,16 +290,19 @@ def main(argv):
         f.write('SEQ_FACE    equ %d\n' % FACE)
         f.write('SEQ_CHX     equ %d\n' % CHX)
         f.write('SEQ_ID      equ %d' % SEQID + chr(10))
+        f.write('SEQ_CHY     equ %d' % CHY + chr(10))
+        f.write('SEQ_SETFALL equ %d' % SETFALL + chr(10))
         f.write('TILE_FLOOR  equ %d' % TILE_FLOOR + chr(10))
         f.write('TILE_SOLID  equ %d' % TILE_SOLID + chr(10))
 
-        for n, nm in enumerate(ORDER):
+        for n, nm in enumerate(IDS):
             f.write('ID_%-9s equ %d' % (nm.upper(), n) + chr(10))
         for name in ORDER:
             f.write('SQ_%-8s equ %d\n' % (name.upper(), labels[name]))
         f.write('START_X     equ %d\n'
                 % (popframe.screen_x(popframe.char_x(START_COL)) - CAMERA))
         f.write('START_Y     equ %d\n' % popframe.char_y(START_ROW))
+        f.write('START_ROW   equ %d\n' % START_ROW)
 
     with open(os.path.join(out, 'seqfix.inc'), 'w') as f:
         f.write('; jump targets are patched in once the sequences are placed\n')
@@ -274,7 +314,12 @@ def main(argv):
     print('sprites.bin %d bytes (%d frames, one facing)'
           % (len(table) + len(blob), len(used)))
     print('seqs.bin    %d bytes, %d sequences' % (len(code), len(ORDER)))
-    print('tiles.bin   %s' % ' '.join('%d' % f for f in flags[:10]))
+    # FloorY, indexed by block row + 1: the plane his feet rest on.
+    floory = bytes(v & 0xff for v in popframe.FLOOR_Y)
+    open(os.path.join(out, 'floory.bin'), 'wb').write(floory)
+
+    print('tiles.bin   %s' % ' '.join('%d' % f for f in flags))
+    print('floory.bin  %s' % ' '.join('%d' % f for f in floory))
     print('foremask    %d байт, закрыто %d пикселей'
           % (len(fore), sum(bin(b).count('1') for b in fore)))
     print('START_X=%d START_Y=%d'

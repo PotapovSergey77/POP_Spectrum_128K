@@ -21,7 +21,9 @@ SCREEN          equ     16384
 BUFW            equ     8               ; widest sprite plus the shift byte
 FRAME_WAIT      equ     3               ; 50Hz frames per game frame
 BLOCK_PX        equ     28
-WALL_DEPTH      equ     12               ; how far into a wall's tile he goes
+WALL_DEPTH      equ     12              ; how far into a wall's tile he goes
+ACCEL_G         equ     3               ; SUBS.S GRAVITY
+TERM_VEL        equ     33
 X_MIN           equ     40
 X_MAX           equ     240
 
@@ -38,9 +40,9 @@ start:          di
                 ld      de, SCREEN      ; start out as the bare room
                 ld      bc, 6912
                 ldir
-                ld      hl, room
-                ld      de, work
-                ld      bc, 6912
+                ld      hl, room        ; the bitmap only: nothing ever writes
+                ld      de, work        ; attributes through the working copy
+                ld      bc, 6144
                 ldir
 
                 include "seqfix.inc"    ; turn sequence offsets into addresses
@@ -49,7 +51,12 @@ start:          di
                 ld      (charx), a
                 ld      a, START_Y
                 ld      (chary), a
+                ld      a, START_ROW
+                ld      (blocky), a
+                call    set_row
                 xor     a
+                ld      (yvel), a
+                ld      (falling), a
                 ld      (facing), a
                 ld      (seqid), a
                 ld      (oldw), a       ; nothing to erase on the first pass
@@ -76,6 +83,8 @@ mainwait:       halt
                 call    erase_prince
                 call    input_step
                 call    step_seq
+                call    check_floor
+                call    do_fall
                 call    draw_prince
                 call    hide_behind
                 call    show_rect
@@ -102,12 +111,26 @@ keyright:       ld      bc, 0xEFFE
 keynone:        xor     a
                 ret
 
+; Cursor up is key 7, row EFFE bit 3.  Out: NZ if it is down.
+
+read_up:        ld      bc, 0xEFFE
+                in      a, (c)
+                cpl
+                and     8
+                ret
+
 ; Standing and running listen to the keys; turning, stopping and turning on
 ; the run play out to their end, as they do in the original.
 
 ; A run that has run out of floor or hit a wall skids to a halt.
 
-input_step:     ld      a, (blocked)
+input_step:     ld      a, (falling)
+                or      a
+                ret     nz              ; no steering in the air
+                ld      a, (seqid)
+                cp      ID_CROUCH
+                jr      z, fromcrouch
+                ld      a, (blocked)
                 or      a
                 jr      z, inputkeys
                 ld      a, (seqid)
@@ -116,6 +139,11 @@ input_step:     ld      a, (blocked)
                 cp      ID_STARTRUN
                 jr      nz, inputkeys
 tostopnow:      ld      hl, seqs + SQ_RUNSTOP
+                jr      setseq
+
+fromcrouch:     call    read_up
+                ret     z
+                ld      hl, seqs + SQ_STANDUP
                 jr      setseq
 
 inputkeys:      call    read_keys
@@ -208,7 +236,24 @@ seqnogoto:      cp      SEQ_FACE
                 ld      (facing), a
                 pop     hl
                 jr      seqloop
-seqnoface:      cp      SEQ_CHX
+seqnoface:      cp      SEQ_CHY
+                jr      nz, seqnochy
+                ld      a, (hl)
+                inc     hl
+                push    hl
+                ld      hl, chary
+                add     a, (hl)
+                ld      (hl), a
+                pop     hl
+                jr      seqloop
+seqnochy:       cp      SEQ_SETFALL
+                jr      nz, seqnosetf
+                inc     hl              ; the X velocity, which we do not use
+                ld      a, (hl)
+                inc     hl
+                ld      (yvel), a
+                jr      seqloop
+seqnosetf:      cp      SEQ_CHX
                 jr      nz, seqnoid
                 ld      a, (hl)
                 inc     hl
@@ -311,18 +356,10 @@ check_spot:     ld      (spotx), a
                 call    tile_flags
                 bit     1, a
                 jr      nz, spotwall
-                bit     0, a
-                jr      z, spotno
-                ld      a, (facing)
-                or      a
-                ld      a, (spotx)
-                jr      nz, spotfwd
-                sub     BLOCK_PX / 2
-                jr      spotfoot
-spotfwd:        add     a, BLOCK_PX / 2
-spotfoot:       call    tile_flags
-                or      a
-                ret
+                ld      a, 1            ; open ground: he may go there, and if
+                or      a               ; the floor has run out he falls.
+                ret                     ; `ld a` leaves the flags alone, so
+                                        ; say so for the caller's jr nz
 
 spotwall:       ld      a, (facing)     ; leaning into the wall's tile is
                 or      a               ; fine while his weight is behind
@@ -350,11 +387,114 @@ tile_flags:     ld      l, a
                 jr      nc, tilenone    ; off the edge of the room
                 ld      l, a
                 ld      h, 0
-                ld      de, tiles
+                ld      de, (tilerow)   ; the row he stands on
                 add     hl, de
                 ld      a, (hl)
                 ret
 tilenone:       xor     a
+                ret
+
+; Ten tiles to a block row.  Worked out only when the row changes, so that
+; tile_flags stays short and leaves C alone for movetry.
+
+set_row:        ld      a, (blocky)
+                ld      l, a
+                ld      h, 0
+                add     hl, hl          ; two
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl          ; eight
+                add     hl, de          ; ten
+                ld      de, tiles
+                add     hl, de
+                ld      (tilerow), hl
+                ret
+
+; Out: A = the flags of the tile he is standing on.
+
+under_flags:    ld      a, (charx)
+                jr      tile_flags
+
+; Out: A = FloorY for the row below his feet -- the plane he lands on.
+
+floor_plane:    ld      a, (blocky)
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, floory
+                add     hl, de
+                ld      a, (hl)
+                ret
+
+; ---------------------------------------------------------------- falling
+;
+; CHECKFLOOR in CTRL.S: with nothing underfoot he goes over the edge.  POP
+; counts CharBlockY as the floor just below his feet while he is in the air,
+; so it steps down here and again each time he passes a floor plane.
+
+check_floor:    ld      a, (falling)
+                or      a
+                ret     nz
+                call    under_flags
+                and     TILE_FLOOR
+                ret     nz
+                ld      hl, blocky
+                inc     (hl)
+                call    set_row
+                ld      a, 1
+                ld      (falling), a
+                xor     a
+                ld      (yvel), a
+                ld      hl, seqs + SQ_STEPFALL
+                ld      (seqptr), hl
+                xor     a
+                ld      (pendchx), a
+                ret
+
+; GRAVITY and ADDFALL, then the floor plane test of `falling`.  stepfall
+; carries its own chy for the first four frames and gravity only takes over
+; at the setfall, which is why the velocity is left alone until then.
+
+do_fall:        ld      a, (falling)
+                or      a
+                ret     z
+                ld      a, (seqid)
+                cp      ID_FREEFALL
+                jr      nz, fallplane
+                ld      a, (yvel)
+                add     a, ACCEL_G
+                cp      TERM_VEL + 1
+                jr      c, fallvel
+                ld      a, TERM_VEL
+fallvel:        ld      (yvel), a
+                ld      b, a
+                ld      a, (chary)
+                add     a, b
+                ld      (chary), a
+fallplane:      call    floor_plane
+                ld      b, a
+                ld      a, (chary)
+                cp      b
+                ret     c               ; not down to the plane yet
+                call    under_flags
+                and     TILE_FLOOR
+                jr      nz, hit_floor
+                ld      hl, blocky      ; straight through, keep going
+                ld      a, (hl)
+                cp      3
+                ret     nc              ; nothing below the bottom row
+                inc     (hl)
+                jp      set_row
+
+hit_floor:      call    floor_plane
+                ld      (chary), a
+                xor     a
+                ld      (yvel), a
+                ld      (falling), a
+                ld      (pendchx), a
+                ld      hl, seqs + SQ_SOFTLAND
+                ld      (seqptr), hl
                 ret
 
 ; ---------------------------------------------------------------- frames
@@ -846,6 +986,10 @@ seqid:          db      0
 seqptr:         dw      0
 pendchx:        db      0
 blocked:        db      0
+blocky:         db      0
+tilerow:        dw      0
+yvel:           db      0
+falling:        db      0
 spotx:          db      0
 wanted:         db      0
 
@@ -885,6 +1029,7 @@ stack:
 
 seqs:           incbin  "seqs.bin"
 tiles:          incbin  "tiles.bin"
+floory:         incbin  "floory.bin"
 blockof:        incbin  "blockof.bin"
 foremask:       incbin  "foremask.bin"
 fill:           incbin  "fill.bin"
@@ -897,7 +1042,8 @@ sprites:        incbin  "sprites.bin"
 dataend:
 
 ; The working copy is never loaded, only written, so it lives past the end of
-; the tape image rather than taking 7K of loading time.
+; the tape image rather than taking 6K of loading time.  It mirrors the bitmap
+; and not the attributes, which nothing here touches.
 work            equ     dataend
 
                 end     start

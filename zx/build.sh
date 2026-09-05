@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")"
 python tools/mkassets.py build
-cp build/assets.inc build/seqfix.inc build/room.bin build/sprites.bin build/seqs.bin build/tiles.bin build/blockof.bin build/foremask.bin build/shifthi.bin build/shiftlo.bin build/fill.bin build/revtab.bin src/
+cp build/assets.inc build/seqfix.inc build/room.bin build/sprites.bin build/seqs.bin build/tiles.bin build/floory.bin build/blockof.bin build/foremask.bin build/shifthi.bin build/shiftlo.bin build/fill.bin build/revtab.bin src/
 cd src
 ../tools/pasmo.exe --tapbas pop.asm ../build/pop_game.tap ../build/pop.sym
 cd ..
