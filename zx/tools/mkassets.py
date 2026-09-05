@@ -49,8 +49,8 @@ KID_SEQS = (list(range(1, 51))
 
 CHAR_ANCHOR = 21
 
-# A block is drawn at canvas x = 28*b, so on screen it runs 28*b - CAMERA to
-# 28*b + 27 - CAMERA -- but the block a character is ON is not simply the one
+# A block is drawn at room x = 28*b, so it runs 28*b to 28*b + 27 -- but the
+# block a character is ON is not simply the one
 # his coordinate lands in.  CharX is BlockEdge[b+5] + angle + 7, which is the
 # far edge of his own block, and GETBLOCKXP in CTRLSUBS.S takes `angle` back
 # off before the lookup, putting him at the middle of the block instead.  That
@@ -60,7 +60,14 @@ BLOCK_PX = 28
 TILE_FLOOR, TILE_SOLID = 1, 2
 
 ROOM = ('LEVEL1', 1)
-CAMERA = 12
+
+# The Apple's room is 280 pixels wide and the Spectrum's screen is 256, so
+# the room is carried whole -- 35 bytes to a scanline, laid out plainly -- and
+# the view slides over it a byte at a time.  Four positions cover the 24
+# pixel difference, so every part of the room can be brought on screen.
+ROOM_BYTES = 35
+ROOM_PX = ROOM_BYTES * 8
+CAM_MAX = ROOM_BYTES - 32
 
 # 128K layout.  The fixed half of the map holds the code, the tables the inner
 # loops index, and the off screen copy of the screen; the 16K window at 0xC000
@@ -160,6 +167,31 @@ def build_sequences():
     return t, bytes(code), bytes(entry)
 
 
+def pack_row(px):
+    """One scanline of 0/1 pixels into ROOM_BYTES bytes, bit 7 leftmost."""
+    out = bytearray(ROOM_BYTES)
+    for x in range(min(len(px), ROOM_PX)):
+        if px[x]:
+            out[x >> 3] |= 0x80 >> (x & 7)
+    return bytes(out)
+
+
+def pack(rows):
+    """The room, plainly: 192 scanlines of ROOM_BYTES, top row first."""
+    return b''.join(pack_row(r) for r in rows)
+
+
+def band_mask(px):
+    """(index, mask): the rows with anything in them, and only those rows."""
+    rows = [y for y in range(192) if any(px[y])]
+    index = bytearray([0xff]) * 192
+    mask = bytearray()
+    for i, y in enumerate(rows):
+        index[y] = i
+        mask += pack_row(px[y])
+    return bytes(index), bytes(mask)
+
+
 def main(argv):
     out = argv[1] if len(argv) > 1 else os.path.join(
         os.path.dirname(os.path.abspath(__file__)), '..', 'build')
@@ -179,7 +211,7 @@ def main(argv):
     # floor tiles -- is not wanted after all.  It stays in renderroom.py, but
     # the floor goes out as the original draws it.
     # px = renderroom.seam_pass(px, level, ROOM[1])
-    screen = zxscreen.build(zxscreen.window(px, CAMERA), 0x05)
+    screen = pack(px)
 
     types, _ = level.screen(ROOM[1])
     ids = [b & poplevel.IDMASK for b in types]
@@ -217,7 +249,7 @@ def main(argv):
     # It is a bitmask at run time, a bit a pixel, but it does not travel as
     # one: six kilobytes of tape and of staging room for a handful of
     # rectangles.  The rectangles travel instead and the program paints them.
-    rects = bytearray()
+    fore = [bytearray(ROOM_PX) for _ in range(192)]
     for row in range(3):
         ay = renderroom.BLOCKBOT[row + 1] - 3
         for col in range(10):
@@ -228,37 +260,17 @@ def main(argv):
             img = (room.tab2 if n & 0x80 else room.tab1).get(n & 0x7f)
             if img is None:
                 continue
-            x0 = (col * 4 + renderroom.bg.frontx[t]) * 7 - CAMERA
+            x0 = (col * 4 + renderroom.bg.frontx[t]) * 7
             ybot = ay + renderroom.bg.fronty[t]
-            ytop = ybot - img.height + 1
-            x1, y1 = x0 + img.width * 7 - 1, ybot
-            x0, y0 = max(0, x0), max(0, ytop)
-            x1, y1 = min(255, x1), min(191, ybot)
-            if x1 < x0 or y1 < y0:
-                continue
-            rects += bytes([x0, x1 - x0 + 1, y0, y1 - y0 + 1])
-    rects = bytes([len(rects) // 4]) + rects
-    open(os.path.join(binout, 'frontrect.bin'), 'wb').write(rects)
+            for y in range(max(0, ybot - img.height + 1), min(192, ybot + 1)):
+                for x in range(max(0, x0), min(ROOM_PX, x0 + img.width * 7)):
+                    fore[y][x] = 1
 
-    # Putting the foreground back is the most expensive thing in a frame, and
-    # most of it is spent walking over bytes the mask has nothing in.  This
-    # says, per scanline, the first and last byte column it covers, so the
-    # walk can be cut to the part that matters -- or skipped.
-    span = bytearray(192 * 2)
-    for row in range(3):
-        pass
-    cover = [[] for _ in range(192)]
-    for i in range(rects[0]):
-        x0, xw, y0, yh = rects[1 + i * 4:5 + i * 4]
-        for y in range(y0, y0 + yh):
-            cover[y].append((x0 >> 3, (x0 + xw - 1) >> 3))
-    for y in range(192):
-        if cover[y]:
-            span[y * 2] = min(a for a, _ in cover[y])
-            span[y * 2 + 1] = max(b for _, b in cover[y])
-        else:
-            span[y * 2], span[y * 2 + 1] = 31, 0     # first > last: nothing
-    open(os.path.join(binout, 'forespan.bin'), 'wb').write(bytes(span))
+    # Putting the foreground back was the most expensive thing in a frame,
+    # and most of it went on rows the mask has nothing in.  So the mask
+    # carries only the rows a front piece reaches, and an index says which
+    # row of it a scanline is, or -1 for the rest of the screen.
+    foreband, foremask = band_mask(fore)
 
     # The screen's thirds and interleave cost a dozen instructions a row to
     # work out, and four passes a frame do it.  192 words is cheaper.
@@ -270,28 +282,41 @@ def main(argv):
     # The art bank: the room first, then the foreground mask behind it, and a
     # signature the program checks -- a bank that did not load leaves a black
     # screen and nothing to go on, so it is worth two bytes to say so.
-    art = screen
-    open(os.path.join(binout, 'bank_art.bin'), 'wb').write(art + SIG_ART)
+    floorpx, halfpx = renderroom.floor_covers(level, ROOM[1])
+    band = []
+    for r in range(3):
+        dy = renderroom.BLOCKBOT[r + 1]
+        band += [y for y in range(dy - 14, dy + 1) if 0 <= y < 192]
+    floorband = bytearray([0xff]) * 192
+    fmask, hmask = bytearray(), bytearray()
+    for i, y in enumerate(band):
+        floorband[y] = i
+        fmask += pack_row(floorpx[y])
+        hmask += pack_row(halfpx[y])
 
-    blockof = bytearray(256)            # screen pixel -> block column
+    art = screen + foremask + bytes(fmask) + bytes(hmask)
+    open(os.path.join(binout, 'bank_art.bin'), 'wb').write(art + SIG_ART)
+    open(os.path.join(binout, 'foreband.bin'), 'wb').write(bytes(foreband))
+    open(os.path.join(binout, 'floorband.bin'), 'wb').write(bytes(floorband))
+
+    blockof = bytearray(ROOM_PX + 8)    # room pixel -> block column
     # GETBLOCKXP takes `angle` off the base coordinate before the lookup.
     # That is the whole of it: a character stands on the TOP surface of his
     # tile, which the perspective draws half a tile right of its front face,
     # and `angle` is what carries him there.  The figure looking right of the
     # tile it belongs to is the drawing being right, not wrong.
     angle_px = 2 * popframe.ANGLE       # logic units are half pixels
-    shift = CAMERA - angle_px
-    for x in range(256):
-        b = (x + shift) // BLOCK_PX
+    for x in range(len(blockof)):
+        b = (x - angle_px) // BLOCK_PX
         blockof[x] = b if 0 <= b <= 9 else 0xFF
     open(os.path.join(binout, 'blockof.bin'), 'wb').write(bytes(blockof))
 
     # GETDIST in CTRLSUBS.S works in OFFSET, the position within the block in
     # POP's 140-wide space -- 0 to 13, two screen pixels to the unit.  Every
     # judgement about edges is made in those units, so the table comes along.
-    distof = bytearray(256)
-    for x in range(256):
-        distof[x] = ((x + shift) % BLOCK_PX) // 2
+    distof = bytearray(ROOM_PX + 8)
+    for x in range(len(distof)):
+        distof[x] = ((x - angle_px) % BLOCK_PX) // 2
     open(os.path.join(binout, 'distof.bin'), 'wb').write(bytes(distof))
 
     seq, code, entry = build_sequences()
@@ -362,7 +387,14 @@ def main(argv):
         f.write('; generated by mkassets.py -- do not edit\n')
         f.write('sprblob     equ %d' % PAGE_WINDOW + chr(10))
         f.write('room        equ %d' % PAGE_WINDOW + chr(10))
-        f.write('foremask    equ %d' % (PAGE_WINDOW + len(screen) + 2) + chr(10))
+        f.write('foremask    equ %d' % (PAGE_WINDOW + len(screen)) + chr(10))
+        f.write('floormask   equ %d'
+                % (PAGE_WINDOW + len(screen) + len(foremask)) + chr(10))
+        f.write('halfmask    equ %d'
+                % (PAGE_WINDOW + len(screen) + len(foremask) + len(fmask))
+                + chr(10))
+        f.write('ROOM_BYTES  equ %d' % ROOM_BYTES + chr(10))
+        f.write('CAM_MAX     equ %d' % CAM_MAX + chr(10))
         f.write('SIG_ART_AT  equ %d' % (PAGE_WINDOW + len(art)) + chr(10))
         f.write('SIG_ART     equ %d' % int.from_bytes(SIG_ART, 'little') + chr(10))
         f.write('SIG_SPR     equ %d' % int.from_bytes(SIG_SPR, 'little') + chr(10))
@@ -382,11 +414,11 @@ def main(argv):
             if n in KID_SEQS:
                 f.write('SQ_%-12s equ %d' % (label.upper(), n) + chr(10))
         f.write('START_X     equ %d\n'
-                % (popframe.screen_x(popframe.char_x(START_COL)) - CAMERA))
+                % popframe.screen_x(popframe.char_x(START_COL)))
         f.write('START_Y     equ %d\n' % popframe.char_y(START_ROW))
         f.write('START_ROW   equ %d\n' % START_ROW)
 
-    print('bank_art    %d байт (комната)' % len(art))
+    print('bank_art    %d байт' % len(art))
     for i, b in enumerate(blobs):
         print('bank_spr%-3d %d байт  (свободно в банке %d)'
               % (i + 1, len(b), BANK_SIZE - len(b) - (2 if not i else 0)))
@@ -401,41 +433,16 @@ def main(argv):
     blocktop = bytes(v & 0xff for v in popframe.BLOCK_TOP)
     open(os.path.join(binout, 'blocktop.bin'), 'wb').write(blocktop)
 
-    # DRAWFLOOR and DRAWHALF: what the floorpieces put back over a character
-    # who is falling, hanging or climbing.  Only the fifteen rows a floor
-    # band occupies are carried -- that is where the perspective wedge is,
-    # and the tall pieces above it (the posts) are already in the foreground
-    # mask.  One index over the rows, then the two masks a row apiece.
-    floorpx, halfpx = renderroom.floor_covers(level, ROOM[1])
-    floorpx = zxscreen.window(floorpx, CAMERA)
-    halfpx = zxscreen.window(halfpx, CAMERA)
-    band = []
-    for r in range(3):
-        dy = renderroom.BLOCKBOT[r + 1]
-        band += [y for y in range(dy - 14, dy + 1) if 0 <= y < 192]
-    index = bytearray([0xff]) * 192
-    fmask, hmask = bytearray(), bytearray()
-    for i, y in enumerate(band):
-        index[y] = i
-        for row, out in ((floorpx[y], fmask), (halfpx[y], hmask)):
-            for x in range(32):
-                b = 0
-                for bit in range(8):
-                    if row[x * 8 + bit]:
-                        b |= 0x80 >> bit
-                out.append(b)
-    open(os.path.join(binout, 'floorband.bin'), 'wb').write(bytes(index))
-    open(os.path.join(binout, 'floormask.bin'), 'wb').write(bytes(fmask))
-    open(os.path.join(binout, 'halfmask.bin'), 'wb').write(bytes(hmask))
 
     print('tiles.bin   типы блоков: %s' % ' '.join('%d' % t for t in ids[:10]))
     print('floory.bin  %s' % ' '.join('%d' % f for f in floory))
     print('blocktop.bin %s' % ' '.join('%d' % f for f in blocktop))
-    print('floormask   %d рядов пола, %d байт на маску' % (len(band), len(fmask)))
-    print('frontrect   %d прямоугольников переднего плана, %d байт'
-          % (rects[0], len(rects)))
+    print('foremask    %d rows, %d bytes' % (len(foremask) // ROOM_BYTES,
+                                             len(foremask)))
+    print('floor masks %d rows, %d bytes each' % (len(band), len(fmask)))
+    print('art bank    %d of %d bytes' % (len(art) + 2, BANK_SIZE))
     print('START_X=%d START_Y=%d'
-          % (popframe.screen_x(popframe.char_x(START_COL)) - CAMERA,
+          % (popframe.screen_x(popframe.char_x(START_COL)),
              popframe.char_y(START_ROW)))
     return 0
 

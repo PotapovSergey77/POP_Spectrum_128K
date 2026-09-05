@@ -81,8 +81,8 @@ FLOOR_HEIGHT    equ     15              ; GAMEEQ.S, the thickness of a floor
 ; The room runs from block 0 to block 9, and a character on block b has his
 ; anchor between 28b+2 and 28b+29.  Only walls should stop him inside that --
 ; these are just to keep him on the map.
-X_MIN           equ     2
-X_MAX           equ     253
+X_MIN           equ     14
+X_MAX           equ     255
 
 ; ---------------------------------------------------------------- entry
 
@@ -95,16 +95,16 @@ start:          di
 
                 call    check_banks     ; before anything is written, and it
                                         ; leaves the art bank in
-                call    build_fore
 
-                ld      hl, room        ; the screen and the working copy both
-                ld      de, SCREEN      ; start out as the bare room
-                ld      bc, 6912
+                ld      hl, SCREEN + 6144   ; one colour over the whole room,
+                ld      de, SCREEN + 6145   ; so the attributes need not be
+                ld      bc, 767             ; carried
+                ld      (hl), 0x05
                 ldir
-                ld      hl, room        ; the bitmap only: nothing ever writes
-                ld      de, work        ; attributes through the working copy
-                ld      bc, 6144
-                ldir
+
+                xor     a               ; the view starts at the room's left
+                ld      (cam), a
+                call    repaint
 
 
                 ld      a, START_X
@@ -146,6 +146,7 @@ mainwait:       halt
                 call    check_barr
                 call    check_floor
                 call    do_fall
+                call    camera
                 call    draw_prince
                 call    page_art
                 call    hide_floor
@@ -161,80 +162,89 @@ mainwait:       halt
 ; 0xC000 and is paged in for the part of the frame that wants it.  Bit 4 keeps
 ; the 48K ROM, which is what the interrupt handler at 0x38 is.
 
-; The foreground is a handful of rectangles, not six kilobytes: they travel
-; on the tape and the mask is painted from them, with the art bank in.
+; The room is 280 pixels wide and the screen is 256, so the room is carried
+; whole -- 35 bytes to a scanline, laid out plainly, one byte the camera can
+; slide over -- and the visible window is copied out of it.
+;
+; A = a scanline or a mask's row.  Out: HL = that row's offset.
 
-build_fore:     ld      hl, foremask
-                ld      de, foremask + 1
-                ld      bc, 6143
-                ld      (hl), 0
-                ldir
-
-                ld      hl, frontrect
-                ld      a, (hl)
-                inc     hl
-                or      a
-                ret     z
-                ld      b, a
-bfrect:         push    bc
-                ld      a, (hl)
-                ld      (frx0), a
-                inc     hl
-                ld      a, (hl)
-                ld      (frxw), a
-                inc     hl
-                ld      a, (hl)
-                ld      (fry), a
-                inc     hl
-                ld      a, (hl)
-                inc     hl
-                ld      b, a
-                push    hl
-bfrow:          push    bc
-                ld      e, 0            ; the row's leftmost byte
-                ld      a, (fry)
-                call    scraddr
-                ld      de, foremask - SCREEN
+mul35:          ld      l, a
+                ld      h, 0
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl          ; thirty two
                 add     hl, de
-                ld      (frrow), hl
-                ld      a, (frx0)
-                ld      c, a
-                ld      a, (frxw)
-                ld      b, a
-bfpix:          ld      a, c            ; which byte of the row
-                srl     a
-                srl     a
-                srl     a
-                ld      e, a
-                ld      d, 0
-                ld      hl, (frrow)
                 add     hl, de
-                ld      a, c            ; and which bit of it
-                and     7
-                inc     a
-                ld      e, 0x80
-bfbit:          dec     a
-                jr      z, bfset
-                srl     e
-                jr      bfbit
-bfset:          ld      a, (hl)
-                or      e
-                ld      (hl), a
-                inc     c
-                djnz    bfpix
-                ld      hl, fry
-                inc     (hl)
-                pop     bc
-                djnz    bfrow
-                pop     hl
-                pop     bc
-                djnz    bfrect
+                add     hl, de          ; and three more
                 ret
 
-frx0:           db      0
-frxw:           db      0
-fry:            db      0
-frrow:          dw      0
+; The whole visible window, out of the room and into the working copy.  The
+; view has moved, so the screen wants all of it: show_rect is told to send
+; the lot rather than the sprite's rectangle.
+
+repaint:        ld      a, 1
+                ld      (fullshow), a
+                xor     a
+                ld      (rowy), a
+                ld      b, 192
+rprow:          push    bc
+                ld      a, (rowy)
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (cam)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                push    hl
+                ld      e, 0
+                ld      a, (rowy)
+                call    scraddr
+                ld      de, work - SCREEN
+                add     hl, de
+                ex      de, hl
+                pop     hl
+                ld      bc, 32
+                ldir
+                ld      hl, rowy
+                inc     (hl)
+                pop     bc
+                djnz    rprow
+                ret
+
+; Nothing in POP moves a camera: the Apple's room is all on screen at once.
+; Ours is 24 pixels short of it, so the view slides a byte at a time and only
+; when he leaves the middle of it.  The dead zone is wide, or a single pace
+; would set it stepping back and forth.
+
+camera:         ld      a, (cam)
+                ld      b, a
+                add     a, a
+                add     a, a
+                add     a, a
+                ld      c, a            ; the view's left edge
+                ld      a, (charx)
+                sub     c               ; where he stands on screen
+                cp      160
+                jr      c, camnear
+                ld      a, b
+                cp      CAM_MAX
+                ret     nc
+                inc     b
+                jr      camset
+camnear:        cp      96
+                ret     nc
+                ld      a, b
+                or      a
+                ret     z
+                dec     b
+camset:         ld      a, b
+                ld      (cam), a
+                jp      repaint
 
 ; Every bank is signed at its end, and a red border says one did not arrive:
 ; a black screen leaves nothing to go on.
@@ -1589,6 +1599,10 @@ dpxoff:         ld      a, (hl)
                 rra
                 rra
                 and     31
+                ld      b, a            ; the room's byte column; the camera
+                ld      a, (cam)        ; says where that is on screen
+                neg
+                add     a, b
                 ld      (newcol), a
 
 ; SETUPCHAR: the picture sits at CharY + Fdy, not at CharY.  Every frame of a
@@ -1840,171 +1854,106 @@ qfair:          cp      2               ; hanging, in the air, free fall,
 qfnone:         ld      hl, 0
                 ret
 
-; The mask is carried for the fifteen rows of each floor band only; floorband
-; says which row of it a scanline is, or -1 for the rest of the screen.
-
 hide_floor:     call    quickfloor
                 ld      a, h
                 or      l
                 ret     z
-                ld      (fmaskp), hl
+                ld      (coverm), hl
+                ld      hl, floorband
+                ld      (coverb), hl
+                jp      cover_rows
+
+; Put the foreground back over the prince.  The mask carries only the rows a
+; front piece reaches; foreband says which row of it a scanline is, or -1.
+
+hide_behind:    ld      hl, foremask
+                ld      (coverm), hl
+                ld      hl, foreband
+                ld      (coverb), hl
+
+; Walk the sprite's rows and lay the mask's own pixels back over him.  Three
+; things line up on each row: the mask, the room the mask picks out of, and
+; the working copy he was drawn into.
+
+cover_rows:     ld      a, (newcol)
+                call    mastercol
+                ld      (masterc), a
                 ld      a, (newh)
                 ld      b, a
                 ld      a, (newtop)
                 ld      (rowy), a
-hfrow:          push    bc
+coverrow:       push    bc
                 ld      a, (rowy)
                 cp      192
-                jr      nc, hfskip
+                jr      nc, coverskip
                 ld      l, a
                 ld      h, 0
-                ld      de, floorband
+                ld      de, (coverb)
                 add     hl, de
                 ld      a, (hl)
                 inc     a
-                jr      z, hfskip       ; nothing of the floor on this row
+                jr      z, coverskip    ; the mask has nothing on this row
                 dec     a
-                ld      l, a
-                ld      h, 0
-                add     hl, hl          ; thirty two bytes to the row
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl
-                ld      de, (fmaskp)
+                call    mul35
+                ld      de, (coverm)
                 add     hl, de
-                ld      a, (newcol)
+                ld      a, (masterc)
                 ld      e, a
                 ld      d, 0
                 add     hl, de
-                ld      (fmrow), hl
+                push    hl              ; the mask's row
+
                 ld      a, (rowy)
-                call    scraddr
-                ld      (hfadr), hl
-                ld      a, (neww)
-                ld      (hfcnt), a
-hfcol:          ld      hl, (fmrow)
-                ld      a, (hl)
-                or      a
-                jr      z, hfnext
-                ld      c, a
-                ld      hl, (hfadr)
-                ld      de, room - SCREEN
+                call    mul35
+                ld      de, room
                 add     hl, de
-                ld      a, (hl)
-                and     c               ; the floorpiece's own pixels
-                ld      b, a
-                ld      hl, (hfadr)
-                ld      de, work - SCREEN
+                ld      a, (masterc)
+                ld      e, a
+                ld      d, 0
                 add     hl, de
-                ld      a, c
-                cpl
-                and     (hl)            ; what the prince may keep
-                or      b
-                ld      (hl), a
-hfnext:         ld      hl, hfadr       ; a screen row never crosses a page
-                inc     (hl)
-                ld      hl, (fmrow)     ; the mask's rows can, so this one
-                inc     hl              ; goes the long way round
-                ld      (fmrow), hl
-                ld      hl, hfcnt
-                dec     (hl)
-                jr      nz, hfcol
-hfskip:         ld      hl, rowy
-                inc     (hl)
-                pop     bc
-                djnz    hfrow
-                ret
-
-; Put the foreground back over the prince.  foremask has a bit per pixel,
-; set where a front piece covers, and it sits at the same offsets as the
-; screen, so one lookup gives both the mask and the room byte to restore.
-
-hide_behind:    ld      a, (newh)
-                ld      b, a
-                ld      a, (newtop)
-                ld      (rowy), a
-hiderow:        push    bc
-                ld      a, (rowy)
-                cp      192
-                jp      nc, hideskip
-
-                ld      l, a            ; what the mask covers on this row.
-                ld      h, 0            ; Usually nothing near him, and then
-                add     hl, hl          ; there is nothing to do at all
-                ld      de, forespan
-                add     hl, de
-                ld      d, (hl)         ; D = first covered byte column
-                inc     hl
-                ld      e, (hl)         ; E = last
+                push    hl              ; the room's row
 
                 ld      a, (newcol)
-                ld      b, a            ; B = his first
-                ld      a, (neww)
-                add     a, b
-                dec     a
-                ld      c, a            ; C = his last
-
-                cp      d
-                jp      c, hideskip     ; all of him is left of the cover
-                ld      a, e
-                cp      b
-                jp      c, hideskip     ; or all of him is right of it
-
-                ld      a, d            ; clip to the overlap
-                cp      b
-                jr      nc, hidefrom
-                ld      a, b
-hidefrom:       ld      b, a
-                ld      a, e
-                cp      c
-                jr      c, hideto
-                ld      a, c
-hideto:         sub     b
-                inc     a
-                ld      (hidecnt), a
-
-                ld      a, b
                 ld      e, a
                 ld      a, (rowy)
                 call    scraddr
-                ld      (hideadr), hl
-hidecol:        ld      hl, (hideadr)
-                ld      de, foremask - SCREEN
+                ld      de, work - SCREEN
                 add     hl, de
-                ld      a, (hl)         ; which pixels here are covered
-                or      a
-                jr      z, hidenext
-                ld      (hidebits), a
-                ld      hl, (hideadr)
-                ld      d, h
-                ld      e, l
-                ld      bc, room - SCREEN
-                add     hl, bc          ; HL = room
-                ex      de, hl
-                ld      bc, work - SCREEN
-                add     hl, bc
-                ex      de, hl          ; HL = room, DE = working copy
-                ld      a, (hidebits)
-                ld      c, a
-                ld      a, (hl)
-                and     c               ; the foreground's own pixels
+                ld      (workp), hl     ; the working copy
+                pop     de              ; the room
+                pop     hl              ; the mask
+                ld      a, (neww)
                 ld      b, a
-                ld      a, c
-                cpl
-                ex      de, hl
-                and     (hl)            ; what the prince may keep
-                or      b
-                ld      (hl), a
-hidenext:       ld      hl, hideadr
-                inc     (hl)
-                ld      hl, hidecnt
-                dec     (hl)
-                jr      nz, hidecol
-hideskip:       ld      hl, rowy
+                call    cover_apply
+coverskip:      ld      hl, rowy
                 inc     (hl)
                 pop     bc
-                djnz    hiderow
+                djnz    coverrow
+                ret
+
+; In: HL = mask, DE = room, (workp) = working copy, B = bytes.
+
+cover_apply:    ld      a, (hl)
+                or      a
+                jr      z, covernext
+                ld      c, a
+                push    hl
+                ld      hl, (workp)
+                cpl
+                and     (hl)            ; what the prince may keep
+                ld      (hl), a
+                ld      a, (de)
+                and     c               ; and the piece's own pixels
+                or      (hl)
+                ld      (hl), a
+                pop     hl
+covernext:      inc     hl
+                inc     de
+                push    hl
+                ld      hl, workp       ; a screen row never crosses a page
+                inc     (hl)
+                pop     hl
+                djnz    cover_apply
                 ret
 
 ; ---------------------------------------------------------------- erase
@@ -2018,22 +1967,30 @@ erase_prince:   ld      a, (oldw)
                 ld      b, a
                 ld      a, (oldtop)
                 ld      (rowy), a
+                ld      a, (oldcol)
+                call    mastercol
+                ld      (masterc), a
 eraserow:       push    bc
                 ld      a, (rowy)
                 cp      192
                 jr      nc, eraseskip
+                ld      a, (rowy)
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (masterc)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                push    hl
                 ld      a, (oldcol)
                 ld      e, a
                 ld      a, (rowy)
                 call    scraddr
-                ld      d, h
-                ld      e, l
-                ld      bc, room - SCREEN
-                add     hl, bc          ; HL = room
+                ld      de, work - SCREEN
+                add     hl, de
                 ex      de, hl
-                ld      bc, work - SCREEN
-                add     hl, bc
-                ex      de, hl          ; HL = room, DE = working copy
+                pop     hl              ; HL = room, DE = working copy
                 ld      a, (oldw)
                 ld      c, a
                 ld      b, 0
@@ -2044,12 +2001,30 @@ eraseskip:      ld      hl, rowy
                 djnz    eraserow
                 ret
 
+; A screen byte column, and which byte of the room the camera puts under it.
+
+mastercol:      ld      b, a
+                ld      a, (cam)
+                add     a, b
+                ret
+
 ; ---------------------------------------------------------------- show
 ;
 ; Copy the rectangle covering both the old and the new sprite from the
 ; working copy to the screen.  This is the only moment the screen changes.
 
-show_rect:      ld      a, (oldw)
+show_rect:      ld      a, (fullshow)   ; the view moved: send all of it
+                or      a
+                jr      z, showpart
+                xor     a
+                ld      (fullshow), a
+                ld      hl, work
+                ld      de, SCREEN
+                ld      bc, 6144
+                ldir
+                ret
+
+showpart:       ld      a, (oldw)
                 or      a
                 jr      nz, showunion
                 ld      a, (newcol)     ; nothing old: just the new box
@@ -2230,11 +2205,12 @@ oldtop:         db      0
 oldw:           db      0
 oldh:           db      0
 
-hideadr:        dw      0
-fmaskp:         dw      0
-fmrow:          dw      0
-hfadr:          dw      0
-hfcnt:          db      0
+cam:            db      0               ; the view's left edge, in bytes
+fullshow:       db      0
+masterc:        db      0
+coverm:         dw      0
+coverb:         dw      0
+workp:          dw      0
 hidecnt:        db      0
 hidebits:       db      0
 shcol:          db      0
@@ -2256,17 +2232,14 @@ cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
 blocktop:       incbin  "blocktop.bin"
 floorband:      incbin  "floorband.bin"
-floormask:      incbin  "floormask.bin"
-halfmask:       incbin  "halfmask.bin"
+foreband:       incbin  "foreband.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"
-forespan:       incbin  "forespan.bin"
                 ds      (($ + 255) / 256 * 256) - $
 rowaddr:        incbin  "rowaddr.bin"
 fcheck:         incbin  "fcheck.bin"
 fdx:            incbin  "fdx.bin"
 fdy:            incbin  "fdy.bin"
-frontrect:      incbin  "frontrect.bin"
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
