@@ -70,7 +70,7 @@ BUFW            equ     8               ; widest sprite plus the shift byte
 ; game frame that outruns its slot lands late and the motion stutters.  The
 ; tall frames -- hanging is fifty five scanlines of him -- are the ones that
 ; do, so the slot has to be wide enough for those.
-FRAME_WAIT      equ     4
+FRAME_WAIT      equ     3
 BLOCK_PX        equ     28
 STEP_OFF_FWD    equ     3               ; CTRL.S
 STEP_OFF_BACK   equ     8
@@ -140,13 +140,13 @@ mainwait:       halt
                 djnz    mainwait
 
                 call    page_art
+                call    camera
                 call    erase_prince
                 call    input_step
                 call    step_seq
                 call    check_barr
                 call    check_floor
                 call    do_fall
-                call    camera
                 call    draw_prince
                 call    page_art
                 call    hide_floor
@@ -182,44 +182,97 @@ mul35:          ld      l, a
                 add     hl, de          ; and three more
                 ret
 
-; The whole visible window, out of the room and into the working copy.  The
-; view has moved, so the screen wants all of it: show_rect is told to send
-; the lot rather than the sprite's rectangle.
+; HL = the room's row under screen column zero.
 
-repaint:        ld      a, 1
-                ld      (fullshow), a
-                xor     a
-                ld      (rowy), a
-                ld      b, 192
-rprow:          push    bc
-                ld      a, (rowy)
-                call    mul35
+roomwin:        call    mul35
                 ld      de, room
                 add     hl, de
                 ld      a, (cam)
                 ld      e, a
                 ld      d, 0
                 add     hl, de
-                push    hl
+                ret
+
+; Thirty two bytes, HL to DE.  Unrolled, because ldir spends a fifth of its
+; time counting and this runs over the whole screen when the view moves.
+
+copy32:         ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ret
+
+; The working copy starts out as the room, once.  After that it is only ever
+; right where the sprite has been, which is all anything reads of it.
+
+repaint:        xor     a
+                ld      (rowy), a
+                call    roomwin         ; the room walks forward a row at a
+                ld      (roomp), hl     ; time, so it is not worked out again
+                ld      b, 192
+rprow:          push    bc
                 ld      e, 0
                 ld      a, (rowy)
                 call    scraddr
                 ld      de, work - SCREEN
                 add     hl, de
                 ex      de, hl
-                pop     hl
-                ld      bc, 32
-                ldir
-                ld      hl, rowy
-                inc     (hl)
+                ld      hl, (roomp)
+                call    copy32
+                call    nextrow
                 pop     bc
                 djnz    rprow
+                ld      a, 1
+                ld      (fullshow), a
+                ret
+
+; copy32 leaves HL past the thirty two it took; the room's rows are three
+; longer than that.
+
+nextrow:        ld      de, ROOM_BYTES - 32
+                add     hl, de
+                ld      (roomp), hl
+                ld      hl, rowy
+                inc     (hl)
                 ret
 
 ; Nothing in POP moves a camera: the Apple's room is all on screen at once.
 ; Ours is 24 pixels short of it, so the view slides a byte at a time and only
 ; when he leaves the middle of it.  The dead zone is wide, or a single pace
 ; would set it stepping back and forth.
+;
+; A step does not repaint the working copy: the screen is redrawn from the
+; room itself, and the only part of the working copy anything reads after
+; that is the rectangle he is about to be drawn in -- which the draw puts the
+; room back under first.  Where he was is forgotten; it is in the old view.
 
 camera:         ld      a, (cam)
                 ld      b, a
@@ -244,7 +297,12 @@ camnear:        cp      96
                 dec     b
 camset:         ld      a, b
                 ld      (cam), a
-                jp      repaint
+                ld      a, 1
+                ld      (fullshow), a
+                ld      (camstep), a
+                xor     a               ; where he was is in the old view and
+                ld      (oldw), a       ; the screen is about to be redrawn
+                ret                     ; whole, so there is nothing to rub out
 
 ; Every bank is signed at its end, and a red border says one did not arrive:
 ; a black screen leaves nothing to go on.
@@ -1652,8 +1710,9 @@ dpxoff:         ld      a, (hl)
                 ld      a, (curh)
                 ld      (newh), a
                 call    crop_char
+                call    erase_new
 
-                ld      a, (newh)       ; crop_char has had A
+                ld      a, (newh)       ; the calls above have had A
                 ld      b, a
                 ld      hl, (curdat)
                 ld      a, (newtop)
@@ -1960,16 +2019,35 @@ covernext:      inc     hl
 ;
 ; Put the room back over where the sprite was, in the working copy.
 
-erase_prince:   ld      a, (oldw)
+erase_prince:   ld      hl, oldcol
+                jr      eraseset
+
+; The view has moved, so the room under where he is about to be drawn is a
+; byte out.  The erase has already put back where he was; this does where he
+; is going, and between them the working copy is right everywhere the screen
+; is about to read it.
+
+erase_new:      ld      a, (camstep)
                 or      a
                 ret     z
-                ld      a, (oldh)
-                ld      b, a
-                ld      a, (oldtop)
-                ld      (rowy), a
-                ld      a, (oldcol)
+                xor     a
+                ld      (camstep), a
+                ld      hl, newcol
+
+eraseset:       ld      de, ercol       ; col, top, width, height, in order
+                ld      bc, 4
+                ldir
+
+                ld      a, (erw)
+                or      a
+                ret     z
+                ld      a, (ercol)      ; mastercol has B, so it goes first
                 call    mastercol
                 ld      (masterc), a
+                ld      a, (ertop)
+                ld      (rowy), a
+                ld      a, (erh)
+                ld      b, a
 eraserow:       push    bc
                 ld      a, (rowy)
                 cp      192
@@ -1983,7 +2061,7 @@ eraserow:       push    bc
                 ld      d, 0
                 add     hl, de
                 push    hl
-                ld      a, (oldcol)
+                ld      a, (ercol)
                 ld      e, a
                 ld      a, (rowy)
                 call    scraddr
@@ -1991,7 +2069,7 @@ eraserow:       push    bc
                 add     hl, de
                 ex      de, hl
                 pop     hl              ; HL = room, DE = working copy
-                ld      a, (oldw)
+                ld      a, (erw)
                 ld      c, a
                 ld      b, 0
                 ldir
@@ -2013,81 +2091,44 @@ mastercol:      ld      b, a
 ; Copy the rectangle covering both the old and the new sprite from the
 ; working copy to the screen.  This is the only moment the screen changes.
 
-show_rect:      ld      a, (fullshow)   ; the view moved: send all of it
+; The view moved, so the whole screen is redrawn -- from the room itself,
+; not from the working copy, which is only right where he has been.  His own
+; rectangle follows out of the working copy, as always.
+
+show_rect:      ld      a, (fullshow)
                 or      a
                 jr      z, showpart
                 xor     a
                 ld      (fullshow), a
-                ld      hl, work
-                ld      de, SCREEN
-                ld      bc, 6144
-                ldir
-                ret
+                ld      (rowy), a
+                call    roomwin
+                ld      (roomp), hl
+                ld      b, 192
+fsrow:          push    bc
+                ld      e, 0
+                ld      a, (rowy)
+                call    scraddr
+                ex      de, hl
+                ld      hl, (roomp)
+                call    copy32
+                call    nextrow
+                pop     bc
+                djnz    fsrow
+
+; Two rectangles reach the screen, not the box around them: where he was and
+; where he is.  The box would take in corners neither of them covers, and the
+; working copy is only ever put right under the two.
 
 showpart:       ld      a, (oldw)
                 or      a
-                jr      nz, showunion
-                ld      a, (newcol)     ; nothing old: just the new box
-                ld      (shcol), a
-                ld      a, (neww)
-                ld      (shw), a
-                ld      a, (newtop)
-                ld      (shtop), a
-                ld      a, (newh)
-                ld      (shh), a
-                jr      showgo
+                jr      z, shownew
+                ld      hl, oldcol
+                call    show_one
+shownew:        ld      hl, newcol
 
-showunion:      ld      a, (oldcol)     ; leftmost of the two
-                ld      b, a
-                ld      a, (newcol)
-                cp      b
-                jr      c, showcol
-                ld      a, b
-showcol:        ld      (shcol), a
-
-                ld      a, (oldcol)     ; rightmost end of the two
-                ld      b, a
-                ld      a, (oldw)
-                add     a, b
-                ld      c, a
-                ld      a, (newcol)
-                ld      b, a
-                ld      a, (neww)
-                add     a, b
-                cp      c
-                jr      nc, showend
-                ld      a, c
-showend:        ld      b, a
-                ld      a, (shcol)
-                neg
-                add     a, b
-                ld      (shw), a
-
-                ld      a, (oldtop)     ; topmost of the two
-                ld      b, a
-                ld      a, (newtop)
-                cp      b
-                jr      c, showtop
-                ld      a, b
-showtop:        ld      (shtop), a
-
-                ld      a, (oldtop)     ; lowest bottom of the two
-                ld      b, a
-                ld      a, (oldh)
-                add     a, b
-                ld      c, a
-                ld      a, (newtop)
-                ld      b, a
-                ld      a, (newh)
-                add     a, b
-                cp      c
-                jr      nc, showbot
-                ld      a, c
-showbot:        ld      b, a
-                ld      a, (shtop)
-                neg
-                add     a, b
-                ld      (shh), a
+show_one:       ld      de, shcol       ; col, top, width, height, in order
+                ld      bc, 4
+                ldir
 
 showgo:         ld      a, (shh)
                 or      a
@@ -2211,6 +2252,12 @@ masterc:        db      0
 coverm:         dw      0
 coverb:         dw      0
 workp:          dw      0
+roomp:          dw      0
+camstep:        db      0
+ercol:          db      0
+ertop:          db      0
+erw:            db      0
+erh:            db      0
 hidecnt:        db      0
 hidebits:       db      0
 shcol:          db      0
