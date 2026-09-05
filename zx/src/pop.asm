@@ -962,7 +962,30 @@ movestore:      ld      a, l
 ; the way he came, a pixel at a time, and say he was blocked -- which is what
 ; turns a run into a skid.
 
-check_barr:     xor     a
+; CHECKBARR begins by naming the states a character is collision proof in --
+; turning, in POP's case.  Ours needs more of them: hanging, his coordinate is
+; over the wall he is holding on to, and in the air it may be over anything.
+; Pushing him out of those is how he ends up back where he jumped from.
+
+check_barr:     ld      a, (charact)
+                cp      2               ; hanging: over the wall he holds
+                ret     z
+                cp      6
+                ret     z
+                cp      3               ; in the air: over anything, legally
+                ret     z
+                cp      4
+                ret     z
+                ld      a, (frame)      ; and the frames CHECKPRESS counts as
+                cp      87              ; hanging rather than standing: those
+                jr      c, cbnot87      ; are exactly the ones whose
+                cp      100             ; coordinate sits over the wall they
+                ret     c               ; are holding on to
+cbnot87:        cp      135
+                jr      c, cbgo
+                cp      141
+                ret     c
+cbgo:           xor     a
                 ld      (blocked), a
                 ld      b, 32           ; he cannot be deeper in than this
 cbtry:          ld      a, (charx)      ; his own coordinate, not his foot:
