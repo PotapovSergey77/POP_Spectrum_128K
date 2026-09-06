@@ -201,10 +201,42 @@ class Room:
         if st['preced'] == bg.gate:
             self._drawgateb(st)
             return
+        if st['preced'] == bg.exit_:
+            self._drawexitb(st)
+            return
         if st['preced'] != bg.loose:
             return
         y = self._loose_state(st['spreced'])
         self.draw(bg.looseb, st['xco'], st['Ay'] + bg.looseby[y], ORA)
+
+    def _drawexitb(self, st):
+        """
+        The exit: stairs, and a door that rises four pixels to the step.
+
+        Both stand in the block to the right of the exit tile, the way a
+        gate's bars do.  In the room the prince starts in the same tile is
+        the way he came in, so it gets no stairs.
+        """
+        if st['xco'] >= 36:
+            return                              # it would run off the right
+        xco = st['xco'] + 1                     # all of it stands one byte in
+        if st['scrnum'] != st['startscrn']:
+            self.draw(bg.stairs, xco, st['Ay'] - 12, STA)
+
+        blockthr = st['Dy'] - 67                # topmost usable line
+        if not 0 <= blockthr < 192:
+            return
+        yco = st['Ay'] - 14 - (st['spreced'] >> 2)
+        while True:
+            self.draw(bg.doormask, xco, yco, AND)
+            self.draw(bg.door, xco, yco, ORA)
+            if yco - 4 < blockthr:
+                break
+            yco -= 4
+
+        top = st['Ay'] - 64                     # part of the C section really
+        if 0 <= top < 192:
+            self.draw(bg.toprepair, xco, top, STA)
 
     # -- the gate ---------------------------------------------------------
     #
@@ -313,7 +345,8 @@ class Room:
                 st = {'objid': ids[i], 'state': specs[i],
                       'preced': preced, 'spreced': spreced,
                       'below': below[col], 'sbelow': sbelow[col],
-                      'xco': col * 4, 'Dy': Dy, 'Ay': Ay}
+                      'xco': col * 4, 'Dy': Dy, 'Ay': Ay,
+                      'scrnum': scrnum, 'startscrn': level.kid_start[0]}
                 self.draw_c(st)
                 self.draw_mc(st)
                 self.draw_b(st)

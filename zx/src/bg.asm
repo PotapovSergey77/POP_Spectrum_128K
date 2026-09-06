@@ -592,6 +592,8 @@ dmc1:           rrca                    ; (state / 4) mod 8
 draw_mb:        ld      a, (preced)
                 cp      BG_GATE
                 jp      z, drawgateb
+                cp      BG_EXIT
+                jp      z, drawexitb
                 cp      BG_LOOSE
                 ret     nz
                 call    page_bg
@@ -711,6 +713,80 @@ dgbtop:         ld      a, (yco)        ; and what is left at the top
                 ld      hl, bgtables + T_GATE8B
                 ld      a, c
                 call    bgentry
+                ld      c, BG_STA
+                jp      bglay
+
+; The exit: stairs, and a door that rises four pixels to the step the way a
+; gate does.  Both stand in the block to the right of the exit tile, one byte
+; further in again -- and in the room the prince starts in, that tile is the
+; way he came in, so it gets no stairs.
+
+EXITINC         equ     4
+EMAXVAL         equ     172
+
+drawexitb:      ld      a, (xco)
+                cp      36
+                ret     nc              ; it would run off the right hand end
+                inc     a
+                ld      (xco), a
+                call    dxbody
+                ld      a, (xco)        ; put XCO back for whatever follows
+                dec     a
+                ld      (xco), a
+                ret
+
+dxbody:         ld      a, (roomnum)
+                cp      START_ROOM
+                jr      z, dxdoor
+                call    page_bg
+                ld      a, (ay)
+                sub     12
+                ld      (yco), a
+                ld      a, (bgtables + T_STAIRS)
+                ld      c, BG_STA
+                call    bglay
+
+dxdoor:         ld      a, (dy)
+                sub     67
+                ret     c
+                cp      192
+                ret     nc
+                ld      (blockthr), a
+                ld      a, (spreced)
+                rrca                    ; the door has risen state/4
+                rrca
+                and     0x3f
+                ld      c, a
+                ld      a, (ay)
+                sub     14
+                sub     c
+                ld      (yco), a
+dxloop:         call    page_bg
+                ld      a, (bgtables + T_DOORMASK)
+                ld      c, BG_AND
+                call    bglay
+                call    page_bg
+                ld      a, (bgtables + T_DOOR)
+                ld      c, BG_ORA
+                call    bglay
+                ld      a, (yco)
+                sub     4
+                ld      c, a
+                ld      hl, blockthr
+                cp      (hl)
+                jr      c, dxtop
+                ld      a, c
+                ld      (yco), a
+                jr      dxloop
+
+dxtop:          ld      a, (ay)         ; part of the C section, really
+                sub     64
+                ret     c
+                cp      192
+                ret     nc
+                ld      (yco), a
+                call    page_bg
+                ld      a, (bgtables + T_TOPREPAIR)
                 ld      c, BG_STA
                 jp      bglay
 
@@ -2563,6 +2639,8 @@ animobj:        call    trobat
                 jr      z, aoplate
                 cp      BG_LOOSE
                 jr      z, aofloor
+                cp      BG_EXIT
+                jr      z, aoexit
                 cp      BG_SPACE
                 jr      z, aodone       ; the floor that was here has gone
                 jp      stopobj         ; none of these: off the list
@@ -2571,12 +2649,16 @@ aogate:         call    animgate
                 jr      aodone
 aoplate:        call    animplate
                 jr      aodone
+aoexit:         call    animexit
+                jr      aodone
 aofloor:        call    animfloor
 
 aodone:         call    trobsave
                 ld      a, (aoid)
                 cp      BG_GATE
                 jp      z, redgate
+                cp      BG_EXIT
+                jp      z, redright
                 jp      redplate
 
 ; A gate rises four pixels a frame, waits at the top while GATETIMER counts
@@ -2643,6 +2725,22 @@ agf1:           ld      l, a
                 ld      (trobst), a
                 jp      stopobj
 
+; The exit door only ever opens, and stops when it is all the way up.
+
+animexit:       ld      a, (trdirec)
+                and     0x80
+                ret     nz
+                ld      a, (trobst)
+                add     a, EXITINC
+                ld      (trobst), a
+                cp      EMAXVAL
+                ret     c
+                ld      a, 1            ; open for good: the way out of here
+                ld      (exitopen), a
+                jp      stopobj
+
+exitopen:       db      0
+
 ; A plate stays down while its count runs out, and the count is in LINKMAP.
 
 animplate:      ld      a, (trdirec)
@@ -2695,6 +2793,19 @@ redplate:       call    onscreen
                 ret     nc
                 inc     a
                 ld      (blockcol), a
+                jp      redblock
+
+; The exit's stairs and door are all in the block to its right.
+
+redright:       call    onscreen
+                ret     nz
+                call    trrowcol
+                ld      a, (blockcol)
+                cp      9
+                ret     nc
+                inc     a
+                ld      (blockcol), a
+                call    page_art
                 jp      redblock
 
 redgate:        call    onscreen

@@ -513,6 +513,9 @@ def main(argv):
                 % popframe.screen_x(popframe.char_x(START_COL)))
         f.write('START_Y     equ %d\n' % popframe.char_y(START_ROW))
         f.write('START_ROW   equ %d\n' % START_ROW)
+        # The room he starts in is the way into the level, so the
+        # same tile there is an entrance and gets no stairs.
+        f.write('START_ROOM  equ %d\n' % level.kid_start[0])
 
     print('bank_art    %d байт' % len(art))
     for i, b in enumerate(blobs):

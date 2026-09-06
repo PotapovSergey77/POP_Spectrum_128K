@@ -28,7 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LEVEL = os.path.join(HERE, '..', '..', '01 POP Source', 'Levels', 'LEVEL1')
 SENTINEL = 0x0038
 GMAXVAL = 188
-PRESSPLATE, UPRESSPLATE, GATE = 6, 15, 4
+PRESSPLATE, UPRESSPLATE, GATE, EXIT = 6, 15, 4, 16
+EMAXVAL = 172
 
 
 def call(cpu, addr):
@@ -72,14 +73,19 @@ def chain(level, index):
 
 
 def gates(level):
+    """Everything a plate can drive: gates, and the level's exit."""
     for n in range(1, 25):
         types, _ = level.screen(n)
         for i, b in enumerate(types):
-            if b & poplevel.IDMASK == GATE:
+            if b & poplevel.IDMASK in (GATE, EXIT):
                 yield n, i
 
 
-HEIGHTS = (0, 20, 60, 100, 140, 180, GMAXVAL, 238, 255)
+def is_exit(level, scrn, block):
+    return level.screen(scrn)[0][block] & poplevel.IDMASK == EXIT
+
+
+HEIGHTS = (0, 20, 60, 100, 140, EMAXVAL, 180, GMAXVAL, 238, 255)
 
 
 def drawn(tap, sym):
@@ -165,12 +171,19 @@ def main(argv):
                 print('   %d/%d is on the chain at %d but never moved'
                       % (g[0], g[1], before[g]))
         for g in moved:
+            end = state(cpu, sym, *g)
+            if is_exit(level, *g):
+                # An exit only ever opens, and then stays open.
+                if end < EMAXVAL:
+                    bad += 1
+                    print('   exit %d/%d stopped at %d, not %d'
+                          % (g[0], g[1], end, EMAXVAL))
+                continue
             top = max(s for s in seen[g] if s <= GMAXVAL)
             if kind == UPRESSPLATE and top < GMAXVAL:
                 bad += 1
                 print('   %d/%d never reached the top (%d of %d)'
                       % (g[0], g[1], top, GMAXVAL))
-            end = state(cpu, sym, *g)
             if end:
                 bad += 1
                 print('   %d/%d ended at %d, not shut' % (g[0], g[1], end))
