@@ -2070,7 +2070,9 @@ char_edges:     call    page_canvas
                 jr      z, ce1
                 inc     hl
 ce1:            ld      a, (hl)         ; the anchor offset, signed
-                call    page_art
+                ld      b, a            ; page_art leaves the bank number in
+                call    page_art        ; A, which is where the 22 came from
+                ld      a, b
                 ld      e, a
                 ld      d, 0
                 or      a
@@ -2079,10 +2081,11 @@ ce1:            ld      a, (hl)         ; the anchor offset, signed
 ce2:            ld      hl, (charx)
                 add     hl, de
                 ld      (edgel), hl
-                ld      a, c
+                ld      a, c            ; seven pixels to an Apple byte, not
+                add     a, a            ; eight: the picture is narrower than
+                add     a, a            ; the buffer it is stored in
                 add     a, a
-                add     a, a
-                add     a, a            ; eight pixels to a byte
+                sub     c
                 ld      e, a
                 ld      d, 0
                 add     hl, de
