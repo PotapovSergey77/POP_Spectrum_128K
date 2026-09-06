@@ -171,6 +171,7 @@ mainwait:       halt
                 call    page_art
                 call    nextroom        ; before anything reads his row again
                 call    checkpress
+                call    shakeloose
                 call    animtrans
                 call    draw_prince
                 call    page_art
@@ -988,6 +989,8 @@ SEQ_CHY         equ     0xFA
 SEQ_ACT         equ     0xF9
 SEQ_SETFALL     equ     0xF8
 SEQ_IFWTLESS    equ     0xF7
+SEQ_JARU        equ     0xF5
+SEQ_JARD        equ     0xF4
 SEQ_EFFECT      equ     0xF3
 SEQ_TAP         equ     0xF2
 SEQ_FIRSTOP     equ     0xF1
@@ -1022,20 +1025,24 @@ seqloop:        ld      a, (hl)
                 cp      SEQ_DOWN
                 jr      z, sqrowdn
                 cp      SEQ_CHX
-                jr      z, sqchx
+                jp      z, sqchx
                 cp      SEQ_CHY
-                jr      z, sqchy
+                jp      z, sqchy
                 cp      SEQ_ACT
-                jr      z, sqact
+                jp      z, sqact
                 cp      SEQ_SETFALL
-                jr      z, sqsetfall
+                jp      z, sqsetfall
                 cp      SEQ_IFWTLESS
-                jr      z, sqskip2
+                jp      z, sqskip2
+                cp      SEQ_JARU
+                jp      z, sqjaru
+                cp      SEQ_JARD
+                jp      z, sqjard
                 cp      SEQ_EFFECT
-                jr      z, sqskip1
+                jp      z, sqskip1
                 cp      SEQ_TAP
-                jr      z, sqskip1
-                jr      seqloop         ; die, jaru, jard, nextlevel: no data
+                jp      z, sqskip1
+                jp      seqloop         ; die and nextlevel: no data
 
 seqframe:       ld      (frame), a
                 ld      (seqptr), hl
@@ -1046,35 +1053,45 @@ sqgoto:         ld      e, (hl)
                 ld      d, (hl)
                 ld      hl, seqs
                 add     hl, de
-                jr      seqloop
+                jp      seqloop
 
 sqface:         push    hl
                 ld      a, (facing)
                 xor     1
                 ld      (facing), a
                 pop     hl
-                jr      seqloop
+                jp      seqloop
+
+; A jump or a hard landing jars the floorboards -- jaru those in the row
+; above him, jard those in his own.  TOPCTRL.S acts on it once a frame.
+
+sqjaru:         ld      a, 1
+                ld      (jarabove), a
+                jp      seqloop
+sqjard:         ld      a, 0xff
+                ld      (jarabove), a
+                jp      seqloop
 
 sqrowup:        push    hl
                 ld      hl, blocky
                 dec     (hl)
                 call    set_row
                 pop     hl
-                jr      seqloop
+                jp      seqloop
 
 sqrowdn:        push    hl
                 ld      hl, blocky
                 inc     (hl)
                 call    set_row
                 pop     hl
-                jr      seqloop
+                jp      seqloop
 
 sqchx:          ld      a, (hl)
                 inc     hl
                 push    hl
                 call    move_by
                 pop     hl
-                jr      seqloop
+                jp      seqloop
 
 sqchy:          ld      a, (hl)
                 inc     hl
@@ -1083,7 +1100,7 @@ sqchy:          ld      a, (hl)
                 add     a, (hl)
                 ld      (hl), a
                 pop     hl
-                jr      seqloop
+                jp      seqloop
 
 sqact:          ld      a, (hl)
                 inc     hl
@@ -2860,6 +2877,7 @@ scraddr:        push    bc
 charx:          dw      0
 chary:          db      0
 facing:         db      0               ; 0 left, 1 right
+jarabove:       db      0               ; 1 the row above, -1 his own
 frame:          db      0
 seqptr:         dw      0
 jstkx:          db      0

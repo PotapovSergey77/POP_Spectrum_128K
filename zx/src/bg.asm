@@ -538,16 +538,18 @@ dago:           or      a
 
 ; getloosey: at rest a loose floor draws exactly like a solid one.
 
-loose_y:        ld      a, (state)
-                bit     7, a
-                jr      nz, ly1
-                xor     a
+loose_y:        ld      a, (state)      ; getloosey: a floor on its way down
+                bit     7, a            ; counts 1..Ffalling and the state is
+                jr      nz, ly1         ; the frame; one that is only jarred
+                cp      BG_FFALLING + 1 ; has bit 7 and counts in the rest
+                ret     c
+                ld      a, BG_FFALLING
                 ret
 ly1:            and     0x7f
                 cp      BG_FFALLING + 1
                 ret     c
-                ld      a, BG_FFALLING
-                ret
+                ld      a, 1            ; past the last frame: back to the
+                ret                     ; first, the way POP does it
 
 ; drawmb and drawmd, of which only the loose floor is here so far.  Without
 ; its B section the floor to its right loses its left half.
@@ -2535,21 +2537,38 @@ trdsave:        ld      l, c
 ; CHECKPRESS in CTRL.S: on the ground with his foot on the floor, whatever is
 ; under it is read, and a plate is pushed or a loose floor broken.
 
-checkpress:     ld      a, (charact)
+checkpress:     ld      a, (frame)      ; hanging from a plate presses it
+                cp      87              ; just as well as standing on it
+                jr      c, cpnothang
+                cp      100
+                jr      c, cphang       ; 87..99, hanging from a jump
+                cp      135
+                jr      c, cpnothang
+                cp      141
+                jr      c, cphang       ; 135..140, climbing up or down
+cpnothang:      ld      a, (charact)
                 cp      7               ; turning
                 jr      z, cpground
                 cp      5               ; bumped
                 jr      z, cpground
                 cp      2
                 ret     nc
-cpground:       ld      a, (frame)      ; is his foot on the floor at all
-                ld      l, a
+cpground:       ld      a, (frame)
+                cp      79              ; jumping up to touch the ceiling
+                jr      z, cpceil
+                ld      l, a            ; is his foot on the floor at all
                 ld      h, 0
                 ld      de, fcheck
                 add     hl, de
                 ld      a, (hl)
                 and     F_CHECK
                 ret     z
+                xor     a               ; the block he stands on
+                jr      cpwhere
+cpceil:         ld      a, 2            ; and up there, only a floor counts
+                jr      cpwhere
+cphang:         ld      a, 1            ; the block he has hold of
+cpwhere:        ld      (cpabove), a
                 call    base_x          ; and which block it is on
                 call    inroom
                 ret     nc
@@ -2560,6 +2579,12 @@ cpground:       ld      a, (frame)      ; is his foot on the floor at all
                 ret     nc
                 ld      c, a
                 ld      a, (blocky)
+                ld      b, a
+                ld      a, (cpabove)
+                or      a
+                jr      z, cprow
+                dec     b
+cprow:          ld      a, b
                 cp      3
                 ret     nc              ; and off the screen is nothing
                 ld      l, a
@@ -2577,11 +2602,16 @@ cpground:       ld      a, (frame)      ; is his foot on the floor at all
                 ld      (trscrn), a
 
                 call    trobat
-                cp      BG_UPRESSPLATE
+                ld      b, a
+                ld      a, (cpabove)
+                cp      2
+                ld      a, b
+                jr      z, cploose      ; touching the ceiling breaks a floor
+                cp      BG_UPRESSPLATE  ; but pushes nothing
                 jp      z, pushpp
                 cp      BG_PRESSPLATE
                 jp      z, pushpp
-                cp      BG_LOOSE
+cploose:        cp      BG_LOOSE
                 ret     nz
 
 ; BREAKLOOSE: it only starts once, and then animfloor has it.
@@ -2598,6 +2628,71 @@ breakloose:     ld      a, (trobst)
                 ld      a, LOOSEWIPE
                 ld      (redh), a
                 jp      redplate
+
+; SHAKELOOSE in TOPCTRL.S and SHAKEM in MOVER.S.  A loose floor that is only
+; jarred wiggles for a few frames and settles again: its state carries bit 7
+; and counts in the low bits, which is how getloosey tells the two apart.
+
+WIGGLETIME      equ     4
+
+shakeloose:     ld      a, (jarabove)
+                or      a
+                ret     z
+                ld      b, a
+                xor     a
+                ld      (jarabove), a
+                ld      a, (blocky)
+                bit     7, b
+                jr      nz, slrow       ; jard: the row he is on
+                dec     a               ; jaru: the one above it
+slrow:          cp      3
+                ret     nc
+                ld      (slrow2), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+                ld      a, 9
+                ld      (slcol), a
+slloop:         ld      a, (slrow2)
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de          ; ten blocks to the row
+                ld      a, (slcol)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      a, l
+                ld      (trloc), a
+                call    trobat
+                cp      BG_LOOSE
+                call    z, shakeit
+                ld      hl, slcol
+                ld      a, (hl)
+                or      a
+                ret     z
+                dec     (hl)
+                jr      slloop
+
+shakeit:        ld      a, (trobst)     ; already going, or on its way down
+                or      a
+                ret     nz
+                ld      a, 0x80
+                ld      (trobst), a
+                call    trobsave
+                ld      a, 1
+                ld      (trdirec), a
+                call    addtrob
+                ld      a, LOOSEWIPE
+                ld      (redh), a
+                jp      redplate
+
+slrow2:         db      0
+slcol:          db      0
+cpabove:        db      0
 
 ; PUSHPP: the plate's own state is its index into the link tables.
 
@@ -2927,6 +3022,8 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 ld      a, (trobst)
                 inc     a
                 ld      (trobst), a
+                bit     7, a
+                jr      nz, afwiggle
                 cp      BG_FFALLING
                 ret     c
                 ld      a, BG_SPACE     ; time it went
@@ -2935,6 +3032,12 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 ld      (trobst), a
                 ld      hl, aoid        ; and it is space that gets redrawn
                 ld      (hl), a
+                jp      stopobj
+
+afwiggle:       cp      0x80 + WIGGLETIME
+                ret     c
+                xor     a               ; jarred, not broken: it settles
+                ld      (trobst), a
                 jp      stopobj
 
 ; ---- putting the change on the screen ----

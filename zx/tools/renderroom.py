@@ -297,10 +297,15 @@ class Room:
 
     @staticmethod
     def _loose_state(state):
-        """getloosey: at rest a loose floor draws exactly like a solid one."""
+        """
+        getloosey.  A floor on its way down counts 1..Ffalling and the state
+        is the frame; one that is only wiggling has bit 7 set and counts in
+        the low bits, and anything past the last frame draws as the first.
+        """
         if not state & 0x80:
-            return 0
-        return min(state & 0x7f, bg.Ffalling)
+            return min(state, bg.Ffalling)
+        y = state & 0x7f
+        return y if y <= bg.Ffalling else 1
 
     def draw_front(self, st):
         x = st['objid']
