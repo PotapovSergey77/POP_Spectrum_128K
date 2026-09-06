@@ -340,43 +340,38 @@ def main(argv):
         distof[x] = ((x - angle_px) % BLOCK_PX) // 2
     open(os.path.join(binout, 'distof.bin'), 'wb').write(bytes(distof))
 
-    # Each frame is baked with the room already behind it, so a flame goes
-    # down as one rectangle and there is nothing to rub out first.  The
-    # rectangle is the same for all nine, whichever of them is the widest.
-    torches, flames = bytearray(), bytearray()
-    for row in range(3):
-        ay = renderroom.BLOCKBOT[row + 1] - 3
-        for col in range(10):
-            if ids[row * 10 + col] != TORCH or col == 9:
-                continue
-            x0 = ((col + 1) * 4 + 1) * 7
-            ybot = ay - FLAME_UP
-            imgs = [room.tab1.get(n) for n in FLAME_FRAMES]
-            wide = max(i.px_width for i in imgs)
-            tall = max(i.height for i in imgs)
-            c0 = x0 // 8
-            cw = (x0 % 8 + wide + 7) // 8
-            top = ybot - tall + 1
-            torches += bytes([c0, top, cw, tall, cw * tall,
-                              len(flames) & 0xff, len(flames) >> 8])
-            for img in imgs:
-                pix = list(img.pixels())
-                for y in range(top, ybot + 1):
-                    line = bytearray(cw)
-                    for b in range(cw):
-                        for bit in range(8):
-                            x = (c0 + b) * 8 + bit
-                            if (x0 <= x < x0 + img.px_width
-                                    and ybot - img.height < y <= ybot):
-                                v = pix[y - (ybot - img.height + 1)][x - x0]
-                            else:
-                                v = px[y][x] if x < ROOM_PX else 0
-                            if v:
-                                line[b] |= 0x80 >> bit
-                    flames += line
-    open(os.path.join(binout, 'torches.bin'), 'wb').write(
-        bytes([len(torches) // 7]) + bytes(torches))
+    # The flame itself, with nothing behind it, and a mask saying which
+    # pixels are its own.  A torch's flame sits at room pixel 28*col + 35, so
+    # it falls on one of two byte boundaries and no more -- three off an even
+    # column, seven off an odd one -- and the nine frames are shifted for
+    # both.  None of this is about a particular room, so it is the same for
+    # the whole level; where a room's torches are is worked out when it is
+    # entered.
+    FLAME_W, FLAME_H = 3, 16
+    flames, flamemask = bytearray(), bytearray()
+    for align in (3, 7):
+        for img in [room.tab1.get(n) for n in FLAME_FRAMES]:
+            pix = list(img.pixels())
+            for r in range(FLAME_H):
+                line = bytearray(FLAME_W)
+                for b8 in range(FLAME_W):
+                    for bit in range(8):
+                        x = b8 * 8 + bit - align
+                        y = r - (FLAME_H - img.height)
+                        if 0 <= x < img.px_width and 0 <= y < img.height:
+                            if pix[y][x]:
+                                line[b8] |= 0x80 >> bit
+                flames += line
+    for align in (3, 7):
+        line = bytearray(FLAME_W)
+        for b8 in range(FLAME_W):
+            for bit in range(8):
+                x = b8 * 8 + bit - align
+                if 0 <= x < 14:
+                    line[b8] |= 0x80 >> bit
+        flamemask += line
     open(os.path.join(binout, 'flames.bin'), 'wb').write(bytes(flames))
+    open(os.path.join(binout, 'flamemask.bin'), 'wb').write(bytes(flamemask))
     open(os.path.join(binout, 'flametab.bin'), 'wb').write(
         bytes(FLAME_FRAMES.index(n) for n in FLAME_TABLE))
 
@@ -535,7 +530,7 @@ def main(argv):
     print('floor masks %d rows, %d bytes each' % (len(band), len(fmask)))
     print('art bank    %d of %d bytes' % (len(art) + 2, BANK_SIZE))
     print('bg bank     %d of %d bytes' % (len(bgblob), BANK_SIZE))
-    print('torches     %d, %d bytes of flame' % (len(torches) // 7, len(flames)))
+    print('flames      %d bytes over two alignments' % len(flames))
     print('START_X=%d START_Y=%d'
           % (popframe.screen_x(popframe.char_x(START_COL)),
              popframe.char_y(START_ROW)))

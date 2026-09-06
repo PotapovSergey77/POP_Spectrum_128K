@@ -1326,6 +1326,12 @@ flame_one:      ld      hl, (flrec)
                 ld      d, (hl)
                 inc     hl
                 ld      (flrec), hl
+                ld      a, d            ; the offset says which shift it is,
+                or      e               ; and so which mask goes with it
+                ld      bc, flamemask
+                jr      z, flmask1
+                ld      bc, flamemask + 3
+flmask1:        ld      (flmbase), bc
                 ld      hl, flames      ; the record carries an offset
                 add     hl, de
                 ld      (flsrc), hl
@@ -1367,16 +1373,45 @@ flgot:          ld      (flsrc), hl
                 ld      a, (flrect + 3)
                 ld      b, a
 flrow:          push    bc
-                call    line_addr
+                call    line_addr       ; the working copy on this row
                 ld      de, work - SCREEN
                 add     hl, de
-                ex      de, hl
-                ld      hl, (flsrc)
+                ld      (flwork), hl
+                ld      a, (rowy)       ; and the room under it
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (flrect)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (flroom), hl
+                ld      hl, (flmbase)   ; the mask starts again each row
+                ld      (flmask), hl
                 ld      a, (flrect + 2)
-                ld      c, a
-                ld      b, 0
-                ldir
+                ld      b, a
+flbyte:         push    bc
+                ld      hl, (flsrc)     ; the flame's own pixels
+                ld      a, (hl)
+                inc     hl
                 ld      (flsrc), hl
+                ld      c, a
+                ld      hl, (flmask)    ; which of them are its own
+                ld      a, (hl)
+                inc     hl
+                ld      (flmask), hl
+                cpl
+                ld      hl, (flroom)    ; the room shows through the rest
+                and     (hl)
+                inc     hl
+                ld      (flroom), hl
+                or      c
+                ld      hl, (flwork)
+                ld      (hl), a
+                inc     hl
+                ld      (flwork), hl
+                pop     bc
+                djnz    flbyte
                 ld      hl, rowy
                 inc     (hl)
                 pop     bc
@@ -1470,6 +1505,120 @@ sacol:          db      0
 sarow:          db      0
 sawide:         db      0
 satall:         db      0
+
+; Where a room's torches are.  FRAMEADV.S draws a flame as the B section of
+; the block to the torch's RIGHT, one byte in and 43 scanlines above that
+; block's A section, so it lands at room pixel 28*col + 35 -- three off a
+; byte boundary on an even column and seven on an odd one, which is why two
+; shifts of the flame are enough for a whole level.
+
+maketorches:    xor     a
+                ld      (torches), a
+                ld      hl, torches + 1
+                ld      (flrec), hl
+                xor     a
+                ld      (mtrow), a
+mtr:            xor     a
+                ld      (mtcol), a
+mtc:            ld      a, (mtrow)
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de          ; ten blocks to the row
+                ld      a, (mtcol)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      de, roomids
+                add     hl, de
+                ld      a, (hl)
+                and     0x1f
+                cp      BG_TORCH
+                jp      nz, mtnext
+                ld      a, (mtcol)
+                cp      9               ; the last column has no flame
+                jp      nc, mtnext
+
+                ld      l, a            ; room pixel 28*col + 35, which
+                ld      h, 0            ; does not fit in eight bits
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl          ; four
+                ld      b, h
+                ld      c, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl          ; thirty two
+                or      a
+                sbc     hl, bc          ; less four is twenty eight
+                ld      de, 35
+                add     hl, de
+                ld      a, l
+                and     7               ; three or seven
+                ld      (mtal), a
+                srl     h               ; and which byte it starts in
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                ld      a, l
+                ld      hl, (flrec)
+                ld      (hl), a
+                inc     hl
+                ld      a, (mtrow)      ; its block row gives the height
+                inc     a
+                ld      e, a
+                ld      d, 0
+                push    hl
+                ld      hl, blockbot
+                add     hl, de
+                ld      a, (hl)
+                pop     hl
+                sub     3               ; Ay
+                sub     43              ; the flame's bottom row
+                sub     15              ; and its top
+                ld      (hl), a
+                inc     hl
+                ld      (hl), 3         ; three bytes across
+                inc     hl
+                ld      (hl), 16        ; sixteen down
+                inc     hl
+                ld      (hl), 48        ; the size of one frame
+                inc     hl
+                ld      de, 0           ; which shift of the nine to use
+                ld      a, (mtal)
+                cp      3
+                jr      z, mtshift
+                ld      de, 9 * 48
+mtshift:        ld      (hl), e
+                inc     hl
+                ld      (hl), d
+                inc     hl
+                ld      (flrec), hl
+                ld      hl, torches
+                inc     (hl)
+
+mtnext:         ld      hl, mtcol
+                inc     (hl)
+                ld      a, (hl)
+                cp      10
+                jp      c, mtc
+                ld      hl, mtrow
+                inc     (hl)
+                ld      a, (hl)
+                cp      3
+                jp      c, mtr
+                ret
+
+mtrow:          db      0
+mtcol:          db      0
+mtal:           db      0
 
 ; And on to the screen, wherever the view has put them.
 
@@ -2624,6 +2773,10 @@ flrec:          dw      0
 flst:           dw      0
 flsrc:          dw      0
 flstride:       db      0
+flmask:         dw      0
+flmbase:        dw      0
+flroom:         dw      0
+flwork:         dw      0
 flrect:         ds      4
 flstate:        ds      8
 linecol:        db      0
@@ -2652,9 +2805,10 @@ cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
 blocktop:       incbin  "blocktop.bin"
 floorband:      incbin  "floorband.bin"
-torches:        incbin  "torches.bin"
+torches:        ds      1 + 6 * 7
 flametab:       incbin  "flametab.bin"
 flames:         incbin  "flames.bin"
+flamemask:      incbin  "flamemask.bin"
 foreband:       ds      192
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"

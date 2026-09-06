@@ -834,7 +834,8 @@ cvgroup:        push    bc
 newroom:        call    compose
                 call    convert
                 call    build_fore
-                jp      floormasks
+                call    floormasks
+                jp      maketorches
 
 ; build_fore below is written but not called yet: the rectangles it collects
 ; are right -- the row index it makes matches the one baked on the host, row
