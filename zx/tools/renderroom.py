@@ -81,11 +81,19 @@ class Room:
     # -- the section passes of RedBlockSure -------------------------------
 
     def draw_c(self, st):
-        objid = st['objid']
-        visible = (objid == bg.space or objid == bg.pillartop or
-                   objid == bg.panelwof or objid >= bg.archtop1)
-        if not visible:
+        if not self._checkc(st):
             return
+        self._dodrawc(st)
+        self.mask_b(st)
+
+    @staticmethod
+    def _checkc(st):
+        """checkc: is the C section of the piece below and left visible?"""
+        objid = st['objid']
+        return (objid == bg.space or objid == bg.pillartop or
+                objid == bg.panelwof or objid >= bg.archtop1)
+
+    def _dodrawc(self, st):
         x = st['below']
         if x == bg.block:
             y = st['sbelow'] if st['sbelow'] < bg.numblox else 0
@@ -98,7 +106,23 @@ class Room:
                 img = bg.panelc[st['sbelow']]
         if img:
             self.draw(img, st['xco'], st['Dy'], ORA)
-        self.mask_b(st)
+
+    def draw_mc(self, st):
+        """
+        Movable C sections (drawmc).  Only a gate has one: the top of its
+        bars pokes up into the block above and to the right, and how far up
+        depends on how open it is.
+        """
+        if st['objid'] not in (bg.space, bg.panelwof, bg.pillartop):
+            return                          # an A section would cover it
+        if st['below'] != bg.gate:
+            return
+        self._drawgatec(st)
+
+    def _drawgatec(self, st):
+        self.draw(bg.gatecmask, st['xco'], st['Dy'], AND)
+        state = min(st['sbelow'], bg.gmaxval)
+        self.draw(bg.gate8c[(state >> 2) % 8], st['xco'], st['Dy'], ORA)
 
     def mask_b(self, st):
         img = bg.maskb[st['preced']]
@@ -174,10 +198,63 @@ class Room:
         its right loses its left half.  Gates, spikes, torches and exits also
         dispatch here and still need doing.
         """
+        if st['preced'] == bg.gate:
+            self._drawgateb(st)
+            return
         if st['preced'] != bg.loose:
             return
         y = self._loose_state(st['spreced'])
         self.draw(bg.looseb, st['xco'], st['Ay'] + bg.looseby[y], ORA)
+
+    # -- the gate ---------------------------------------------------------
+    #
+    # A gate's bars hang in the block to its right, so they are drawn as that
+    # block's movable B section.  The state is how far the gate has risen,
+    # four pixels to the step; the bottom piece is laid at that height and
+    # eight-line middle pieces are stacked above it up to the top of the B
+    # section, with one of eight part-height shapes to finish.
+
+    @staticmethod
+    def _setupdgb(st):
+        """setupdgb: the topmost line of the B section, and the gate's foot."""
+        blockthr = st['Dy'] - 62
+        gateposn = (min(st['spreced'], bg.gmaxval) >> 2) + 1
+        return blockthr, st['Ay'] - gateposn
+
+    def _restorebot(self, st):
+        """
+        The foot of the gate crosses the floor line, where a stamp would cut
+        into the floor below it.  Put the background back and OR the foot on
+        top of it instead.
+        """
+        self.draw(bg.pieceb[bg.gate], st['xco'],
+                  bg.pieceby[bg.gate] + st['Ay'], STA)
+        if self._checkc(st):
+            self._dodrawc(st)
+        self.draw_a(st)
+
+    def _drawgateb(self, st):
+        blockthr, gatebot = self._setupdgb(st)
+        if gatebot + 12 >= st['Ay']:
+            self._restorebot(st)
+            self.draw(bg.gatebotORA, st['xco'], gatebot - 2, ORA)
+        else:
+            self.draw(bg.gatebotSTA, st['xco'], gatebot, STA)
+
+        yco = gatebot - 12
+        while True:
+            if yco >= 192:
+                return
+            top = yco - 7                   # a middle piece is eight high
+            if top < 0 or top < blockthr:
+                break
+            self.draw(bg.gateB1, st['xco'], yco, STA)
+            yco -= 8
+            if yco == 0:
+                break
+        height = yco - blockthr + 1         # what is left at the top
+        if 0 < height < 9:
+            self.draw(bg.gate8b[height - 1], st['xco'], yco, STA)
 
     def draw_md(self, st):
         """Movable D sections (drawmd): a loose floor's own top surface."""
@@ -212,19 +289,22 @@ class Room:
     def build(self, level, scrnum):
         types, specs = level.screen(scrnum)
         ids = [b & poplevel.IDMASK for b in types]
+        prev, sprev = self._prev_screen(level, scrnum)
 
         for row in (2, 1, 0):
             Dy = BLOCKBOT[row + 1]
             Ay = Dy - 3
             # BELOW[col] is the block below and to the LEFT: getbelow stores
-            # the row below starting at BELOW+1, so it is shifted by one.
+            # the row below starting at BELOW+1, so it is shifted by one, and
+            # BELOW[0] comes from the screen to the left.
             if row < 2:
-                below = [0] + ids[(row + 1) * 10:(row + 1) * 10 + 9]
-                sbelow = [0] + list(specs[(row + 1) * 10:(row + 1) * 10 + 9])
+                below = [prev[row + 1]] + ids[(row + 1) * 10:(row + 1) * 10 + 9]
+                sbelow = ([sprev[row + 1]]
+                          + list(specs[(row + 1) * 10:(row + 1) * 10 + 9]))
             else:
-                below, sbelow = [0] * 10, [0] * 10
+                below, sbelow = self._below_screen(level, scrnum)
 
-            preced, spreced = bg.space, 0
+            preced, spreced = prev[row], sprev[row]
             for col in range(10):
                 i = row * 10 + col
                 st = {'objid': ids[i], 'state': specs[i],
@@ -232,6 +312,7 @@ class Room:
                       'below': below[col], 'sbelow': sbelow[col],
                       'xco': col * 4, 'Dy': Dy, 'Ay': Ay}
                 self.draw_c(st)
+                self.draw_mc(st)
                 self.draw_b(st)
                 self.draw_mb(st)
                 self.draw_d(st)
@@ -241,6 +322,49 @@ class Room:
                 preced, spreced = ids[i], specs[i]
 
         self.hatch_walls(ids)
+
+    @staticmethod
+    def _prev_screen(level, scrnum):
+        """
+        getprev: the three rightmost blocks of the screen to the left.
+
+        They seed PRECED for column 0, so whatever hangs off the right hand
+        side of the room next door -- a wall face, or the bars of a gate in
+        its last column -- lands here rather than being lost.  With no screen
+        to the left POP puts a solid block there.
+        """
+        left = level.links(scrnum)[0]
+        if not left:
+            return [bg.block] * 3, [0] * 3
+        types, specs = level.screen(left)
+        return ([types[i] & poplevel.IDMASK for i in (9, 19, 29)],
+                [specs[i] for i in (9, 19, 29)])
+
+    @staticmethod
+    def _below_screen(level, scrnum):
+        """
+        getbelow for the bottom row: the top row of the screen underneath.
+
+        Nothing to fall through means floor, and the corner block comes from
+        the screen below and to the left -- a solid block if there is none.
+        """
+        below_num = level.links(scrnum)[3]
+        if below_num:
+            types, specs = level.screen(below_num)
+            below = [0] + [b & poplevel.IDMASK for b in types[:9]]
+            sbelow = [0] + list(specs[:9])
+            corner = level.links(below_num)[0]
+        else:
+            below = [0] + [bg.floor] * 9
+            sbelow = [0] * 10
+            corner = 0
+        if corner:
+            types, specs = level.screen(corner)
+            below[0] = types[9] & poplevel.IDMASK
+            sbelow[0] = specs[9]
+        else:
+            below[0] = bg.block
+        return below, sbelow
 
     # Hatching laid over the finished room.
     #
@@ -535,9 +659,6 @@ def main(argv):
     return 0
 
 
-if __name__ == '__main__':
-    sys.exit(main(sys.argv))
-
 
 def despeckle(pixels):
     """
@@ -791,7 +912,7 @@ SEAM_BEHIND = frozenset([bg.posts])
 SEAM_DRAW = frozenset([bg.space])
 
 
-def _editable(ids, row, tile, seam=False):
+def _editable(ids, row, tile, prev, seam=False):
     """
     A tile may be worked on only if its left neighbour is an ordinary floor
     too.  The neighbour's B section is drawn into this tile's columns, so a
@@ -802,15 +923,17 @@ def _editable(ids, row, tile, seam=False):
     the neighbour one of SEAM_LEFT_OK, whose B section is ordinary hatch.  The
     hatch pass, which rewrites dots across the whole tile, keeps the stricter
     rule.
+
+    Tile zero's neighbour is the last tile of the room next door -- getprev
+    draws its B section in here just the same -- so `prev` carries the three
+    blocks that room hands over.
     """
     if tile < 0 or tile > 9:
         return False
     own = SEAM_TYPES | SEAM_EXTRA if seam else SEAM_TYPES
     if ids[row * 10 + tile] not in own:
         return False
-    if tile == 0:
-        return True                 # nothing is drawn in from off screen
-    left = ids[row * 10 + tile - 1]
+    left = prev[row] if tile == 0 else ids[row * 10 + tile - 1]
     return left in (SEAM_TYPES | SEAM_LEFT_OK if seam else SEAM_TYPES)
 
 
@@ -843,6 +966,7 @@ def seam_pass(pixels, level, scrnum):
     """
     types, _ = level.screen(scrnum)
     ids = [b & poplevel.IDMASK for b in types]
+    prev = Room._prev_screen(level, scrnum)[0]
     out = [bytearray(row) for row in pixels]
     width = len(pixels[0])
 
@@ -851,7 +975,7 @@ def seam_pass(pixels, level, scrnum):
         for tile in range(10):
             t = ids[row * 10 + tile]
             drawing = t in SEAM_DRAW
-            if not drawing and not _editable(ids, row, tile, seam=True):
+            if not drawing and not _editable(ids, row, tile, prev, seam=True):
                 continue
             behind = t in SEAM_BEHIND
             for k in range(BAND_ROWS):
@@ -907,6 +1031,7 @@ def hatch_phase(k):
 def normalise_hatch(pixels, level, scrnum):
     types, _ = level.screen(scrnum)
     ids = [b & poplevel.IDMASK for b in types]
+    prev = Room._prev_screen(level, scrnum)[0]
     out = [bytearray(row) for row in pixels]
     width = len(pixels[0])
 
@@ -923,7 +1048,7 @@ def normalise_hatch(pixels, level, scrnum):
                     continue
                 if ids[row * 10 + x // BLOCK_PX] not in SEAM_TYPES:
                     continue
-                if not _editable(ids, row, x // BLOCK_PX):
+                if not _editable(ids, row, x // BLOCK_PX, prev):
                     continue
                 # Hatch dots stand four apart, so a real one is alone within
                 # two pixels either side.  A narrower test mistakes the first
@@ -944,3 +1069,6 @@ def normalise_hatch(pixels, level, scrnum):
                                             # dot where it is rather than
                                             # punching a hole in the art
     return out
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

@@ -284,17 +284,27 @@ bglay:          ld      (imgnum), a
 
 ; drawc: the C section of the piece below and to the left.
 
-draw_c:         ld      a, (objid)      ; only some pieces show it
+draw_c:         call    checkc
+                ret     nc
+                call    dodrawc
+                jp      mask_b
+
+; checkc: carry set if the C section below and to the left shows at all.
+
+checkc:         ld      a, (objid)
                 cp      BG_SPACE
-                jr      z, dcok
+                jr      z, ccyes
                 cp      BG_PILLARTOP
-                jr      z, dcok
+                jr      z, ccyes
                 cp      BG_PANELWOF
-                jr      z, dcok
-                cp      BG_ARCHTOP1
-                jr      nc, dcok
-                ret                     ; and no mask either: drawc is done
-dcok:           call    page_bg
+                jr      z, ccyes
+                cp      BG_ARCHTOP1     ; carry below it, and those hide it
+                ccf
+                ret
+ccyes:          scf
+                ret
+
+dodrawc:        call    page_bg
                 ld      a, (below)
                 cp      BG_BLOCK
                 jr      nz, dcpiece
@@ -319,13 +329,13 @@ dcpiece:        call    tab_piecec
                 ld      hl, bgtables + T_PANELC
                 call    bgentry
 dcgo:           or      a
-                jr      z, mask_b
+                ret     z
                 ld      c, a
                 ld      a, (dy)
                 ld      (yco), a
                 ld      a, c
                 ld      c, BG_ORA
-                call    bglay
+                jp      bglay
 
 mask_b:         call    page_bg
                 ld      a, (preced)
@@ -542,7 +552,46 @@ ly1:            and     0x7f
 ; drawmb and drawmd, of which only the loose floor is here so far.  Without
 ; its B section the floor to its right loses its left half.
 
+; drawmc: the only movable C section is the top of a gate's bars, poking up
+; into the block above and to the right of it.
+
+draw_mc:        ld      a, (objid)      ; an A section would cover it
+                cp      BG_SPACE
+                jr      z, dmcok
+                cp      BG_PANELWOF
+                jr      z, dmcok
+                cp      BG_PILLARTOP
+                ret     nz
+dmcok:          ld      a, (below)
+                cp      BG_GATE
+                ret     nz
+
+                call    page_bg
+                ld      a, (dy)
+                ld      (yco), a
+                ld      a, (bgtables + T_GATECMASK)
+                ld      c, BG_AND       ; a triangle out of the way first
+                call    bglay
+                call    page_bg
+                ld      a, (sbelow)
+                cp      GMAXVAL
+                jr      c, dmc1
+                ld      a, GMAXVAL
+dmc1:           rrca                    ; (state / 4) mod 8
+                rrca
+                and     7
+                ld      hl, bgtables + T_GATE8C
+                call    bgentry
+                ld      c, a
+                ld      a, (dy)
+                ld      (yco), a
+                ld      a, c
+                ld      c, BG_ORA
+                jp      bglay
+
 draw_mb:        ld      a, (preced)
+                cp      BG_GATE
+                jp      z, drawgateb
                 cp      BG_LOOSE
                 ret     nz
                 call    page_bg
@@ -573,6 +622,117 @@ draw_md:        ld      a, (objid)
                 ld      a, c
                 ld      c, BG_STA
                 jp      bglay
+
+; ---------------------------------------------------------------- the gate
+;
+; A gate's bars hang in the block to its right, so they are drawn as that
+; block's movable B section.  The state is how far the gate has risen, four
+; pixels to the step, up to GMAXVAL; the foot of the bars is laid at that
+; height and eight-line middle pieces are stacked above it to the top of the
+; B section, with one of eight part-height shapes to finish.
+
+GMAXVAL         equ     188
+
+; setupdgb: the topmost line of the B section, and where the foot sits.
+
+setupdgb:       ld      a, (dy)
+                sub     62
+                ld      (blockthr), a
+                ld      a, (spreced)
+                cp      GMAXVAL
+                jr      c, sdgb1
+                ld      a, GMAXVAL
+sdgb1:          rrca                    ; state / 4, one off the floor
+                rrca
+                and     0x3f
+                inc     a
+                ld      c, a
+                ld      a, (ay)
+                sub     c
+                ld      (gatebot), a
+                ret
+
+drawgateb:      call    setupdgb
+                ld      a, (gatebot)
+                add     a, 12
+                ld      c, a
+                ld      a, (ay)
+                cp      c
+                jr      c, dgbora
+                jr      z, dgbora
+
+                call    page_bg         ; clear of the floor line: stamp it
+                ld      a, (gatebot)
+                ld      (yco), a
+                ld      a, (bgtables + T_GATEBOTSTA)
+                ld      c, BG_STA
+                call    bglay
+                jr      dgbmid
+
+dgbora:         call    restorebot      ; over it, so put the floor back and
+                call    page_bg         ; lay the foot on top of that
+                ld      a, (gatebot)
+                sub     2
+                ld      (yco), a
+                ld      a, (bgtables + T_GATEBOTORA)
+                ld      c, BG_ORA
+                call    bglay
+
+dgbmid:         ld      a, (gatebot)
+                sub     12
+                ld      (yco), a
+dgbloop:        ld      a, (yco)
+                cp      192
+                ret     nc
+                sub     7               ; a middle piece is eight lines high
+                jr      c, dgbtop
+                ld      hl, blockthr
+                cp      (hl)
+                jr      c, dgbtop
+                call    page_bg
+                ld      a, (bgtables + T_GATEB1)
+                ld      c, BG_STA
+                call    bglay
+                ld      a, (yco)
+                sub     8
+                ld      (yco), a
+                jr      nz, dgbloop
+
+dgbtop:         ld      a, (yco)        ; and what is left at the top
+                ld      hl, blockthr
+                sub     (hl)
+                inc     a
+                ret     z
+                cp      9
+                ret     nc
+                dec     a
+                ld      c, a
+                call    page_bg
+                ld      hl, bgtables + T_GATE8B
+                ld      a, c
+                call    bgentry
+                ld      c, BG_STA
+                jp      bglay
+
+; The foot of the bars crosses the floor line, where a stamp would cut into
+; the floor.  Lay the gate block's own B section back down, and its C and A
+; sections with it, so the foot can be ORed over unbroken background.
+
+restorebot:     call    page_bg
+                ld      a, BG_GATE
+                call    tab_pieceby
+                call    bgay
+                call    page_bg
+                ld      a, BG_GATE
+                call    tab_pieceb
+                ld      c, BG_STA
+                call    bglay
+                call    checkc
+                call    c, dodrawc
+                jp      draw_a
+
+blockthr:       db      0
+gatebot:        db      0
 
 ; drawfrnt: what goes over the characters.  Stamped rather than ORed for the
 ; posts and the arches, so the neighbour's B section does not show through.
@@ -630,6 +790,7 @@ compose:        xor     a               ; no front pieces noted yet
                 ldir
 
                 call    read_room
+                call    read_edges
 
                 ld      a, 2
                 ld      (blockrow), a
@@ -644,13 +805,23 @@ comprow:        ld      a, (blockrow)
                 sub     3
                 ld      (ay), a
 
-                xor     a               ; PREV: nothing to the left yet
+                ld      a, (blockrow)   ; PREV: what the room to the left
+                add     a, a            ; hangs over into this one
+                ld      l, a
+                ld      h, 0
+                ld      de, prevblk
+                add     hl, de
+                ld      a, (hl)
                 ld      (preced), a
+                inc     hl
+                ld      a, (hl)
                 ld      (spreced), a
+                xor     a
                 ld      (blockcol), a
                 ld      (xco), a
 compcol:        call    setblock
                 call    draw_c
+                call    draw_mc
                 call    draw_b
                 call    draw_mb
                 call    draw_d
@@ -695,16 +866,35 @@ setblock:       ld      a, (blockrow)
                 ld      a, (hl)
                 ld      (state), a
 
-                xor     a               ; the row below, one block to the left
-                ld      (below), a
-                ld      (sbelow), a
-                ld      a, (blockrow)
+                ld      a, (blockrow)   ; the row below, one block to the left
                 cp      2
-                ret     z
-                ld      a, (blockcol)
+                jr      nz, sbon
+                ld      a, (blockcol)   ; the bottom row looks into the room
+                add     a, a            ; underneath, read once already
+                ld      l, a
+                ld      h, 0
+                ld      de, belowrow
+                add     hl, de
+                jr      sbtake
+
+sbon:           ld      a, (blockcol)
                 or      a
-                ret     z
-                dec     a
+                jr      nz, sbhere
+                ld      a, (blockrow)   ; and column zero into the one to the
+                inc     a               ; left, whose row below this is
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, prevblk
+                add     hl, de
+sbtake:         ld      a, (hl)
+                ld      (below), a
+                inc     hl
+                ld      a, (hl)
+                ld      (sbelow), a
+                ret
+
+sbhere:         dec     a
                 ld      c, a
                 ld      a, (blockrow)
                 inc     a
@@ -719,6 +909,133 @@ setblock:       ld      a, (blockrow)
                 ld      a, (hl)
                 ld      (sbelow), a
                 ret
+
+; getprev and getbelow: what the rooms next door put into this one's edges.
+;
+; PRECED for column zero is the rightmost column of the room to the left --
+; its wall face hangs over into this one, and a gate in its last column draws
+; its bars here -- and the bottom row's C sections come out of the room
+; underneath.  With no room that way POP puts a solid block; below, floor.
+
+read_edges:     call    readlinks
+                call    page_bg
+
+                ld      de, prevblk     ; blocks 9, 19 and 29 to the left
+                ld      a, (links)
+                or      a
+                jr      z, repnone
+                ld      c, 9
+                call    edgeblk
+                ld      a, (links)
+                ld      c, 19
+                call    edgeblk
+                ld      a, (links)
+                ld      c, 29
+                call    edgeblk
+                jr      rebelow
+repnone:        ld      b, 3
+repnl:          ld      a, BG_BLOCK
+                ld      (de), a
+                inc     de
+                xor     a
+                ld      (de), a
+                inc     de
+                djnz    repnl
+
+rebelow:        ld      de, belowrow + 2
+                ld      a, (links + 3)
+                or      a
+                jr      z, rebnone
+                xor     a
+                ld      (edgecol), a
+rebl:           ld      a, (edgecol)
+                ld      c, a
+                ld      a, (links + 3)
+                call    edgeblk
+                ld      hl, edgecol
+                inc     (hl)
+                ld      a, (hl)
+                cp      9               ; nine of them: the rightmost is the
+                jr      c, rebl         ; next room's business
+                jr      rebcorn
+rebnone:        ld      b, 9
+rebnl:          ld      a, BG_FLOOR     ; nothing to fall into
+                ld      (de), a
+                inc     de
+                xor     a
+                ld      (de), a
+                inc     de
+                djnz    rebnl
+
+rebcorn:        ld      de, belowrow    ; and the corner, down and to the left
+                ld      a, (links + 3)
+                or      a
+                jr      z, rebcnone
+                call    roomleft
+                or      a
+                jr      z, rebcnone
+                ld      c, 9
+                call    edgeblk
+                jp      page_art
+rebcnone:       ld      a, BG_BLOCK
+                ld      (de), a
+                inc     de
+                xor     a
+                ld      (de), a
+                jp      page_art
+
+; A = a room, C = one of its thirty blocks, DE = where the id and its state
+; go.  The background bank has to be in.
+
+edgeblk:        push    de
+                dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl          ; thirty bytes to a room
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl          ; thirty two
+                or      a
+                sbc     hl, de          ; less two
+                ld      e, c
+                ld      d, 0
+                add     hl, de
+                ld      de, level
+                add     hl, de
+                ld      a, (hl)
+                and     0x1f
+                pop     de
+                ld      (de), a
+                inc     de
+                push    de
+                ld      de, 720         ; the states follow the ids
+                add     hl, de
+                ld      a, (hl)
+                pop     de
+                ld      (de), a
+                inc     de
+                ret
+
+; A = a room.  Out: A = the room to its left.  The bank has to be in.
+
+roomleft:       push    de              ; the caller is holding a destination
+                dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl          ; four bytes to a room
+                ld      de, level + 1952
+                add     hl, de
+                ld      a, (hl)
+                pop     de
+                ret
+
+edgecol:        db      0
+prevblk:        ds      6
+belowrow:       ds      20
 
 ; B = row, C = column.  Out: (blockptr) = where that block's id sits.
 

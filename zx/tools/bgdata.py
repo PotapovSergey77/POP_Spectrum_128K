@@ -41,6 +41,11 @@ frontx = [0,0,0,1,3,0,0,3,1,1,2,0,3,1,0,0,
 gatebotSTA, gatebotORA, gateB1, gatecmask = 0x43, 0x44, 0x37, 0x0d
 gate8c = [0x2f,0x30,0x31,0x32,0x33,0x34,0x35,0x36]
 gate8b = [0x3e,0x3d,0x3c,0x3b,0x3a,0x39,0x38,0x37]
+# A gate's state is how far it has risen, four pixels to the step, so
+# 47*4 is fully open and $ff means jammed there.
+gmaxval, gminval, gatetimer, maxgatevel = 47 * 4, 0, 238, 8
+gateinc = [-1, 4, 4]
+gatevel = [0, 0, 0, 20, 40, 60, 80, 100, 120]
 
 CUmask, CUpiece, CUpost = 0x11, 0x12, 0x0e
 stairs, door, doormask, toprepair = 0x6b, 0x6c, 0x6d, 0x6e
