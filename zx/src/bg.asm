@@ -152,6 +152,13 @@ bgrowloop:      push    bc
                 ld      a, (bgrow)
                 cp      192
                 jp      nc, bgrowskip
+                ld      hl, bandbot     ; a single block redraw only wants the
+                cp      (hl)            ; rows that can have changed; a whole
+                jr      z, bgband1      ; room asks for all of them
+                jp      nc, bgrowskip
+bgband1:        ld      hl, bandtop
+                cp      (hl)
+                jp      c, bgrowskip
                 ld      a, (bgmask)     ; into a mask, or into the picture
                 or      a
                 jp      nz, bgmaskrow
@@ -251,6 +258,9 @@ bgrowdown:      ld      hl, bgrow
                 dec     b
                 jp      nz, bgrowloop
                 ret
+
+bandtop:        db      0               ; the rows a draw may touch
+bandbot:        db      191
 
 ; A = a scanline.  Out: HL = where its forty bytes start in the canvas.
 
@@ -2105,9 +2115,8 @@ nrright:        ld      a, (links + 1)
 
 nrgo:           call    newroom         ; the room and everything about it
                 call    readlinks
-                call    set_row
-                xor     a               ; the view starts over
-                ld      (cam), a
+                call    camhome         ; the view is already where he is
+                xor     a
                 ld      (oldw), a
                 call    repaint
                 call    set_attrs
@@ -2168,6 +2177,14 @@ rbleft:         dec     a
                 ld      a, (hl)
                 ld      (spreced), a
 
+                ld      a, (redh)       ; the band, for the wipe, the five
+                ld      b, a            ; passes and the repack alike -- what
+                ld      a, (dy)         ; falls outside it is redrawn exactly
+                ld      (bandbot), a    ; as it was, so leaving it alone is
+                sub     b               ; the same picture for a third of the
+                inc     a               ; work
+                ld      (bandtop), a
+
 rbwipe:         ld      a, (blockcol)   ; four bytes to a block
                 add     a, a
                 add     a, a
@@ -2175,7 +2192,8 @@ rbwipe:         ld      a, (blockcol)   ; four bytes to a block
                 call    page_canvas
                 ld      a, (dy)
                 ld      (rbrow), a
-                ld      b, 63
+                ld      a, (redh)
+                ld      b, a
 rbwipe1:        push    bc
                 ld      a, (rbrow)
                 cp      192
@@ -2212,16 +2230,10 @@ rbwipe2:        ld      hl, rbrow
 ; group or the second, and one group either side takes in whatever a piece
 ; spilled.
 
-                ld      a, (blockcol)
-                add     a, a
-                add     a, a
-                srl     a               ; which group it starts in
-                srl     a
-                srl     a
-                or      a
-                jr      z, rbg0
-                dec     a
-rbg0:           ld      (rbgroup), a
+                ld      a, (blockcol)   ; the one group of eight Apple bytes
+                srl     a               ; that holds the block: four bytes to
+                ld      (rbgroup), a    ; a block, eight to a group, so it is
+                                        ; always the column halved
                 ld      a, (redh)       ; only the band that changed goes
                 ld      b, a            ; back into the room: the rest of the
                 ld      a, (dy)         ; block was redrawn the same as it was
@@ -2247,7 +2259,7 @@ rbline:         ld      a, (rbrow)
                 ld      d, 0
                 add     hl, de
                 ld      de, cvbuf
-                ld      bc, 24
+                ld      bc, 8
                 ldir
 
                 call    page_art
@@ -2266,17 +2278,17 @@ rbline:         ld      a, (rbrow)
                 add     hl, de
                 ex      de, hl
                 ld      hl, cvbuf
-                ld      b, 3
-rbgrp:          push    bc
                 call    cv8to7
-                pop     bc
-                djnz    rbgrp
 
 rbnext:         ld      hl, rbrow
                 inc     (hl)
                 ld      hl, rbleftn
                 dec     (hl)
                 jp      nz, rbline
+                xor     a               ; the next whole room wants them all
+                ld      (bandtop), a
+                ld      a, 191
+                ld      (bandbot), a
                 jp      redshow         ; and on to the screen
 
 rbrow:          db      0
@@ -2299,8 +2311,13 @@ rbgroup:        db      0
 
 MAXTR           equ     6
 PPTIMER         equ     5
-LOOSEWIPE       equ     31              ; how deep a redraw each reaches, out
-PLATEWIPE       equ     16              ; of MOVER.S
+; How deep a redraw each of them reaches.  POP's loosewipe is 31, but that is
+; an erase height that has to take a character with it; what actually changes
+; between a loose floor's frames is fifteen rows up from Dy, measured over all
+; ten of the falling states and all four of the wiggling ones.  A gate's bars
+; fill the whole B section, so that one keeps the lot.
+LOOSEWIPE       equ     16
+PLATEWIPE       equ     16
 GATETIMER       equ     238
 MAXGATEVEL      equ     8
 LINKLOC         equ     level + 1440
@@ -2588,13 +2605,9 @@ cpceil:         ld      a, 2            ; and up there, only a floor counts
 cphang:         ld      a, 1            ; the block he has hold of
 cpwhere:        ld      (cpabove), a
                 call    base_x          ; and which block it is on
-                call    inroom
-                ret     nc
-                ld      de, blockof
-                add     hl, de
-                ld      a, (hl)
+                call    blockcol_of
                 cp      10
-                ret     nc
+                ret     nc              ; -2..-1 come back as 254..255
                 ld      c, a
                 ld      a, (blocky)
                 ld      b, a

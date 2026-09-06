@@ -320,16 +320,20 @@ def main(argv):
     open(os.path.join(binout, 'bank_art.bin'), 'wb').write(SIG_ART)
     open(os.path.join(binout, 'floorband.bin'), 'wb').write(bytes(floorband))
 
-    blockof = bytearray(ROOM_PX + 8)    # room pixel -> block column
+    # RDBLOCK's handler wants a column for coordinates outside the room too,
+    # so the table is biased: index x + BLOCKOF_BIAS, value column + 2, over
+    # -64 to 319 and columns -2 to 11.
+    BLOCKOF_BIAS, BLOCKOF_LEN = 64, 384
+    blockof = bytearray(BLOCKOF_LEN)
     # GETBLOCKXP takes `angle` off the base coordinate before the lookup.
     # That is the whole of it: a character stands on the TOP surface of his
     # tile, which the perspective draws half a tile right of its front face,
     # and `angle` is what carries him there.  The figure looking right of the
     # tile it belongs to is the drawing being right, not wrong.
     angle_px = 2 * popframe.ANGLE       # logic units are half pixels
-    for x in range(len(blockof)):
-        b = (x - angle_px) // BLOCK_PX
-        blockof[x] = b if 0 <= b <= 9 else 0xFF
+    for i in range(BLOCKOF_LEN):
+        b = (i - BLOCKOF_BIAS - angle_px) // BLOCK_PX
+        blockof[i] = max(-2, min(11, b)) + 2
     open(os.path.join(binout, 'blockof.bin'), 'wb').write(bytes(blockof))
 
     # GETDIST in CTRLSUBS.S works in OFFSET, the position within the block in
@@ -513,6 +517,8 @@ def main(argv):
                 % popframe.screen_x(popframe.char_x(START_COL)))
         f.write('START_Y     equ %d\n' % popframe.char_y(START_ROW))
         f.write('START_ROW   equ %d\n' % START_ROW)
+        f.write('BLOCKOF_BIAS equ %d\n' % BLOCKOF_BIAS)
+        f.write('BLOCKOF_LEN equ %d\n' % BLOCKOF_LEN)
         # The room he starts in is the way into the level, so the
         # same tile there is an entrance and gets no stairs.
         f.write('START_ROOM  equ %d\n' % level.kid_start[0])

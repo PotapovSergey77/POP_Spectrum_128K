@@ -121,7 +121,6 @@ start:          di
                 ld      (chary), a
                 ld      a, START_ROW
                 ld      (blocky), a
-                call    set_row
                 xor     a
                 ld      (yvel), a
                 ld      (facing), a
@@ -322,6 +321,31 @@ camback:        ld      a, b
                 ret     z
                 dec     b
                 jr      camset
+
+; And on the way into a room, straight to the value it would settle at: he
+; arrives at the far side of it, and a view that started over would be seen
+; scrolling across to find him.
+
+camhome:        ld      hl, (charx)
+                ld      de, 128         ; the middle of the band the camera
+                or      a               ; holds him in
+                sbc     hl, de
+                bit     7, h
+                jr      nz, chzero
+                ld      a, h
+                or      a
+                jr      nz, chmax
+                ld      a, l
+                srl     a
+                srl     a
+                srl     a               ; eight pixels to the step
+                cp      CAM_MAX
+                jr      c, chset
+chmax:          ld      a, CAM_MAX
+                jr      chset
+chzero:         xor     a
+chset:          ld      (cam), a
+                ret
 camfwd:         ld      a, b
                 cp      CAM_MAX
                 ret     nc
@@ -391,7 +415,9 @@ page_frame:     ld      a, (curbank)
                 ld      de, banktab
                 add     hl, de
                 ld      a, (hl)
-pageset:        or      0x10            ; bit 4 keeps the 48K ROM, which is
+pageset:        ld      (nowbank), a    ; so a lookup that has to borrow
+                or      0x10            ; another bank can put this one back
+                                        ; bit 4 keeps the 48K ROM, which is
                 push    bc              ; what the handler at 0x38 is.  By now
                 ld      bc, PAGEPORT    ; BASIC is gone and BANKM with it
                 out     (c), a
@@ -402,6 +428,7 @@ pageset:        or      0x10            ; bit 4 keeps the 48K ROM, which is
 ; [2] the room and its mask.
 banktab:        db      BANK_SPR1, BANK_SPR2, BANK_SPR3
 artbank:        db      BANK_ART
+nowbank:        db      BANK_ART
 
 ; ---------------------------------------------------------------- input
 ;
@@ -1075,14 +1102,12 @@ sqjard:         ld      a, 0xff
 sqrowup:        push    hl
                 ld      hl, blocky
                 dec     (hl)
-                call    set_row
                 pop     hl
                 jp      seqloop
 
 sqrowdn:        push    hl
                 ld      hl, blocky
                 inc     (hl)
-                call    set_row
                 pop     hl
                 jp      seqloop
 
@@ -1204,20 +1229,10 @@ cbset:          ld      (charx), hl
 ; HL = a room x, which may be off either end.  Out: A = the tile's flags
 ; there, zero off the room.
 
-tile_flags:     call    inroom
-                jr      nc, tilenone
-                ld      de, blockof
-                add     hl, de
-                ld      a, (hl)
-                cp      10
-                jr      nc, tilenone    ; off the edge of the room
-                ld      l, a
-                ld      h, 0
-                ld      de, (tilerow)   ; the row he stands on
-                add     hl, de
-                ld      a, (hl)
-                and     0x1f            ; getobjid: the low five bits of it
-                ret
+tile_flags:     ld      a, (blocky)
+                ld      c, a
+                jp      tile_in_row
+
 tilenone:       xor     a
                 ret
 
@@ -1263,19 +1278,18 @@ cmp_barr:       ld      l, a
 ; In: A = a screen x, C = a block row.  Out: A = that tile's flags.  The row
 ; is free here, which tile_flags cannot afford -- it runs inside movetry.
 
-tile_in_row:    call    inroom
-                jr      nc, tilenone
-                ld      de, blockof
-                add     hl, de
-                ld      a, (hl)
-                cp      10
-                jr      nc, tilenone
-                ld      b, a
+tile_in_row:    call    blockcol_of
+                ld      b, a            ; B = the column, C = the row, both
+                or      a               ; signed: a block off the screen is
+                jp      m, tirfar       ; not empty, it belongs to the room
+                cp      10              ; next door
+                jr      nc, tirfar
                 ld      a, c
                 cp      3
-                jr      nc, tilenone
-                ld      l, a
-                ld      h, 0
+                jr      nc, tirfar
+
+                ld      l, a            ; the common case: this room, whose
+                ld      h, 0            ; thirty are already in hand
                 add     hl, hl
                 ld      d, h
                 ld      e, l
@@ -1291,27 +1305,124 @@ tile_in_row:    call    inroom
                 and     0x1f
                 ret
 
-; Ten tiles to a block row.  Worked out only when the row changes, so that
-; tile_flags stays short and leaves C alone for movetry.
+; HL = a room x.  Out: A = the block column, signed, -2 to 11.  The table
+; runs from -64 to 319 so an index just off either side still resolves.
 
-set_row:        ld      a, (blocky)
-                cp      3               ; the rows over and under the screen
-                jr      c, srin         ; belong to the next room along, and
-                ld      hl, spacerow    ; until the cut there is nothing there
-                ld      (tilerow), hl
+blockcol_of:    ld      de, BLOCKOF_BIAS
+                add     hl, de
+                bit     7, h
+                jr      nz, bcolow
+                ld      a, h
+                or      a
+                jr      z, bcook
+                dec     a
+                jr      nz, bcohigh
+                ld      a, l
+                cp      BLOCKOF_LEN - 256
+                jr      nc, bcohigh
+bcook:          ld      de, blockof
+                add     hl, de
+                ld      a, (hl)
+                sub     2               ; the table is biased by two columns
                 ret
-srin:           ld      l, a
+bcolow:         ld      a, -2
+                ret
+bcohigh:        ld      a, 11
+                ret
+
+; The handler of RDBLOCK in CTRLSUBS.S.  A block index outside the screen
+; belongs to the room next door; a room that is not there at all reads as
+; solid block, never as space -- otherwise the edge of the world is a step
+; into thin air, and he falls through it for ever.
+
+tirfar:         ld      a, (nowbank)
+                push    af
+                call    page_bg
+                ld      a, (roomnum)
+                ld      (tirroom), a
+tirhand:        ld      a, b
+                bit     7, a
+                jr      z, tirh1
+                add     a, 10
+                ld      b, a
+                ld      e, 0            ; left
+                call    tirstep
+                jr      tirhand
+tirh1:          cp      10
+                jr      c, tirh2
+                sub     10
+                ld      b, a
+                ld      e, 1            ; right
+                call    tirstep
+                jr      tirhand
+tirh2:          ld      a, c
+                bit     7, a
+                jr      z, tirh3
+                add     a, 3
+                ld      c, a
+                ld      e, 2            ; up
+                call    tirstep
+                jr      tirhand
+tirh3:          cp      3
+                jr      c, tirgot
+                sub     3
+                ld      c, a
+                ld      e, 3            ; down
+                call    tirstep
+                jr      tirhand
+
+tirgot:         ld      a, (tirroom)
+                or      a
+                jr      z, tirnull
+                ld      l, c            ; ten blocks to the row
                 ld      h, 0
-                add     hl, hl          ; two
+                add     hl, hl
                 ld      d, h
                 ld      e, l
                 add     hl, hl
-                add     hl, hl          ; eight
-                add     hl, de          ; ten
-                ld      de, roomids     ; the room in hand, not a baked one
+                add     hl, hl
                 add     hl, de
-                ld      (tilerow), hl
+                ld      e, b
+                ld      d, 0
+                add     hl, de
+                ld      c, l
+                ld      a, (tirroom)
+                call    bluepos
+                ld      a, (hl)
+                and     0x1f
+                ld      b, a
+                ld      de, 720
+                add     hl, de
+                ld      c, (hl)
+                ld      a, b
+                call    subplate
+tirdone:        ld      c, a
+                pop     af
+                call    pageset
+                ld      a, c
                 ret
+tirnull:        ld      a, BLK_BLOCK    ; nothing that way is a solid wall
+                jr      tirdone
+
+; E = which way to step.  Zero if there is no room there.
+
+tirstep:        ld      a, (tirroom)
+                or      a
+                ret     z
+                dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl          ; four bytes to a room
+                ld      d, 0
+                add     hl, de
+                ld      de, level + 1952
+                add     hl, de
+                ld      a, (hl)
+                ld      (tirroom), a
+                ret
+
+tirroom:        db      0
 
 ; ---------------------------------------------------------------- flames
 ;
@@ -1994,7 +2105,6 @@ cfspace:        call    cmp_space       ; solid: he stays where he is
                 ret     nz
                 ld      hl, blocky
                 inc     (hl)
-                call    set_row
                 ld      a, 3
                 ld      (charact), a
                 xor     a
@@ -2032,7 +2142,7 @@ dfspace:        call    cmp_space
                 jr      nz, hit_floor
                 ld      hl, blocky      ; straight through, keep going.
                 inc     (hl)            ; Three is the row under the screen,
-                jp      set_row         ; and CUT takes him to it
+                ret                     ; and CUT takes him to it
 
 hit_floor:      call    floor_plane
                 ld      (chary), a
@@ -2111,18 +2221,19 @@ shoff:          ld      hl, (charx)
                 ld      a, l
                 and     7
                 ld      (curshift), a
-                srl     h
+                sra     h               ; signed: he can stand left of the room
                 rr      l
-                srl     h
+                sra     h
                 rr      l
-                srl     h
+                sra     h
                 rr      l
                 ld      a, l
                 ld      b, a            ; the room's byte column; the camera
                 ld      a, (cam)        ; says where that is on screen
                 neg
                 add     a, b
-                ld      (newcol), a
+
+                ld      (rawcol), a
 
 ; SETUPCHAR: the picture sits at CharY + Fdy, not at CharY.  Every frame of a
 ; sequence has its own, and that is what carries him up and down within it.
@@ -2170,6 +2281,46 @@ shoff:          ld      hl, (charx)
                 ld      (neww), a
                 ld      a, (curh)
                 ld      (newh), a
+
+; Clip him to the thirty two columns the screen has.  The room is 280 wide
+; and the view 256, so he can be half off the side of it -- and a byte column
+; outside 0..31 is not off the screen at all, it is the next row along, which
+; is where the rubbish on the left came from.  What the left edge cuts off is
+; skipped in the source too, so the rest still lines up.
+
+                xor     a
+                ld      (spskip), a
+                ld      a, (rawcol)
+                ld      c, a
+                bit     7, a
+                jr      z, clipright
+                neg                     ; off the left: skip that many bytes
+                ld      (spskip), a
+                ld      b, a
+                ld      a, (neww)
+                sub     b
+                jr      c, clipnone
+                jr      z, clipnone
+                ld      (neww), a
+                ld      c, 0
+clipright:      ld      a, c
+                ld      b, a
+                ld      a, (neww)
+                add     a, b            ; past the right hand edge?
+                cp      33
+                jr      c, clipset
+                ld      a, 32
+                sub     b
+                jr      c, clipnone
+                jr      z, clipnone
+                ld      (neww), a
+clipset:        ld      a, c
+                ld      (newcol), a
+                jr      clipdone
+clipnone:       xor     a               ; none of him is on screen
+                ld      (neww), a
+                ld      (newcol), a
+clipdone:
                 call    crop_char
                 call    erase_new
                 call    draw_flames     ; background, so before he is drawn
@@ -2202,10 +2353,20 @@ drawrow:        push    bc
                 jr      drawskip        ; counts towards where the next one is
 drawblank:      call    startrows
                 jr      drawskip
-drawgo:         call    line_addr
+drawgo:         ld      a, (neww)       ; wholly off the side of the screen
+                or      a
+                jr      z, drawskip
+                call    line_addr
                 ld      bc, work - SCREEN
                 add     hl, bc          ; draw into the working copy
-                ld      de, mbuf
+                ld      de, mbuf        ; past what the left edge cut off
+                ld      a, (spskip)
+                add     a, a            ; two bytes to a pixel byte here
+                ld      c, a
+                ld      b, 0
+                ex      de, hl
+                add     hl, bc
+                ex      de, hl
                 ld      a, (neww)
                 ld      b, a
 drawblit:       ld      a, (de)         ; mask
@@ -2631,6 +2792,7 @@ show_rect:      ld      a, (fullshow)
 
                 xor     a
                 ld      (fullshow), a
+                ld      (dirtyh), a
                 ld      (rowy), a
                 ld      (linecol), a
                 call    startrows
@@ -2686,7 +2848,14 @@ fs_sprite:      ld      a, (neww)
 ; where he is.  The box would take in corners neither of them covers, and the
 ; working copy is only ever put right under the two.
 
-showpart:       ld      a, (oldw)
+showpart:       ld      a, (dirtyh)     ; whatever a block redraw changed
+                or      a
+                jr      z, showold
+                ld      hl, dirtycol
+                call    show_one
+                xor     a
+                ld      (dirtyh), a
+showold:        ld      a, (oldw)
                 or      a
                 jr      z, shownew
                 ld      hl, oldcol
@@ -2790,6 +2959,7 @@ rsright:        ld      a, b
                 inc     a               ; the band ends on the block's floor
                 ld      (rowy), a
                 call    startrows
+                call    dirty_add       ; and the blit takes it from there
 rsrow:          push    bc
                 ld      a, (rowy)
                 cp      192
@@ -2812,12 +2982,6 @@ rsrow:          push    bc
                 ld      c, a
                 ld      b, 0
                 ldir
-                ld      hl, (rswrk)
-                ld      de, (rsscr)
-                ld      a, (rdw)
-                ld      c, a
-                ld      b, 0
-                ldir
                 jr      rsnext
 rsskip:         call    startrows
 rsnext:         ld      hl, rowy
@@ -2826,12 +2990,76 @@ rsnext:         ld      hl, rowy
                 djnz    rsrow
                 ret
 
+; The rectangle a block redraw left behind, grown to hold all of them, and
+; sent at the top of the next frame -- before his own two, so that he wins.
+
+dirty_add:      ld      a, (dirtyh)
+                or      a
+                jr      z, dirtyset     ; nothing there yet: take it whole
+                ld      a, (dirtycol)   ; else grow it to hold both
+                ld      b, a
+                ld      a, (linecol)
+                cp      b
+                jr      nc, dirty1
+                ld      b, a
+dirty1:         ld      a, (dirtycol)
+                ld      c, a
+                ld      a, (dirtyw)
+                add     a, c            ; the old right hand edge
+                ld      c, a
+                ld      a, (linecol)
+                ld      hl, rdw
+                add     a, (hl)
+                cp      c
+                jr      nc, dirty2
+                ld      a, c
+dirty2:         sub     b
+                ld      (dirtyw), a
+                ld      a, b
+                ld      (dirtycol), a
+                ld      a, (dirtytop)
+                ld      b, a
+                ld      a, (rowy)
+                cp      b
+                jr      nc, dirty3
+                ld      b, a
+dirty3:         ld      a, (dirtytop)
+                ld      c, a
+                ld      a, (dirtyh)
+                add     a, c
+                ld      c, a
+                ld      a, (rowy)
+                ld      hl, redh
+                add     a, (hl)
+                cp      c
+                jr      nc, dirty4
+                ld      a, c
+dirty4:         sub     b
+                ld      (dirtyh), a
+                ld      a, b
+                ld      (dirtytop), a
+                ret
+
+dirtyset:       ld      a, (linecol)
+                ld      (dirtycol), a
+                ld      a, (rowy)
+                ld      (dirtytop), a
+                ld      a, (rdw)
+                ld      (dirtyw), a
+                ld      a, (redh)
+                ld      (dirtyh), a
+                ret
+
 rdcol:          db      0
 rdstart:        db      0
 rdw:            db      0
 redh:           db      63
 rsscr:          dw      0
 rswrk:          dw      0
+dirtycol:       db      0
+dirtytop:       db      0
+dirtyw:         db      0
+dirtyh:         db      0
 
 ; Remember where the sprite went, so the next frame can rub it out.
 
@@ -2893,8 +3121,6 @@ fwdkind:        db      0
 blockid:        db      0
 blocked:        db      0
 blocky:         db      0
-tilerow:        dw      0
-spacerow:       ds      10
 charcu:         db      0               ; FCharCU, the row his picture is cut at
 fchary:         db      0
 curleft:        dw      0
@@ -2916,6 +3142,8 @@ filllo:         db      0
 rowy:           db      0
 
 newcol:         db      0
+rawcol:         db      0
+spskip:         db      0
 newtop:         db      0
 neww:           db      0
 newh:           db      0
