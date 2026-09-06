@@ -1340,7 +1340,12 @@ tirfar:         ld      a, (nowbank)
                 call    page_bg
                 ld      a, (roomnum)
                 ld      (tirroom), a
-tirhand:        ld      a, b
+                ld      a, 6            ; POP's handler expects an index at
+                ld      (tirsteps), a   ; most one screen out.  If it is not,
+tirhand:        ld      hl, tirsteps    ; something has run away, and walking
+                dec     (hl)            ; the whole level a room at a time is
+                jr      z, tirnull      ; how the game came to look hung
+                ld      a, b
                 bit     7, a
                 jr      z, tirh1
                 add     a, 10
@@ -1423,6 +1428,7 @@ tirstep:        ld      a, (tirroom)
                 ret
 
 tirroom:        db      0
+tirsteps:       db      0
 
 ; ---------------------------------------------------------------- flames
 ;
@@ -2048,13 +2054,29 @@ ibreland:       call    move_by
 ; two pixels, measured the way he faces.  Standing in the middle of a block
 ; is offset 7, so seven units to the edge behind and six to the one ahead.
 
+; How far into his own block he stands, in POP's units of two pixels.  It was
+; a table of 288; this is the same sum -- the coordinate less `angle`, brought
+; into one block's width and halved -- and 288 bytes we did not have.
+
 get_dist:       call    base_x
-                call    inroom
-                jr      c, gd1
-                ld      hl, 0           ; off the map: the near edge will do
-gd1:            ld      de, distof
+                ld      de, -ANGLE_PX
                 add     hl, de
-                ld      b, (hl)
+gdup:           bit     7, h            ; up into the block above zero
+                jr      z, gddown
+                ld      de, 28
+                add     hl, de
+                jr      gdup
+gddown:         ld      a, h            ; and down into the first one
+                or      a
+                jr      nz, gdsub
+                ld      a, l
+                cp      28
+                jr      c, gdgot
+gdsub:          ld      de, -28
+                add     hl, de
+                jr      gddown
+gdgot:          srl     a               ; two pixels to the unit
+                ld      b, a
                 ld      a, (facing)
                 or      a
                 ld      a, b
@@ -3206,7 +3228,6 @@ flames:         incbin  "flames.bin"
 flamemask:      incbin  "flamemask.bin"
 foreband:       ds      192
 blockof:        incbin  "blockof.bin"
-distof:         incbin  "distof.bin"
                 ds      (($ + 255) / 256 * 256) - $
 rowaddr:        incbin  "rowaddr.bin"
 fcheck:         incbin  "fcheck.bin"

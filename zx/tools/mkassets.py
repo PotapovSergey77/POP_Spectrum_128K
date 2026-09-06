@@ -337,12 +337,9 @@ def main(argv):
     open(os.path.join(binout, 'blockof.bin'), 'wb').write(bytes(blockof))
 
     # GETDIST in CTRLSUBS.S works in OFFSET, the position within the block in
-    # POP's 140-wide space -- 0 to 13, two screen pixels to the unit.  Every
-    # judgement about edges is made in those units, so the table comes along.
-    distof = bytearray(ROOM_PX + 8)
-    for x in range(len(distof)):
-        distof[x] = ((x - angle_px) % BLOCK_PX) // 2
-    open(os.path.join(binout, 'distof.bin'), 'wb').write(bytes(distof))
+    # POP's 140-wide space -- 0 to 13, two screen pixels to the unit.  It used
+    # to be a table of 288; the game works it out from the block column now,
+    # which is three subtractions and 288 bytes we did not have.
 
     # The flame itself, with nothing behind it, and a mask saying which
     # pixels are its own.  A torch's flame sits at room pixel 28*col + 35, so
@@ -519,6 +516,7 @@ def main(argv):
         f.write('START_ROW   equ %d\n' % START_ROW)
         f.write('BLOCKOF_BIAS equ %d\n' % BLOCKOF_BIAS)
         f.write('BLOCKOF_LEN equ %d\n' % BLOCKOF_LEN)
+        f.write('ANGLE_PX    equ %d\n' % angle_px)
         # The room he starts in is the way into the level, so the
         # same tile there is an entrance and gets no stairs.
         f.write('START_ROOM  equ %d\n' % level.kid_start[0])
