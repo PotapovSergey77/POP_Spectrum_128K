@@ -597,10 +597,21 @@ class Cover(Room):
         return Room.draw(self, imgnum, xco, yco, op)
 
     def floorpiece(self, st, half):
-        """drawfloor, or drawhalf when there is a half piece for the tile."""
+        """
+        drawfloor, or drawhalf when there is a half piece for the tile.
+
+        Both begin by asking whether the tile to the LEFT is empty space, and
+        do nothing at all if it is not: the wedge is the near edge of a floor,
+        and a floor that runs on into this one has no near edge here.  Without
+        that test a tile whose neighbour is solid still laid its whole A
+        section back over him, which is most of a figure climbing on to it.
+        """
+        if st['preced'] != bg.space:
+            return
         objid = st['objid']
         if half and objid in HALFPIECE:
-            self.draw(bg.CUmask, st['xco'], st['Ay'], AND)
+            yco = st['Ay'] + (1 if objid == bg.dpressplate else 0)
+            self.draw(bg.CUmask, st['xco'], yco, AND)
             self.draw(bg.CUpiece, st['xco'], st['Ay'], ORA)
         else:
             if bg.maska[objid]:                     # addamask
@@ -620,15 +631,19 @@ def floor_covers(level, scrnum, bgset='DUN'):
     types, specs = level.screen(scrnum)
     ids = [b & poplevel.IDMASK for b in types]
     out = []
+    prev = Room._prev_screen(level, scrnum)
     for half in (False, True):
         cov = Cover(bgset)
         cov.recording = True
         for row in range(3):
             Dy = BLOCKBOT[row + 1]
+            preced, spreced = prev[0][row], prev[1][row]
             for col in range(10):
                 i = row * 10 + col
                 cov.floorpiece({'objid': ids[i], 'state': specs[i],
+                                'preced': preced, 'spreced': spreced,
                                 'xco': col * 4, 'Dy': Dy, 'Ay': Dy - 3}, half)
+                preced, spreced = ids[i], specs[i]
         rows = []
         for line in cov.mask:
             px = bytearray()

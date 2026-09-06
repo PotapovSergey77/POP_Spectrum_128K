@@ -1719,14 +1719,23 @@ halfpiece:      ld      a, (objid)
 
 ; One block's floorpiece, into whichever mask is in hand.
 
-floorpiece:     call    page_bg
+floorpiece:     ld      a, (preced)     ; drawfloor and drawhalf both begin
+                or      a               ; here: the wedge is the near edge of
+                ret     nz              ; a floor, and a floor that runs on
+                call    page_bg         ; into this one has no near edge
                 ld      a, (bgmask)
                 dec     a
                 jr      z, fpwhole      ; the first mask is the whole piece
                 call    halfpiece
                 jr      nz, fpwhole
                 ld      a, (ay)         ; CUmask and CUpiece, the short one
-                ld      (yco), a
+                ld      c, a
+                ld      a, (objid)
+                cp      BG_DPRESSPLATE
+                ld      a, c
+                jr      nz, fpcu
+                inc     a               ; POP's own quick trick for a plate
+fpcu:           ld      (yco), a
                 ld      a, (bgtables + T_CUMASK)
                 ld      c, BG_AND
                 call    bglay
@@ -1820,9 +1829,18 @@ omrow:          ld      a, (blockrow)
                 ld      (dy), a
                 sub     3
                 ld      (ay), a
-                xor     a
+                ld      a, (blockrow)   ; PREV, the same as compose has it
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, prevblk
+                add     hl, de
+                ld      a, (hl)
                 ld      (preced), a
+                inc     hl
+                ld      a, (hl)
                 ld      (spreced), a
+                xor     a
                 ld      (blockcol), a
                 ld      (xco), a
 omcol:          call    setblock
