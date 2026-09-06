@@ -115,6 +115,10 @@ bgd1:           and     0x7f
                 ld      a, (hl)
                 ld      (imgh), a
                 inc     hl
+                push    hl
+                call    frontrec        ; a front piece is worth remembering
+                pop     hl
+                ld      a, (imgh)       ; which has had A
                 ld      b, a
                 push    hl
                 ld      h, 0            ; how many bytes that is
@@ -541,8 +545,12 @@ draw_front:     call    page_bg
                 cp      BG_ARCHTOP2
                 jr      c, dfgo
 dfsta:          ld      c, BG_STA
-dfgo:           ld      a, (frimg)
+dfgo:           ld      a, 1
+                ld      (recfront), a
+                ld      a, (frimg)
                 call    bglay
+                xor     a
+                ld      (recfront), a
                 call    page_bg         ; put the column back for the next one
                 ld      a, (objid)
                 call    tab_frontx
@@ -557,7 +565,10 @@ dfgo:           ld      a, (frimg)
 ; Three rows of ten blocks, left to right and bottom to top, exactly as the
 ; screen redraw of FRAMEADV.S walks them.
 
-compose:        call    page_canvas     ; a clean canvas first
+compose:        xor     a               ; no front pieces noted yet
+                ld      (nfront), a
+                ld      (recfront), a
+                call    page_canvas     ; a clean canvas first
                 ld      hl, CANVAS
                 ld      de, CANVAS + 1
                 ld      bc, CANVAS_W * 192 - 1
@@ -756,38 +767,11 @@ cvline:         call    page_canvas
                 add     hl, de
                 ex      de, hl          ; DE = the room's row
                 ld      hl, cvbuf
-                ld      a, CANVAS_W
-                ld      (cvleft2), a
-                ld      c, 8            ; bits still wanted by the byte in hand
-                xor     a
-                ld      (cvacc), a
-cvsrc:          ld      a, (hl)
-                inc     hl
-                push    hl
-                ld      h, revtab / 256 ; bit 0 leftmost becomes bit 7
-                ld      l, a
-                ld      a, (hl)
-                pop     hl
-                ld      b, 7            ; seven pixels of it
-cvbit:          add     a, a
-                push    af
-                ld      a, (cvacc)
-                rla
-                ld      (cvacc), a
-                dec     c
-                jr      nz, cvbit2
-                ld      (de), a
-                inc     de
-                ld      c, 8
-                xor     a
-                ld      (cvacc), a
-cvbit2:         pop     af
-                djnz    cvbit
-                push    hl
-                ld      hl, cvleft2
-                dec     (hl)
-                pop     hl
-                jr      nz, cvsrc
+                ld      b, 5            ; forty in, thirty five out
+cvgroup:        push    bc
+                call    cv8to7
+                pop     bc
+                djnz    cvgroup
 
                 ld      hl, cvrow
                 inc     (hl)
@@ -801,8 +785,415 @@ cvbit2:         pop     af
 newroom:        call    compose
                 jp      convert
 
+; build_fore below is written but not called yet: the rectangles it collects
+; are right -- the row index it makes matches the one baked on the host, row
+; for row -- but something paints rows it should not, so the mask that
+; travels is still the baked one until that is found.
+
 cvrow:          db      0
 cvleft:         db      0
 cvleft2:        db      0
 cvacc:          db      0
 cvbuf:          ds      CANVAS_W
+; Eight bytes of seven pixels are exactly seven of eight, so the row divides
+; into five of these and nothing is left over.  Reversing first puts the
+; leftmost pixel in bit 7, where the Spectrum wants it, and then each output
+; byte is the tail of one source byte and the head of the next.
+;
+; In: HL = eight source bytes, DE = seven to write.  Out: both past them.
+
+cv8to7:         ld      (cvdst), de     ; where the seven are to go
+                ex      de, hl          ; DE = the eight, HL free for the table
+                ld      h, revtab / 256
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 0), a
+                inc     de
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 1), a
+                inc     de
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 2), a
+                inc     de
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 3), a
+                inc     de
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 4), a
+                inc     de
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 5), a
+                inc     de
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 6), a
+                inc     de
+                ld      a, (de)
+                ld      l, a
+                ld      a, (hl)
+                ld      (cvrev + 7), a
+                inc     de
+                ex      de, hl          ; HL past the eight
+                ld      de, (cvdst)     ; and the seven where they were
+
+                ld      a, (cvrev + 0)
+                and     0xfe
+                ld      c, a
+                ld      a, (cvrev + 1)
+                rlca
+                and     0x01
+                or      c
+                ld      (de), a
+                inc     de
+
+                ld      a, (cvrev + 1)
+                add     a, a
+                and     0xfc
+                ld      c, a
+                ld      a, (cvrev + 2)
+                rlca
+                rlca
+                and     0x03
+                or      c
+                ld      (de), a
+                inc     de
+
+                ld      a, (cvrev + 2)
+                add     a, a
+                add     a, a
+                and     0xf8
+                ld      c, a
+                ld      a, (cvrev + 3)
+                rlca
+                rlca
+                rlca
+                and     0x07
+                or      c
+                ld      (de), a
+                inc     de
+
+                ld      a, (cvrev + 3)
+                add     a, a
+                add     a, a
+                add     a, a
+                and     0xf0
+                ld      c, a
+                ld      a, (cvrev + 4)
+                rlca
+                rlca
+                rlca
+                rlca
+                and     0x0f
+                or      c
+                ld      (de), a
+                inc     de
+
+                ld      a, (cvrev + 4)
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a
+                and     0xe0
+                ld      c, a
+                ld      a, (cvrev + 5)
+                rlca
+                rlca
+                rlca
+                rlca
+                rlca
+                and     0x1f
+                or      c
+                ld      (de), a
+                inc     de
+
+                ld      a, (cvrev + 5)
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a
+                and     0xc0
+                ld      c, a
+                ld      a, (cvrev + 6)
+                rlca
+                rlca
+                rlca
+                rlca
+                rlca
+                rlca
+                and     0x3f
+                or      c
+                ld      (de), a
+                inc     de
+
+                ld      a, (cvrev + 6)
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a
+                and     0x80
+                ld      c, a
+                ld      a, (cvrev + 7)
+                rrca
+                and     0x7f
+                or      c
+                ld      (de), a
+                inc     de
+                ret
+
+cvdst:          dw      0
+cvrev:          ds      8
+
+
+; ---------------------------------------------------------------- the mask
+;
+; What the foreground covers.  POP draws the front pieces after the
+; characters, which is what lets a wall or a post stand in front of the
+; prince; here they go down with the room and their rectangles are put back
+; over him afterwards.  The whole rectangle counts, not just the lit pixels,
+; or he shows through the gaps in the dither.
+;
+; The pieces are noted as they are drawn and the mask is painted from the
+; notes, because painting wants the art bank and drawing wants the canvas.
+; Twenty five is the most any room of the level has; a hundred and eighty
+; rows is the most any of them covers, which is what the mask holds.
+
+MAXFRONT        equ     28
+
+frontrec:       ld      a, (recfront)
+                or      a
+                ret     z
+                ld      a, (nfront)
+                cp      MAXFRONT
+                ret     nc
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                ld      de, frontlist
+                add     hl, de
+                ld      a, (xco)        ; where it went and how big it is
+                ld      (hl), a
+                inc     hl
+                ld      a, (yco)
+                ld      (hl), a
+                inc     hl
+                ld      a, (imgw)
+                ld      (hl), a
+                inc     hl
+                ld      a, (imgh)
+                ld      (hl), a
+                ld      hl, nfront
+                inc     (hl)
+                ret
+
+; Which rows the mask has anything on, and where each of them sits in it.
+
+build_fore:     call    page_art
+                ld      hl, foreband
+                ld      de, foreband + 1
+                ld      bc, 191
+                ld      (hl), 0xff
+                ldir
+
+                ld      a, (nfront)
+                or      a
+                ret     z
+                ld      (fleft), a
+                ld      hl, frontlist
+                ld      (fptr), hl
+bfmark:         call    frontrect       ; B = top row, C = how many
+bfmark1:        ld      a, b
+                cp      192
+                jr      nc, bfmark2
+                ld      l, a
+                ld      h, 0
+                ld      de, foreband
+                add     hl, de
+                ld      (hl), 0
+bfmark2:        inc     b
+                dec     c
+                jr      nz, bfmark1
+                ld      hl, fleft
+                dec     (hl)
+                jr      nz, bfmark
+
+                ld      hl, foreband    ; number the rows that are marked
+                ld      b, 192
+                ld      c, 0
+bfnum:          ld      a, (hl)
+                inc     a
+                jr      z, bfnum1
+                ld      (hl), c
+                inc     c
+bfnum1:         inc     hl
+                djnz    bfnum
+
+                ld      a, c            ; and clear that much of the mask
+                or      a
+                ret     z
+                call    mul35
+                ld      b, h
+                ld      c, l
+                dec     bc
+                ld      hl, foremask
+                ld      de, foremask + 1
+                ld      (hl), 0
+                ldir
+
+                ld      a, (nfront)     ; then paint the rectangles into it
+                ld      (fleft), a
+                ld      hl, frontlist
+                ld      (fptr), hl
+bfpaint:        call    frontrect
+                ld      a, b
+                ld      (frow), a
+                ld      a, c
+                ld      (frows), a
+bfrow:          ld      a, (frow)
+                cp      192
+                jr      nc, bfrownext
+                ld      l, a
+                ld      h, 0
+                ld      de, foreband
+                add     hl, de
+                ld      a, (hl)
+                inc     a
+                jr      z, bfrownext
+                dec     a
+                call    mul35
+                ld      de, foremask
+                add     hl, de
+                ld      (fmrow), hl
+                ld      a, (fx0)        ; the byte it starts in
+                srl     a
+                srl     a
+                srl     a
+                ld      e, a
+                ld      d, 0
+                ld      hl, (fmrow)
+                add     hl, de
+                ld      a, (fx0)        ; and the bits of that byte
+                and     7
+                ld      b, a
+                ld      a, 0xff
+                inc     b
+bfsh1:          dec     b
+                jr      z, bfsh2
+                srl     a
+                jr      bfsh1
+bfsh2:          ld      c, a            ; C = the first byte's mask
+
+                ld      a, (fx0)        ; the byte it ends in
+                ld      b, a
+                ld      a, (fpx)
+                add     a, b
+                dec     a
+                ld      b, a            ; B = the last pixel
+                and     7               ; bits down to that one stay
+                ld      d, a
+                ld      a, 7
+                sub     d
+                ld      d, a
+                ld      a, 0xff
+                inc     d
+bfsh3:          dec     d
+                jr      z, bfsh4
+                add     a, a
+                jr      bfsh3
+bfsh4:          ld      d, a            ; D = the last byte's mask
+
+                ld      a, (fx0)        ; how many bytes it spans
+                srl     a
+                srl     a
+                srl     a
+                ld      e, a
+                ld      a, b
+                srl     a
+                srl     a
+                srl     a
+                sub     e
+                jr      nz, bfwide
+                ld      a, c            ; all in the one byte
+                and     d
+                or      (hl)
+                ld      (hl), a
+                jr      bfrownext
+bfwide:         ld      b, a            ; the first, then the whole ones
+                ld      a, c
+                or      (hl)
+                ld      (hl), a
+                inc     hl
+                dec     b
+                jr      z, bflast
+bfmid:          ld      (hl), 0xff
+                inc     hl
+                djnz    bfmid
+bflast:         ld      a, d
+                or      (hl)
+                ld      (hl), a
+bfrownext:      ld      hl, frow
+                inc     (hl)
+                ld      hl, frows
+                dec     (hl)
+                jp      nz, bfrow
+                ld      hl, fleft
+                dec     (hl)
+                jp      nz, bfpaint
+                ret
+
+; The next note, unpacked: B = its top row, C = how many, (fx0) = its first
+; pixel and (fpx) = how many of those.
+
+frontrect:      ld      hl, (fptr)
+                ld      a, (hl)         ; the byte column it went at
+                inc     hl
+                ld      c, a
+                add     a, a            ; times seven
+                add     a, a
+                add     a, a
+                sub     c
+                ld      (fx0), a
+                ld      b, (hl)         ; the bottom row
+                inc     hl
+                ld      a, (hl)         ; the width, in bytes of seven
+                inc     hl
+                ld      c, a
+                add     a, a
+                add     a, a
+                add     a, a
+                sub     c
+                ld      (fpx), a
+                ld      c, (hl)         ; and the height
+                inc     hl
+                ld      (fptr), hl
+                ld      a, b            ; the top of it
+                sub     c
+                inc     a
+                ld      b, a
+                ret
+
+recfront:       db      0
+nfront:         db      0
+fleft:          db      0
+fptr:           dw      0
+fmrow:          dw      0
+frow:           db      0
+frows:          db      0
+fx0:            db      0
+fpx:            db      0
+frontlist:      ds      MAXFRONT * 4
