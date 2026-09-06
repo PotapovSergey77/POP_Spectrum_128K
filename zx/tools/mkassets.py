@@ -409,7 +409,8 @@ def main(argv):
         inc.append('T_%-9s equ %d' % (n.upper(), o))
     for n in ('space', 'floor', 'posts', 'gate', 'panelwif', 'pillartop',
               'loose', 'panelwof', 'block', 'archtop1', 'archtop2',
-              'torch', 'dpressplate'):
+              'torch', 'dpressplate', 'pressplate', 'upressplate',
+              'rubble'):
         inc.append('BG_%-8s equ %d' % (n.upper(), getattr(renderroom.bg, n)))
     inc.append('BG_EXIT     equ %d' % renderroom.bg.exit_)
     inc.append('BG_NUMBLOX  equ %d' % renderroom.bg.numblox)

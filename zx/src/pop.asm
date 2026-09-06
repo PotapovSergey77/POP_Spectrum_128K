@@ -166,7 +166,7 @@ mainwait:       halt
                 call    page_art
                 call    nextroom        ; before anything reads his row again
                 call    checkpress
-                call    animfloor
+                call    animtrans
                 call    draw_prince
                 call    page_art
                 call    hide_floor

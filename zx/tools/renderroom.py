@@ -288,7 +288,10 @@ class Room:
 
     def build(self, level, scrnum):
         types, specs = level.screen(scrnum)
-        ids = [b & poplevel.IDMASK for b in types]
+        got = [self._subplate(level, b & poplevel.IDMASK, sp)
+               for b, sp in zip(types, specs)]
+        ids = [g[0] for g in got]
+        specs = [g[1] for g in got]
         prev, sprev = self._prev_screen(level, scrnum)
 
         for row in (2, 1, 0):
@@ -324,6 +327,20 @@ class Room:
         self.hatch_walls(ids)
 
     @staticmethod
+    def _subplate(level, objid, state):
+        """
+        getobjid1: a plate that is down is not drawn as the piece the
+        blueprint names.  Whether it is down is the count in LINKMAP, indexed
+        by the plate's own state, so every read of a block goes through here.
+        """
+        if objid not in (bg.pressplate, bg.upressplate):
+            return objid, state
+        down = (level.data[poplevel.LINKMAP + state] & 0x1f) >= 2
+        if objid == bg.pressplate:
+            return (bg.dpressplate if down else bg.pressplate), state
+        return (bg.floor, 0) if down else (bg.upressplate, state)
+
+    @staticmethod
     def _prev_screen(level, scrnum):
         """
         getprev: the three rightmost blocks of the screen to the left.
@@ -337,8 +354,9 @@ class Room:
         if not left:
             return [bg.block] * 3, [0] * 3
         types, specs = level.screen(left)
-        return ([types[i] & poplevel.IDMASK for i in (9, 19, 29)],
-                [specs[i] for i in (9, 19, 29)])
+        got = [Room._subplate(level, types[i] & poplevel.IDMASK, specs[i])
+               for i in (9, 19, 29)]
+        return [g[0] for g in got], [g[1] for g in got]
 
     @staticmethod
     def _below_screen(level, scrnum):
@@ -351,8 +369,10 @@ class Room:
         below_num = level.links(scrnum)[3]
         if below_num:
             types, specs = level.screen(below_num)
-            below = [0] + [b & poplevel.IDMASK for b in types[:9]]
-            sbelow = [0] + list(specs[:9])
+            got = [Room._subplate(level, types[i] & poplevel.IDMASK, specs[i])
+                   for i in range(9)]
+            below = [0] + [g[0] for g in got]
+            sbelow = [0] + [g[1] for g in got]
             corner = level.links(below_num)[0]
         else:
             below = [0] + [bg.floor] * 9
@@ -360,8 +380,8 @@ class Room:
             corner = 0
         if corner:
             types, specs = level.screen(corner)
-            below[0] = types[9] & poplevel.IDMASK
-            sbelow[0] = specs[9]
+            below[0], sbelow[0] = Room._subplate(
+                level, types[9] & poplevel.IDMASK, specs[9])
         else:
             below[0] = bg.block
         return below, sbelow

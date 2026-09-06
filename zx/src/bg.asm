@@ -1007,14 +1007,16 @@ edgeblk:        push    de
                 add     hl, de
                 ld      a, (hl)
                 and     0x1f
+                ld      b, a
+                ld      de, 720         ; the states follow the ids
+                add     hl, de
+                ld      c, (hl)
+                ld      a, b
+                call    subplate
                 pop     de
                 ld      (de), a
                 inc     de
-                push    de
-                ld      de, 720         ; the states follow the ids
-                add     hl, de
-                ld      a, (hl)
-                pop     de
+                ld      a, c
                 ld      (de), a
                 inc     de
                 ret
@@ -1056,9 +1058,58 @@ blockat:        ld      a, b
                 ld      (blockptr), hl
                 ret
 
+; getobjid1: a plate that is down is not drawn as the piece the blueprint
+; names, and whether it is down is in LINKMAP rather than in the blueprint --
+; which is why every read of a block goes through here.  In: A = the masked
+; id, C = its state.  Out: A and C = what to draw.  The bank has to be in.
+
+subplate:       cp      BG_PRESSPLATE
+                jr      z, spdown
+                cp      BG_UPRESSPLATE
+                ret     nz
+                ld      a, c            ; a plate's state is its link index
+                ld      (linkindex), a
+                call    gettimer
+                cp      2
+                ld      a, BG_UPRESSPLATE
+                ret     c               ; still up
+                ld      c, 0
+                ld      a, BG_FLOOR     ; pushed down it is just floor
+                ret
+spdown:         ld      a, c
+                ld      (linkindex), a
+                call    gettimer
+                cp      2
+                ld      a, BG_PRESSPLATE
+                ret     c
+                ld      a, BG_DPRESSPLATE
+                ret
+
 ; The room's thirty ids and thirty states, out of the blueprint.
 
-read_room:      call    page_bg
+read_room:      call    rr_copy
+                ld      b, 30           ; and each of them through getobjid1
+                ld      hl, roomids
+rrsub:          push    bc
+                push    hl
+                ld      a, (hl)
+                ld      de, 30
+                add     hl, de
+                ld      c, (hl)
+                call    subplate
+                pop     hl
+                ld      (hl), a
+                push    hl
+                ld      de, 30
+                add     hl, de
+                ld      (hl), c
+                pop     hl
+                inc     hl
+                pop     bc
+                djnz    rrsub
+                ret
+
+rr_copy:        call    page_bg
                 ld      a, (roomnum)
                 dec     a
                 ld      l, a            ; thirty bytes to a room
@@ -1867,8 +1918,16 @@ redblock:       ld      a, (blockrow)
                 ld      a, (blockcol)   ; the piece to its left, for drawc
                 or      a               ; and drawb
                 jr      nz, rbleft
-                xor     a
+                ld      a, (blockrow)   ; column zero takes it from the room
+                add     a, a            ; to the left, the way compose does
+                ld      l, a
+                ld      h, 0
+                ld      de, prevblk
+                add     hl, de
+                ld      a, (hl)
                 ld      (preced), a
+                inc     hl
+                ld      a, (hl)
                 ld      (spreced), a
                 jr      rbwipe
 rbleft:         dec     a
@@ -1916,6 +1975,7 @@ rbwipe2:        ld      hl, rbrow
 
                 call    setblock        ; and lay it down again
                 call    draw_c
+                call    draw_mc
                 call    draw_b
                 call    draw_mb
                 call    draw_d
@@ -1996,23 +2056,284 @@ rbrow:          db      0
 rbleftn:        db      0
 rbgroup:        db      0
 
-; ---------------------------------------------------------------- loose floor
+; ------------------------------------------------------- gates and pressplates
 ;
-; CHECKPRESS in CTRL.S sets one going: standing on the ground with his foot
-; on the floor, whatever is under it is read, and a loose floor is broken.
-; BREAKLOOSE in MOVER.S marks it and adds it to the list of things being
-; animated; animfloor walks that list each frame, and when the count reaches
-; Ffalling the floor becomes empty space.  Each step redraws the block, and
-; the one to its right, whose B section is this piece.
+; MOVER.S.  Standing on a pressplate puts it down for a count and triggers
+; whatever the level says it is wired to; a gate so triggered rises, waits at
+; the top and comes back down, and a plate under a raised gate lets it fall.
+; The wiring is two tables in the blueprint: LINKLOC holds a block and two
+; bits of a room number, LINKMAP the other three bits and the plate's count,
+; and a flag in LINKLOC ends the chain, so one plate can work several gates.
+;
+; Everything part way through an animation is on the trans list along with the
+; room it is in, because a gate goes on opening after the view has left that
+; room.  That is also why an object's state lives in the blueprint rather than
+; in the room's own copy of it: the copy is only what is being drawn.
 
-MAXTROB         equ     4
+MAXTR           equ     6
+PPTIMER         equ     5
+GATETIMER       equ     238
+MAXGATEVEL      equ     8
+LINKLOC         equ     level + 1440
+LINKMAP         equ     level + 1696
+
+; A = a room (1..24), C = one of its thirty blocks.  Out: HL = its type byte
+; in the blueprint; its state is 720 further on.  The bank has to be in.
+
+bluepos:        dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl          ; thirty bytes to a room
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl          ; thirty two
+                or      a
+                sbc     hl, de          ; less two
+                ld      e, c
+                ld      d, 0
+                add     hl, de
+                ld      de, level
+                add     hl, de
+                ret
+
+; The object the trans list is pointing at.  Out: A = its id, (trobst) = its
+; state, (blueptr) on its type byte.  Leaves the background bank in.
+
+trobat:         call    page_bg
+                ld      a, (trloc)
+                ld      c, a
+                ld      a, (trscrn)
+                call    bluepos
+                ld      (blueptr), hl
+                ld      de, 720
+                add     hl, de
+                ld      a, (hl)
+                ld      (trobst), a
+                ld      hl, (blueptr)
+                ld      a, (hl)
+                and     0x1f
+                ret
+
+; Put (trobst) back, and into the room's own copy if that room is the one on
+; screen -- the drawing reads the copy, not the blueprint.
+
+trobsave:       call    page_bg
+                ld      hl, (blueptr)
+                ld      de, 720
+                add     hl, de
+                ld      a, (trobst)
+                ld      (hl), a
+                call    onscreen
+                ret     nz
+                ld      hl, (blueptr)
+                ld      a, (hl)
+                and     0x1f
+                push    af
+                ld      a, (trobst)
+                ld      c, a
+                pop     af
+                call    subplate
+                ld      b, a
+                ld      a, (trloc)
+                ld      l, a
+                ld      h, 0
+                ld      de, roomids
+                add     hl, de
+                ld      (hl), b
+                ld      de, 30
+                add     hl, de
+                ld      (hl), c
+                ret
+
+; A = a new id for it, the same two places.
+
+trobtype:       ld      c, a
+                call    page_bg
+                ld      hl, (blueptr)
+                ld      (hl), c
+                call    onscreen
+                ret     nz
+                ld      a, (trloc)
+                ld      l, a
+                ld      h, 0
+                ld      de, roomids
+                add     hl, de
+                ld      (hl), c
+                ret
+
+onscreen:       ld      a, (trscrn)     ; Z if this object is in the room the
+                ld      hl, roomnum     ; view is showing
+                cp      (hl)
+                ret
+
+; LINKLOC and LINKMAP, one entry per link, indexed by (linkindex).
+
+llocat:         ld      a, (linkindex)
+                ld      l, a
+                ld      h, 0
+                ld      de, LINKLOC
+                add     hl, de
+                ret
+
+lmapat:         ld      a, (linkindex)
+                ld      l, a
+                ld      h, 0
+                ld      de, LINKMAP
+                add     hl, de
+                ret
+
+gettimer:       call    lmapat
+                ld      a, (hl)
+                and     0x1f
+                ret
+
+chgtimer:       and     0x1f            ; in: A = the new count
+                ld      c, a
+                call    lmapat
+                ld      a, (hl)
+                and     0xe0
+                or      c
+                ld      (hl), a
+                ret
+
+getloc:         call    llocat
+                ld      a, (hl)
+                and     0x1f
+                ret
+
+getlast:        call    llocat
+                ld      a, (hl)
+                and     0x80
+                ret
+
+getscrn:        call    llocat          ; two bits of the room here, three in
+                ld      a, (hl)         ; the map
+                and     0x60
+                rrca
+                rrca
+                ld      c, a
+                call    lmapat
+                ld      a, (hl)
+                and     0xe0
+                add     a, c
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                ret
+
+; ---- the list itself ----
+;
+; Is (trloc, trscrn) on it already?  Out: carry set and C = where.
+
+searchtrob:     ld      a, (numtrans)
+                or      a
+                ret     z
+                ld      b, a
+                ld      c, 0
+sto1:           push    bc
+                ld      a, c
+                ld      l, a
+                ld      h, 0
+                ld      de, trlocs
+                add     hl, de
+                ld      a, (trloc)
+                cp      (hl)
+                jr      nz, sto2
+                ld      de, trscrns - trlocs
+                add     hl, de
+                ld      a, (trscrn)
+                cp      (hl)
+                jr      nz, sto2
+                pop     bc
+                scf
+                ret
+sto2:           pop     bc
+                inc     c
+                djnz    sto1
+                or      a
+                ret
+
+; In: trdirec, trloc, trscrn.  Already listed means only a change of direction.
+
+addtrob:        call    searchtrob
+                jr      c, atchange
+                ld      a, (numtrans)
+                cp      MAXTR
+                ret     nc              ; too many at once: the trigger fails
+                ld      c, a
+                inc     a
+                ld      (numtrans), a
+                ld      a, c
+                ld      l, a
+                ld      h, 0
+                ld      de, trlocs
+                add     hl, de
+                ld      a, (trloc)
+                ld      (hl), a
+                ld      de, trscrns - trlocs
+                add     hl, de
+                ld      a, (trscrn)
+                ld      (hl), a
+atdirec:        ld      de, trdirecs - trscrns
+                add     hl, de
+                ld      a, (trdirec)
+                ld      (hl), a
+                ret
+atchange:       ld      a, c
+                ld      l, a
+                ld      h, 0
+                ld      de, trscrns
+                add     hl, de
+                jr      atdirec
+
+stopobj:        ld      a, 0xff
+                ld      (trdirec), a
+                ret
+
+; C = an entry.  Load it into the three the routines work on, or save the
+; direction back into it.
+
+trload:         ld      l, c
+                ld      h, 0
+                ld      de, trlocs
+                add     hl, de
+                ld      a, (hl)
+                ld      (trloc), a
+                ld      de, trscrns - trlocs
+                add     hl, de
+                ld      a, (hl)
+                ld      (trscrn), a
+                ld      de, trdirecs - trscrns
+                add     hl, de
+                ld      a, (hl)
+                ld      (trdirec), a
+                ret
+
+trdsave:        ld      l, c
+                ld      h, 0
+                ld      de, trdirecs
+                add     hl, de
+                ld      a, (trdirec)
+                ld      (hl), a
+                ret
+
+; ---- what puts things on it ----
+;
+; CHECKPRESS in CTRL.S: on the ground with his foot on the floor, whatever is
+; under it is read, and a plate is pushed or a loose floor broken.
 
 checkpress:     ld      a, (charact)
-                cp      2               ; on the ground, or turning, or bumped
-                jr      c, cp1
-                cp      5
-                ret     nz
-cp1:            ld      a, (frame)      ; is his foot on the floor at all
+                cp      7               ; turning
+                jr      z, cpground
+                cp      5               ; bumped
+                jr      z, cpground
+                cp      2
+                ret     nc
+cpground:       ld      a, (frame)      ; is his foot on the floor at all
                 ld      l, a
                 ld      h, 0
                 ld      de, fcheck
@@ -2028,89 +2349,396 @@ cp1:            ld      a, (frame)      ; is his foot on the floor at all
                 ld      a, (hl)
                 cp      10
                 ret     nc
-                ld      (trcol), a
                 ld      c, a
                 ld      a, (blocky)
-                ld      b, a
-                call    blockat
-                ld      hl, (blockptr)
-                ld      a, (hl)
-                and     0x1f
-                cp      BG_LOOSE
-                ret     nz
-
-breakloose:     ld      de, 30          ; its state, if it has one yet
-                add     hl, de
-                ld      a, (hl)
-                or      a
-                ret     nz              ; already going
-                ld      (hl), 1
-                ld      a, (ntrob)      ; on to the list of animating blocks
-                cp      MAXTROB
-                ret     nc
+                cp      3
+                ret     nc              ; and off the screen is nothing
                 ld      l, a
                 ld      h, 0
                 add     hl, hl
-                ld      de, troblist
-                add     hl, de
-                ld      a, (blocky)
-                ld      (hl), a
-                inc     hl
-                ld      a, (trcol)
-                ld      (hl), a
-                ld      hl, ntrob
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de          ; ten blocks to the row
+                ld      a, l
+                add     a, c
+                ld      (trloc), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+
+                call    trobat
+                cp      BG_UPRESSPLATE
+                jp      z, pushpp
+                cp      BG_PRESSPLATE
+                jp      z, pushpp
+                cp      BG_LOOSE
+                ret     nz
+
+; BREAKLOOSE: it only starts once, and then animfloor has it.
+
+breakloose:     ld      a, (trobst)
+                or      a
+                ret     nz
+                ld      a, 1
+                ld      (trobst), a
+                call    trobsave
+                xor     a               ; down
+                ld      (trdirec), a
+                jp      addtrob
+
+; PUSHPP: the plate's own state is its index into the link tables.
+
+pushpp:         ld      (pptype), a
+                ld      a, (trobst)
+                ld      (linkindex), a
+                call    gettimer
+                cp      31
+                ret     z               ; this one is down for good
+                cp      2
+                jr      nc, ppagain     ; down already: restart the count
+                ld      a, PPTIMER
+                call    chgtimer
+                ld      a, 1
+                ld      (trdirec), a
+                call    addtrob
+                call    trobsave        ; so the copy shows it pushed down
+                call    redplate
+                jp      trigger
+ppagain:        ld      a, PPTIMER
+                call    chgtimer
+                jp      trigger
+
+; And what the plate is wired to.  The chain runs on until an entry has the
+; last flag set.
+
+trigger:        call    page_bg
+trigl:          call    llocat
+                ld      a, (hl)
+                cp      0xff
+                ret     z               ; wired to nothing
+                call    getloc
+                ld      (trloc), a
+                call    getscrn
+                ld      (trscrn), a
+                call    trobat
+                call    trigobj
+                ld      a, (trdirec)
+                and     0x80
+                jr      nz, trignext    ; the trigger failed
+                call    addtrob
+trignext:       call    page_bg
+                call    getlast
+                ld      c, a
+                ld      hl, linkindex
                 inc     (hl)
+                ld      a, c
+                or      a
+                jr      z, trigl
                 ret
 
-; One step of every block on the list.
+trigobj:        cp      BG_GATE
+                jr      z, triggate
+                cp      BG_EXIT
+                ret     nz
+                ld      a, (trobst)     ; an exit only ever opens
+                or      a
+                jp      nz, stopobj
+                ld      a, 1
+                ld      (trdirec), a
+                ret
 
-animfloor:      ld      a, (ntrob)
+; A plate lowers a gate, one that springs back up raises it, and rubble --
+; a plate crushed under a falling slab -- opens it and jams it there.
+
+triggate:       ld      a, (pptype)
+                cp      BG_UPRESSPLATE
+                jr      z, tgraise
+                cp      BG_RUBBLE
+                jr      z, tgjam
+
+                ld      a, (trobst)     ; down, unless it is down already
+                or      a
+                jp      z, stopobj
+                ld      a, 3            ; down fast
+                ld      (trdirec), a
+                ret
+
+tgjam:          ld      a, 2
+                ld      (trdirec), a
+                ld      a, (trobst)
+                cp      GMAXVAL
+                ret     c
+                ld      a, 0xff         ; at the top already: jam it there
+                ld      (trobst), a
+                call    trobsave
+                jp      stopobj
+
+tgraise:        ld      a, 1
+                ld      (trdirec), a
+                ld      a, (trobst)
+                cp      0xff
+                jp      z, stopobj      ; jammed open
+                cp      GMAXVAL
+                ret     c
+                ld      a, GATETIMER    ; up already: start the wait again
+                ld      (trobst), a
+                call    trobsave
+                jp      stopobj
+
+; ---- one step of everything on the list ----
+
+animtrans:      ld      a, (numtrans)
                 or      a
                 ret     z
-                ld      (trleft), a
-                ld      hl, troblist
-                ld      (trptr), hl
-aftrob:         ld      hl, (trptr)
-                ld      a, (hl)
-                ld      (blockrow), a
                 ld      b, a
-                inc     hl
-                ld      a, (hl)
-                ld      (blockcol), a
-                ld      c, a
-                inc     hl
-                ld      (trptr), hl
-                call    blockat
-                ld      hl, (blockptr)
-                push    hl
-                ld      de, 30
+                ld      c, 0
+antl:           push    bc
+                call    trload
+                call    animobj
+                pop     bc
+                push    bc
+                call    trdsave
+                pop     bc
+                inc     c
+                djnz    antl
+
+; and drop whatever has stopped, closing the list up over it
+
+                xor     a
+                ld      (tcsrc), a
+                ld      (tcdst), a
+tcl:            ld      a, (tcsrc)
+                ld      hl, numtrans
+                cp      (hl)
+                jr      nc, tcdone
+                ld      l, a
+                ld      h, 0
+                ld      de, trdirecs
                 add     hl, de
-                ld      a, (hl)         ; the count, one step on
-                inc     a
-                ld      (hl), a
-                cp      BG_FFALLING
-                jr      c, afdraw
-                pop     hl              ; time it went: the block is空 now
-                ld      (hl), BG_SPACE
-                push    hl
-                ld      hl, ntrob       ; and off the list
-                dec     (hl)
-afdraw:         pop     hl
-                call    page_art
-                call    redblock        ; the block, and the one to its right
-                ld      a, (blockcol)
-                cp      9
-                jr      nc, afnext
-                inc     a
-                ld      (blockcol), a
-                call    redblock
-afnext:         ld      hl, trleft
-                dec     (hl)
-                jp      nz, aftrob
+                ld      a, (hl)
+                cp      0xff
+                jr      z, tcskip
+                ld      a, (tcsrc)
+                ld      c, a
+                call    trload
+                ld      a, (tcdst)
+                ld      c, a
+                call    trstore
+                ld      hl, tcdst
+                inc     (hl)
+tcskip:         ld      hl, tcsrc
+                inc     (hl)
+                jr      tcl
+tcdone:         ld      a, (tcdst)
+                ld      (numtrans), a
                 ret
 
-ntrob:          db      0
-trleft:         db      0
-trcol:          db      0
-trptr:          dw      0
-troblist:       ds      MAXTROB * 2
+trstore:        ld      l, c
+                ld      h, 0
+                ld      de, trlocs
+                add     hl, de
+                ld      a, (trloc)
+                ld      (hl), a
+                ld      de, trscrns - trlocs
+                add     hl, de
+                ld      a, (trscrn)
+                ld      (hl), a
+                ld      de, trdirecs - trscrns
+                add     hl, de
+                ld      a, (trdirec)
+                ld      (hl), a
+                ret
+
+; The object in hand: work out what it is, move it on, put the state back and
+; only then redraw, because the drawing reads the room's copy of the state.
+
+animobj:        call    trobat
+                ld      (aoid), a
+                cp      BG_GATE
+                jr      z, aogate
+                cp      BG_UPRESSPLATE
+                jr      z, aoplate
+                cp      BG_PRESSPLATE
+                jr      z, aoplate
+                cp      BG_LOOSE
+                jr      z, aofloor
+                cp      BG_SPACE
+                jr      z, aodone       ; the floor that was here has gone
+                jp      stopobj         ; none of these: off the list
+
+aogate:         call    animgate
+                jr      aodone
+aoplate:        call    animplate
+                jr      aodone
+aofloor:        call    animfloor
+
+aodone:         call    trobsave
+                ld      a, (aoid)
+                cp      BG_GATE
+                jp      z, redgate
+                jp      redplate
+
+; A gate rises four pixels a frame, waits at the top while GATETIMER counts
+; down through the states above GMAXVAL, and then falls under gatevel.
+
+animgate:       ld      a, (trdirec)
+                and     0x80
+                ret     nz              ; stopped: only the redraw is left
+                ld      a, (trdirec)
+                cp      3
+                jr      nc, agfast
+
+                ld      a, (trobst)
+                cp      0xff
+                jp      z, stopobj      ; jammed open
+                ld      c, a
+                ld      a, (trdirec)
+                ld      l, a
+                ld      h, 0
+                ld      de, gateinc
+                add     hl, de
+                ld      a, c
+                add     a, (hl)
+                ld      (trobst), a
+
+                ld      a, (trdirec)
+                or      a
+                jr      z, agdown
+                ld      a, (trobst)     ; going up
+                cp      GMAXVAL
+                ret     c
+                ld      a, (trdirec)    ; at the top: jam, or wait and fall
+                cp      2
+                jr      c, agwait
+                ld      a, 0xff
+                ld      (trobst), a
+                jp      stopobj
+agwait:         ld      a, GATETIMER
+                ld      (trobst), a
+                xor     a
+                ld      (trdirec), a
+                ret
+
+agdown:         ld      a, (trobst)     ; all the way down is the end of it
+                or      a
+                ret     nz
+                jp      stopobj
+
+agfast:         ld      a, (trdirec)    ; trdirec is an index into gatevel
+                cp      MAXGATEVEL
+                jr      nc, agf1
+                inc     a
+                ld      (trdirec), a
+agf1:           ld      l, a
+                ld      h, 0
+                ld      de, gatevel
+                add     hl, de
+                ld      a, (trobst)
+                sub     (hl)
+                ld      (trobst), a
+                ret     z
+                ret     nc
+                xor     a               ; it hit the floor
+                ld      (trobst), a
+                jp      stopobj
+
+; A plate stays down while its count runs out, and the count is in LINKMAP.
+
+animplate:      ld      a, (trdirec)
+                and     0x80
+                ret     nz
+                ld      a, (trobst)
+                ld      (linkindex), a
+                call    page_bg
+                call    gettimer
+                dec     a
+                push    af
+                call    chgtimer
+                pop     af
+                cp      2
+                ret     nc              ; the count stops at one
+                jp      stopobj
+
+; A loose floor shakes for Ffalling frames and then is not there any more.
+
+animfloor:      ld      a, (trdirec)
+                and     0x80
+                ret     nz
+                ld      a, (trobst)
+                inc     a
+                ld      (trobst), a
+                cp      BG_FFALLING
+                ret     c
+                ld      a, BG_SPACE     ; time it went
+                call    trobtype
+                xor     a
+                ld      (trobst), a
+                ld      hl, aoid        ; and it is space that gets redrawn
+                ld      (hl), a
+                jp      stopobj
+
+; ---- putting the change on the screen ----
+;
+; Only if the object is in the room the view is showing.  A plate or a floor
+; takes its own block and the one to its right, whose B section it is; a gate
+; takes the block to its right, where the bars hang, and the one above that,
+; where the top of them pokes through.
+
+redplate:       call    onscreen
+                ret     nz
+                call    trrowcol
+                call    page_art
+                call    redblock
+                ld      a, (blockcol)
+                cp      9
+                ret     nc
+                inc     a
+                ld      (blockcol), a
+                jp      redblock
+
+redgate:        call    onscreen
+                ret     nz
+                call    trrowcol
+                ld      a, (blockcol)
+                cp      9
+                ret     nc
+                inc     a
+                ld      (blockcol), a
+                call    page_art
+                call    redblock
+                ld      a, (blockrow)
+                or      a
+                ret     z
+                dec     a
+                ld      (blockrow), a
+                jp      redblock
+
+trrowcol:       ld      a, (trloc)      ; thirty blocks, ten to the row
+                ld      c, 0
+trrc1:          cp      10
+                jr      c, trrc2
+                sub     10
+                inc     c
+                jr      trrc1
+trrc2:          ld      (blockcol), a
+                ld      a, c
+                ld      (blockrow), a
+                ret
+
+numtrans:       db      0
+trlocs:         ds      MAXTR
+trscrns:        ds      MAXTR
+trdirecs:       ds      MAXTR
+trloc:          db      0
+trscrn:         db      0
+trdirec:        db      0
+trobst:         db      0
+aoid:           db      0
+linkindex:      db      0
+pptype:         db      0
+blueptr:        dw      0
+tcsrc:          db      0
+tcdst:          db      0
+gateinc:        db      -1, 4, 4
+gatevel:        db      0, 0, 0, 20, 40, 60, 80, 100, 120
