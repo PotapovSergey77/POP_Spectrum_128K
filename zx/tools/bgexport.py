@@ -40,7 +40,8 @@ IMAGES = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..',
 # Thirty entries each, one per piece id, so a single base plus the id reaches
 # any of them.
 BY_PIECE = ('maska', 'maskb', 'piecea', 'pieceay', 'pieceb', 'pieceby',
-            'piecec', 'pieced', 'fronti', 'fronty', 'frontx', 'bstripe')
+            'piecec', 'pieced', 'fronti', 'fronty', 'frontx', 'bstripe',
+            'frontmx', 'frontmw')
 
 # And the shorter ones, each padded to its own fixed length.
 FIXED = (('blockb', 2), ('blockc', 2), ('blockd', 2), ('blockfr', 2),
@@ -58,7 +59,42 @@ SINGLES = ('looseb', 'panelb0', 'panelc0', 'archpanel', 'CUmask', 'CUpiece',
            'specialflask', 'numblox', 'numpans', 'numbpans')
 
 
+def front_body(imgnum, t1, t2):
+    """
+    Which part of a front piece is solid enough to stand in front of him.
+
+    A piece is not opaque across its whole rectangle.  A column is thirteen
+    pixels of body and then seven of thinly dithered shadow beside it; a
+    pillar is eight pixels of nothing and then its body.  Masking the whole
+    rectangle hides him where he should be seen; masking only the lit pixels
+    lets him through the body's own dither, which on the Apple reads as solid
+    colour at 140 and here does not.  So take the columns that are lit in half
+    their rows or more, from the first to the last.
+
+    Out: (offset, width) in pixels, both zero if there is no piece.
+    """
+    if not imgnum:
+        return 0, 0
+    img = (t2 if imgnum & 0x80 else t1).get(imgnum & 0x7f)
+    if img is None:
+        return 0, 0
+    dense = []
+    for x in range(img.width * 7):
+        lit = sum(1 for y in range(img.height)
+                  if img.data[y * img.width + x // 7] & 0x7f & (1 << (x % 7)))
+        if lit * 2 >= img.height:
+            dense.append(x)
+    if not dense:
+        return 0, 0
+    return dense[0], dense[-1] - dense[0] + 1
+
+
 def piece_tables():
+    t1 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB1.DUN'))
+    t2 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'))
+    body = [front_body(n, t1, t2) for n in bg.fronti]
+    bg.frontmx = [b[0] for b in body]
+    bg.frontmw = [b[1] for b in body]
     out = bytearray()
     for name in BY_PIECE:
         a = list(getattr(bg, name))

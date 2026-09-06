@@ -30,6 +30,7 @@ Usage: mkassets.py [outdir]
 import os
 import sys
 
+import bgexport
 import popframe
 import popseq
 import poplevel
@@ -275,10 +276,13 @@ def main(argv):
             img = (room.tab2 if n & 0x80 else room.tab1).get(n & 0x7f)
             if img is None:
                 continue
-            x0 = (col * 4 + renderroom.bg.frontx[t]) * 7
+            mx, mw = bgexport.front_body(n, room.tab1, room.tab2)
+            if not mw:
+                continue
+            x0 = (col * 4 + renderroom.bg.frontx[t]) * 7 + mx
             ybot = ay + renderroom.bg.fronty[t]
             for y in range(max(0, ybot - img.height + 1), min(192, ybot + 1)):
-                for x in range(max(0, x0), min(ROOM_PX, x0 + img.width * 7)):
+                for x in range(max(0, x0), min(ROOM_PX, x0 + mw)):
                     fore[y][x] = 1
 
     # Putting the foreground back was the most expensive thing in a frame,
@@ -389,7 +393,6 @@ def main(argv):
     # The background bank: the two dungeon image tables, the piece tables of
     # BGDATA.S and the level's blueprint, in a shape a Z80 can index.  A room
     # is composed out of these when it is walked into, the way POP does it.
-    import bgexport
     bgblob, bgat, bgoffs = bgexport.build(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), '..', '..',
         '01 POP Source', 'Levels', ROOM[0]))

@@ -847,7 +847,18 @@ draw_front:     call    page_bg
                 cp      BG_ARCHTOP2
                 jr      c, dfgo
 dfsta:          ld      c, BG_STA
-dfgo:           ld      a, 1
+dfgo:           push    bc              ; C is the opacity and bgentry uses it
+                call    page_bg         ; which part of it is solid enough
+                ld      a, (objid)      ; to stand in front of him
+                ld      hl, bgtables + T_FRONTMX
+                call    bgentry
+                ld      (frbodyx), a
+                ld      a, (objid)
+                ld      hl, bgtables + T_FRONTMW
+                call    bgentry
+                ld      (frbodyw), a
+                pop     bc
+                ld      a, 1
                 ld      (recfront), a
                 ld      a, (frimg)
                 call    bglay
@@ -1474,17 +1485,23 @@ frontrec:       ld      a, (recfront)
                 ret     nc
                 ld      l, a
                 ld      h, 0
+                ld      d, h
+                ld      e, l
                 add     hl, hl
                 add     hl, hl
+                add     hl, de          ; five bytes to an entry
                 ld      de, frontlist
                 add     hl, de
-                ld      a, (xco)        ; where it went and how big it is
-                ld      (hl), a
+                ld      a, (xco)        ; where it went, which part of it is
+                ld      (hl), a         ; solid, and how tall it is
                 inc     hl
                 ld      a, (yco)
                 ld      (hl), a
                 inc     hl
-                ld      a, (imgw)
+                ld      a, (frbodyx)
+                ld      (hl), a
+                inc     hl
+                ld      a, (frbodyw)
                 ld      (hl), a
                 inc     hl
                 ld      a, (imgh)
@@ -1492,6 +1509,9 @@ frontrec:       ld      a, (recfront)
                 ld      hl, nfront
                 inc     (hl)
                 ret
+
+frbodyx:        db      0
+frbodyw:        db      0
 
 ; Which rows the mask has anything on, and where each of them sits in it.
 
@@ -1571,12 +1591,14 @@ bfrow:          ld      a, (frow)
                 ld      de, foremask
                 add     hl, de
                 ld      (fmrow), hl
-                ld      a, (fx0)        ; the byte it starts in
-                srl     a
-                srl     a
-                srl     a
-                ld      e, a
-                ld      d, 0
+                ld      hl, (fx0)       ; the byte it starts in
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                ex      de, hl
                 ld      hl, (fmrow)
                 add     hl, de
                 ld      a, (fx0)        ; and the bits of that byte
@@ -1591,10 +1613,8 @@ bfsh1:          dec     b
 bfsh2:          ld      c, a            ; C = the first byte's mask
 
                 push    hl              ; the last pixel of it, which for a
-                ld      a, (fx0)        ; piece at the right hand end of the
-                ld      l, a            ; room does not fit in eight bits
-                ld      h, 0
-                ld      a, (fpx)
+                ld      hl, (fx0)       ; piece at the right hand end of the
+                ld      a, (fpx)        ; room does not fit in eight bits
                 ld      e, a
                 ld      d, 0
                 add     hl, de
@@ -1621,11 +1641,16 @@ bfsh4:          ld      d, a            ; D = the last byte's mask
                 ld      b, l
                 pop     hl
 
-                ld      a, (fx0)        ; how many bytes it spans
-                srl     a
-                srl     a
-                srl     a
-                ld      e, a
+                push    hl              ; how many bytes it spans, without
+                ld      hl, (fx0)       ; losing the row it is writing to
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                ld      e, l
+                pop     hl
                 ld      a, b
                 sub     e
                 jr      nz, bfwide
@@ -1661,23 +1686,33 @@ bfrownext:      ld      hl, frow
 ; pixel and (fpx) = how many of those.
 
 frontrect:      ld      hl, (fptr)
-                ld      a, (hl)         ; the byte column it went at
-                inc     hl
-                ld      c, a
-                add     a, a            ; times seven
-                add     a, a
-                add     a, a
-                sub     c
-                ld      (fx0), a
+                ld      a, (hl)         ; the byte column it went at, times
+                inc     hl              ; seven -- which does not fit in a
+                push    hl              ; byte at the right hand end of the
+                ld      l, a            ; room, and used to wrap
+                ld      h, 0
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                or      a
+                sbc     hl, de
+                ex      de, hl
+                pop     hl
                 ld      b, (hl)         ; the bottom row
                 inc     hl
-                ld      a, (hl)         ; the width, in bytes of seven
+                ld      a, (hl)         ; where its body starts within it
                 inc     hl
                 ld      c, a
-                add     a, a
-                add     a, a
-                add     a, a
-                sub     c
+                ld      a, e
+                add     a, c
+                ld      e, a
+                jr      nc, frx1
+                inc     d
+frx1:           ld      (fx0), de
+                ld      a, (hl)         ; and how wide the body is
+                inc     hl
                 ld      (fpx), a
                 ld      c, (hl)         ; and the height
                 inc     hl
@@ -1695,7 +1730,7 @@ fptr:           dw      0
 fmrow:          dw      0
 frow:           db      0
 frows:          db      0
-fx0:            db      0
+fx0:            dw      0
 fpx:            db      0
 frontlist:      ds      MAXFRONT * 4
 
