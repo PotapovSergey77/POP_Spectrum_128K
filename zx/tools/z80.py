@@ -2,8 +2,13 @@
 A small Z80 core, enough to run the demo and look at what it drew.
 
 Not a complete Spectrum: there is no ROM and no interrupt routine.  HALT with
-interrupts enabled simply counts a frame and falls through, which is all the
+interrupts enabled counts a frame and falls through, which is nearly all the
 program uses it for, and IN reads come from a key map the harness sets.
+
+The one thing the ROM does that the program leans on is the three byte frame
+count at 23672, which the main loop reads to pace itself.  A halt bumps it,
+so the loop sees time passing; interrupts DURING work are not modelled, so
+what is counted here is halts and the pace measured is the old one.
 
 Undocumented flags and instructions are left out; DAA, DD/FD and the block
 compare/IO groups are not implemented, and hitting one raises rather than
@@ -179,6 +184,13 @@ class Z80:
                 not self.f & PF, self.f & PF, not self.f & SF,
                 self.f & SF][i]
 
+    def tick_frames(self):
+        """The ROM's own counter at 23672, which the main loop reads."""
+        for a in (23672, 23673, 23674):
+            self.mem[a] = (self.mem[a] + 1) & 0xFF
+            if self.mem[a]:
+                break
+
     # -- execution ------------------------------------------------------
 
     def step(self):
@@ -195,6 +207,7 @@ class Z80:
                 # the question the pace of the game turns on.
                 self.cycles += FRAME_TSTATES - self.cycles % FRAME_TSTATES
                 self.frames += 1
+                self.tick_frames()
             else:
                 self.halted = True
             return

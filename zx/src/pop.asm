@@ -69,12 +69,21 @@ dopage:         and     7
                 include "bg.inc"
 
 SCREEN          equ     16384
+FRAMES          equ     23672           ; the ROM's own count of interrupts,
+                                        ; kept by the handler at 0x38
 BUFW            equ     8               ; widest sprite plus the shift byte
-; 50Hz frames per game frame.  The Apple ran the kid at about ten a second
-; and this is twelve and a half, but the number is not only about speed: a
-; game frame that outruns its slot lands late and the motion stutters.  The
-; tall frames -- hanging is fifty five scanlines of him -- are the ones that
-; do, so the slot has to be wide enough for those.
+; 50Hz interrupt periods per game frame.  The Apple ran the kid at about ten
+; a second; three periods is sixteen and two thirds, which is as near as whole
+; periods come to the thirty per cent more that plays comfortably.
+;
+; What is counted is the periods since the frame BEGAN, not the halts after
+; its work ended.  Three halts after the work cost ceil(work/period) + 2, so
+; the walking frame's 1.6 periods of work bought four -- twelve a second --
+; and any frame whose work crossed the next whole period lost a further one.
+; Counting from the start spends max(FRAME_WAIT, ceil(work/period)) instead:
+; the tall frames -- hanging is fifty five scanlines of him -- have their two
+; periods of work inside the same slot as the short ones, so they no longer
+; fall off a step, and only a frame that overruns all three lands late.
 FRAME_WAIT      equ     3
 BLOCK_PX        equ     28
 STEP_OFF_FWD    equ     3               ; CTRL.S
@@ -141,6 +150,8 @@ start:          di
                 call    page_art
                 call    hide_floor
                 call    hide_behind
+                ld      a, (FRAMES)
+                ld      (frstart), a
                 ei
 
 ; ---------------------------------------------------------------- main
@@ -152,9 +163,17 @@ start:          di
 ; A frame's worth of lag, and nothing torn: the beam never catches the blit
 ; halfway through him.
 
-main:           ld      b, FRAME_WAIT
-mainwait:       halt
-                djnz    mainwait
+main:           halt                    ; the blit wants the beam still in the
+mainwait:       ld      a, (FRAMES)     ; border above the room, so a frame
+                ld      hl, frstart     ; always begins on an interrupt -- but
+                sub     (hl)            ; on the FIRST one that leaves the slot
+                cp      FRAME_WAIT      ; full, which a frame that overran has
+                jr      nc, mainrun     ; left behind already
+                halt
+                jr      mainwait
+
+mainrun:        ld      a, (FRAMES)
+                ld      (frstart), a
 
                 call    page_art
                 call    show_rect
@@ -3202,8 +3221,10 @@ fillhi:         db      0
 filllo:         db      0
 rowy:           db      0
 
-; show_one and keep_rect copy these four as one record -- col, top, width,
-; height, in that order -- so nothing may be put between them.
+; show_one and keep_rect copy four bytes as one record -- col, top, width,
+; height, in that order -- so nothing may be put between them.  That holds
+; for every one of these three, not just the first: a byte slipped into the
+; middle of the old rectangle sent the blitter a garbage height.
 newcol:         db      0
 newtop:         db      0
 neww:           db      0
@@ -3216,6 +3237,7 @@ oldh:           db      0
 
 rawcol:         db      0               ; where his picture wanted to go,
 spskip:         db      0               ; and what the left edge cut off
+frstart:        db      0               ; the interrupt this frame began on
 
 cam:            db      0               ; the view's left edge, in bytes
 fullshow:       db      0

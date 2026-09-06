@@ -1849,13 +1849,15 @@ floormasks:     ld      a, 1
 
 ; A = which mask.  Runs the floorpiece pass over every block of the room.
 
-onemask:        ld      (bgmask), a
+onemask:        ld      (bgmask), a     ; which canvas, before paging: pageset
+                dec     a               ; hands back the port value in A, and
+                ld      hl, FLOORCAN    ; asking afterwards cleared HALFCAN
+                jr      z, om1          ; twice and FLOORCAN never -- so the
+                ld      hl, HALFCAN     ; floor mask kept the ink of every room
+om1:            push    hl              ; visited before this one
                 call    page_canvas
-                dec     a
-                ld      hl, FLOORCAN
-                jr      z, om1
-                ld      hl, HALFCAN
-om1:            ld      d, h
+                pop     hl
+                ld      d, h
                 ld      e, l
                 inc     de
                 ld      bc, CANVAS_W * 45 - 1
@@ -1908,6 +1910,185 @@ omcol:          call    setblock
                 ret     z
                 dec     (hl)
                 jr      omrow
+
+; One block's floorpiece, made again in both masks.
+;
+; The masks are made when the room is entered, but a floor that gives way
+; changes them: the wedge is a floor's near edge and exists only where the
+; block to the left is empty space, which the block right of a collapsed
+; floor now has.  DRAWFLOOR runs off the blueprint every frame on the Apple
+; and never has this to think about; here the two blocks that change are done
+; again, on redblock's pattern and with its invariant -- a piece keeps to its
+; own four columns.  A block's wedge lies in its own band, so only fifteen of
+; the forty five rows are touched.
+;
+; In: (blockrow), (blockcol).
+
+maskblock:      ld      a, (blockcol)   ; four bytes to a block
+                add     a, a
+                add     a, a
+                ld      (xco), a
+                ld      a, (blockrow)
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blockbot
+                add     hl, de
+                ld      a, (hl)
+                ld      (dy), a
+                sub     3
+                ld      (ay), a
+
+                ld      a, (blockrow)   ; fifteen rows to a band, in the order
+                ld      b, a            ; mkassets lays them down
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a            ; sixteen of them
+                sub     b               ; less one is fifteen
+                ld      (mbband), a
+
+                ld      a, (blockcol)   ; PREV, the same as compose has it
+                or      a
+                jr      nz, mbleft
+                ld      a, (blockrow)
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, prevblk
+                add     hl, de
+                jr      mbtake
+mbleft:         dec     a
+                ld      c, a
+                ld      a, (blockrow)
+                ld      b, a
+                call    blockat
+                ld      hl, (blockptr)
+                ld      a, (hl)
+                and     0x1f
+                ld      (preced), a
+                ld      de, 30
+                add     hl, de
+                ld      a, (hl)
+                ld      (spreced), a
+                jr      mbdone
+
+mbtake:         ld      a, (hl)
+                ld      (preced), a
+                inc     hl
+                ld      a, (hl)
+                ld      (spreced), a
+
+mbdone:         ld      a, 1
+                call    maskone
+                ld      a, 2
+                call    maskone
+                xor     a               ; and out of mask mode
+                ld      (bgmask), a
+                ret
+
+; A = which mask.  Wipes the block's four columns over its own band, draws
+; the piece again and repacks the one group of eight that holds them.
+
+maskone:        ld      (bgmask), a
+                dec     a
+                ld      hl, FLOORCAN
+                ld      de, floormask
+                jr      z, mo1
+                ld      hl, HALFCAN
+                ld      de, halfmask
+mo1:            ld      (mocan), hl
+                ld      (momask), de
+
+                ld      a, (mbband)
+                ld      (morow), a
+                ld      a, (xco)        ; the wipe works in the block's own
+                ld      (mooff), a      ; four bytes
+                call    page_canvas
+                call    mocanrow
+                ld      b, 15
+mowipe:         ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                ld      de, CANVAS_W - 3
+                add     hl, de
+                djnz    mowipe
+
+                call    setblock
+                call    floorpiece
+
+                ld      a, (blockcol)   ; eight Apple bytes to a group, and a
+                srl     a               ; block of four never straddles two --
+                ld      (mogrp), a      ; but an odd column sits in the second
+                add     a, a            ; half of its group, so the repack
+                add     a, a            ; starts four bytes before the block
+                add     a, a
+                ld      (mooff), a
+                ld      a, (mbband)
+                ld      (morow), a
+                ld      b, 15
+mopack:         push    bc
+                call    page_canvas
+                call    mocanrow
+                ld      de, cvbuf
+                ld      bc, 8
+                ldir
+
+                call    page_art
+                ld      a, (morow)
+                call    mul35
+                ld      de, (momask)
+                add     hl, de
+                ld      a, (mogrp)      ; seven bytes out to a group
+                ld      c, a
+                add     a, a
+                add     a, a
+                add     a, a
+                sub     c
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ex      de, hl
+                ld      hl, cvbuf
+                call    cv8to7
+
+                ld      hl, morow
+                inc     (hl)
+                pop     bc
+                djnz    mopack
+                ret
+
+; HL = where this row's four bytes start in the mask's canvas.
+
+mocanrow:       ld      a, (morow)
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl          ; eight
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl          ; and thirty two
+                add     hl, de          ; forty to the row
+                ld      de, (mocan)
+                add     hl, de
+                ld      a, (mooff)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ret
+
+mocan:          dw      0
+mooff:          db      0
+momask:         dw      0
+mbband:         db      0
+mogrp:          db      0
+morow:          db      0
 
 ; Forty five rows of forty Apple bytes into forty five of thirty five.
 
@@ -2171,7 +2352,16 @@ nrright:        ld      a, (links + 1)
                 add     hl, de
                 ld      (charx), hl
 
-nrgo:           call    newroom         ; the room and everything about it
+; Building a room takes the best part of a second, and a frozen picture of the
+; room he has just left reads as the game having stopped.  Black says it is
+; working, and the new room arrives whole when it is ready.
+
+nrgo:           ld      hl, SCREEN
+                ld      de, SCREEN + 1
+                ld      bc, 6143
+                ld      (hl), 0
+                ldir
+                call    newroom         ; the room and everything about it
                 call    readlinks
                 call    camhome         ; the view is already where he is
                 xor     a
@@ -3024,9 +3214,25 @@ aodone:         call    trobsave
                 jp      z, redgate
                 cp      BG_EXIT
                 jp      z, redright
-                jp      redplate
+                call    redplate
+                ld      a, (mskwant)    ; a floor that has gone takes its own
+                or      a               ; wedge with it and gives one to the
+                ret     z               ; block on its right
+                xor     a
+                ld      (mskwant), a
+                call    onscreen
+                ret     nz
+                call    trrowcol
+                call    maskblock
+                ld      a, (blockcol)
+                cp      9
+                ret     nc
+                inc     a
+                ld      (blockcol), a
+                jp      maskblock
 
 redwant:        db      0
+mskwant:        db      0
 
 ; A gate rises four pixels a frame, waits at the top while GATETIMER counts
 ; down through the states above GMAXVAL, and then falls under gatevel.
@@ -3155,6 +3361,8 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 ret     c
                 ld      a, BG_SPACE     ; time it went
                 call    trobtype
+                ld      a, 1            ; and the wedges with it
+                ld      (mskwant), a
                 xor     a
                 ld      (trobst), a
                 ld      hl, aoid        ; and it is space that gets redrawn

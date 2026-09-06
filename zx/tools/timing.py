@@ -54,14 +54,23 @@ def build(tap, sym):
 
 
 def frames(tap, sym, n=40):
-    """Halted against working, over a walk."""
+    """
+    Halted against working, over a walk.
+
+    The pace is worked out from the work, not from the halts: the core has no
+    interrupt routine, so the periods that pass DURING a frame's work are lost
+    on it and it always halts FRAME_WAIT times.  The machine counts them, and
+    spends max(FRAME_WAIT, ceil(work / period)) periods on a frame.
+    """
     cpu = runtap.boot(tap)
     runtap.game_frame(cpu, sym['main'], [])
-    lo, hi = sym['main'], sym['main'] + 8        # ld b,n / halt / djnz
+    lo, hi = sym['main'], sym['mainrun']
     script = runtap.parse(WALK)
-    idle = work = 0
+    idle = 0
+    each = []
     for _ in range(1, n):
         first = True
+        work = 0
         while True:
             p, t = cpu.pc, cpu.cycles
             cpu.step()
@@ -73,14 +82,23 @@ def frames(tap, sym, n=40):
             if cpu.pc == sym['main'] and not first:
                 break
             first = False
+        each.append(work)
     n -= 1
+    wait = sym['FRAME_WAIT']
+    work = sum(each) / float(n)
+    slots = lambda w: max(wait, -(-int(w) // FRAME))
     print('a walking frame, averaged over %d:' % n)
     print('  halted   %8.0f T  (%.1f interrupt periods)'
           % (idle / float(n), idle / float(n) / FRAME))
     print('  working  %8.0f T  (%.1f interrupt periods)'
-          % (work / float(n), work / float(n) / FRAME))
-    print('  the game runs at %.1f Hz, and %.0f%% of it is spare'
-          % (n * float(CLOCK) / (idle + work), 100.0 * idle / (idle + work)))
+          % (work, work / FRAME))
+    print('  worst    %8d T  (%.1f interrupt periods)'
+          % (max(each), max(each) / float(FRAME)))
+    print('  FRAME_WAIT is %d, so a frame takes %d periods and the game runs'
+          % (wait, slots(work)))
+    print('  at %.1f Hz, with %.0f%% of it spare; the worst of these takes %d'
+          % (CLOCK / float(slots(work) * FRAME),
+             100.0 * (1 - work / (slots(work) * FRAME)), slots(max(each))))
 
 
 def main(argv):
