@@ -41,12 +41,6 @@ walk left 40 462 8 78 4 41
 walk left 41 512 8 79 4 40
 walk left 42 501 8 80 4 39
 walk left 43 515 7 81 5 38
-walk left 44 358 6 81 5 38
-walk left 45 409 5 80 5 39
-walk left 46 502 4 79 6 40
-walk left 47 467 4 79 6 40
-walk left 48 357 3 80 5 39
-walk left 49 423 2 81 5 38
 walk right 1 0 0 0 0 0
 walk right 2 260 21 15 3 41
 walk right 3 272 19 17 3 39
@@ -149,12 +143,6 @@ fall 40 581 8 90 5 29
 fall 41 575 8 89 5 30
 fall 42 613 8 86 5 33
 fall 43 418 8 84 4 35
-fall 44 407 8 81 4 38
-fall 45 370 9 80 3 39
-fall 46 377 9 78 3 41
-fall 47 377 9 78 3 41
-fall 48 377 9 78 3 41
-fall 49 377 9 78 3 41
 jump up 1 0 0 0 0 0
 jump up 2 260 21 15 3 41
 jump up 3 260 20 15 3 41

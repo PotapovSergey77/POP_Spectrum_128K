@@ -26,9 +26,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 BASELINE = os.path.join(HERE, 'fingerprint.txt')
 
 SCENES = [
-    ('walk left',   50, ['left@1-60']),
+    ('walk left',   44, ['left@1-60']),
     ('walk right',  60, ['right@1-60']),
-    ('fall',        50, ['left@1-20', 'down@26-34']),
+    ('fall',        44, ['left@1-20', 'down@26-34']),
     ('jump up',     40, ['up@14-20']),
     ('crouch',      30, ['down@7-14']),
 ]

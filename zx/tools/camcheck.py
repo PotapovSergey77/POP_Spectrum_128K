@@ -26,11 +26,13 @@ import zxscreen
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 SCENES = [
-    ('walk left',  50, ['left@1-60']),
+    # These stay inside the first room on purpose: they are a check on the
+    # drawing, and walking out of it would be a check on something else.
+    ('walk left',  44, ['left@1-60']),
     ('walk right', 60, ['right@1-60']),
-    ('fall+climb', 60, ['left@1-20', 'down@26-34', 'up@46-120']),
+    ('fall+climb', 55, ['left@1-20', 'down@26-34', 'up@46-120']),
     ('jump up',    40, ['up@14-20']),
-    ('run jump',   50, ['left@1-30', 'up@10-14']),
+    ('run jump',   17, ['left@1-14', 'up@8-12']),
 ]
 
 

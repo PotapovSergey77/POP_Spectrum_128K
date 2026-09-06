@@ -101,6 +101,7 @@ start:          di
                 call    check_banks     ; before anything is written, and it
                                         ; leaves the art bank in
                 call    newroom         ; and the room is composed, not loaded
+                call    readlinks
 
                 call    set_attrs
 
@@ -157,6 +158,7 @@ mainwait:       halt
                 call    check_barr
                 call    check_floor
                 call    do_fall
+                call    nextroom
                 call    draw_prince
                 call    page_art
                 call    hide_floor

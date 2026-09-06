@@ -835,7 +835,8 @@ newroom:        call    compose
                 call    convert
                 call    build_fore
                 call    floormasks
-                jp      maketorches
+                call    maketorches
+                jp      page_art
 
 ; build_fore below is written but not called yet: the rectangles it collects
 ; are right -- the row index it makes matches the one baked on the host, row
@@ -1445,3 +1446,60 @@ pmgroup:        push    bc
 cvsrc2:         dw      0
 cvdst2:         dw      0
 bgmask:         db      0
+
+; ---------------------------------------------------------------- next room
+;
+; A level is twenty four rooms and the blueprint says which is which way: the
+; four bytes at MAP are the room to the left, to the right, above and below,
+; and a zero means there is nothing there.  Walking off an edge takes him to
+; the room on that side, and everything about the new one -- its picture, its
+; three masks, its torches -- is made on the way in.
+
+readlinks:      call    page_bg
+                ld      a, (roomnum)
+                dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl          ; four bytes to a room
+                ld      de, level + 1952
+                add     hl, de
+                ld      de, links
+                ld      bc, 4
+                ldir
+                jp      page_art
+
+; He is at one end of the room or the other, and there is a room that way.
+
+nextroom:       ld      a, (charx)
+                cp      X_MIN + 2
+                jr      c, nrleft
+                cp      X_MAX - 1
+                jr      nc, nrright
+                ret
+
+nrleft:         ld      a, (links)
+                or      a
+                ret     z
+                ld      (roomnum), a
+                ld      a, X_MAX - 30
+                ld      (charx), a
+                jr      nrgo
+nrright:        ld      a, (links + 1)
+                or      a
+                ret     z
+                ld      (roomnum), a
+                ld      a, X_MIN + 30
+                ld      (charx), a
+
+nrgo:           call    newroom         ; the room and everything about it
+                call    readlinks
+                call    set_row
+                xor     a               ; the view starts over
+                ld      (cam), a
+                ld      (oldw), a
+                call    repaint
+                call    set_attrs
+                ret
+
+links:          ds      4
