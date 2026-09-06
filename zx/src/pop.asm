@@ -2893,13 +2893,13 @@ show_one:       ld      de, shcol       ; col, top, width, height, in order
                 ld      bc, 4
                 ldir
 
-showgo:         ld      a, (shh)
-                or      a
-                ret     z
-                ld      a, (shw)        ; none of him on screen: LDIR would
+showgo:         ld      a, (shw)        ; none of him on screen: LDIR would
                 or      a               ; read a width of zero as 65536 and
                 ret     z               ; take the stack with it
-                ld      b, a
+                ld      a, (shh)
+                or      a
+                ret     z
+                ld      b, a            ; B is the row count, not the width
                 ld      a, (shtop)
                 ld      (rowy), a
                 ld      a, (shcol)
