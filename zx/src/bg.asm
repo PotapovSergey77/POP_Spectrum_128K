@@ -1471,12 +1471,30 @@ readlinks:      call    page_bg
 
 ; He is at one end of the room or the other, and there is a room that way.
 
-nextroom:       ld      a, (charx)
+nextroom:       ld      a, (chary)      ; fallen out of the bottom of it
+                cp      244
+                jr      nc, nrdown
+                ld      a, (charx)
                 cp      X_MIN + 2
                 jr      c, nrleft
                 cp      X_MAX - 1
                 jr      nc, nrright
                 ret
+
+; The rooms stack 189 scanlines apart -- the bottom of the row below the
+; screen against the bottom of the top row of the next one -- so falling
+; through takes that off his height and puts him on the top row.
+
+nrdown:         ld      a, (links + 3)
+                or      a
+                ret     z
+                ld      (roomnum), a
+                ld      a, (chary)
+                sub     189
+                ld      (chary), a
+                xor     a
+                ld      (blocky), a
+                jr      nrgo
 
 nrleft:         ld      a, (links)
                 or      a
