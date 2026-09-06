@@ -248,12 +248,17 @@ class Room:
     # brick per tile, its joint falling on the tile boundary; the middle one
     # is offset by half a brick, its joint sitting at columns 14..17, so a
     # brick there straddles two tiles.  A course is given here as the rows it
-    # occupies in the face, the columns of the tile a brick fills, and how
-    # many of those columns are shadow rather than hatch.  The top course is
-    # rows 1..20 and the whole tile, of which the last two columns are
-    # blacked out -- the shadow the original throws -- with a third before
-    # them at a dot every fourth row, which carries the eye from the hatch
-    # into the shadow instead of dropping it straight in.  The middle course is
+    # occupies in the face and the columns of the tile a brick fills.
+    #
+    # The two are done differently, because they want different things.  The
+    # half brick beside the rubble is struck again from nothing: it had to go
+    # as dark as the rubble, so it is redrawn in the rubble's dither with its
+    # own column of shadow.  The pair in the top course only wants taking
+    # down a little, so the original stands and one dot in sixteen is knocked
+    # out of it -- 76 per cent of the brick lit against 69, which is about
+    # the least that reads as darker at all.  Nothing is ever
+    # lit that was not, so the shadow the original throws comes through
+    # untouched.  The middle course is
     # rows 22..41, columns 16..27 -- the joint to the tile edge -- and the
     # last of those is blacked out, since the half brick beside the rubble
     # has no neighbour to cast the shadow it needs.
@@ -268,7 +273,7 @@ class Room:
     FACE_HEIGHT = 60
     BRICK_DENSITY = 2                   # dots per four, against the brick's 3
 
-    TOPCOURSE = (1, 21, 0, 28, 2, 1)
+    TOPCOURSE = (1, 21, 0, 28, 16)
     MIDCOURSE = (22, 42, 16, 28, 1, 0)
 
     # The middle floor: the second and fourth brick of its top course,
@@ -289,7 +294,7 @@ class Room:
             lo, hi = run
             for n in bricks:
                 if hi - n + 1 >= lo:
-                    self.hatch(row, hi - n + 1, course)
+                    self.thin(row, hi - n + 1, course)
 
     @staticmethod
     def wall_run(ids, row):
@@ -305,6 +310,22 @@ class Room:
             if hi - col >= 2:
                 return col + 1, hi
         return None
+
+    def thin(self, row, col, course):
+        """Knock one dot in `every` out of the brick as it was drawn."""
+        r0, r1, x0, x1, every = course
+        top = BLOCKBOT[row + 1] - 3 - self.FACE_HEIGHT + 1
+        for r in range(r0, r1):
+            y = top + r
+            if not 0 <= y < HEIGHT:
+                continue
+            line = self.canvas[y]
+            for c in range(x0, x1):
+                x = col * BLOCK_PX + c
+                if not 0 <= x < WIDTH_BYTES * 7:
+                    continue
+                if (x - 2 * y) % every == 0:
+                    line[x // 7] &= ~(1 << (x % 7)) & 0xff
 
     def hatch(self, row, col, course):
         r0, r1, x0, x1, shadow, thin = course
