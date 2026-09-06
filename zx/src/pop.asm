@@ -2682,6 +2682,110 @@ shownext:       ld      hl, rowy
                 djnz    showrow
                 ret
 
+; A block that has just been redrawn, from the room to the working copy and
+; on to the screen.
+;
+; Nothing else does this.  The working copy is only ever put right under the
+; two rectangles the sprite covers, and only those reach the screen -- so a
+; gate opening, an exit door rising or a floor giving way was not seen until
+; the view moved or he happened to walk over it.
+;
+; In: (blockcol) and (dy) say which block, (redh) how deep the band that
+; changed is -- POP's loosewipe and platewipe, and the whole block for a gate.
+
+REDWIDE         equ     5               ; twenty eight pixels, however it sits
+
+redshow:        ld      a, (blockcol)   ; the block's leftmost room byte
+                add     a, a
+                add     a, a
+                ld      c, a            ; four
+                add     a, a
+                add     a, a
+                add     a, a            ; thirty two
+                sub     c               ; twenty eight pixels to a block
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                ld      (rdcol), a
+
+                ld      b, a            ; clipped to what the view shows
+                ld      a, (cam)
+                cp      b
+                jr      nc, rsleft
+                ld      a, b
+rsleft:         ld      (rdstart), a
+                ld      c, a
+                ld      a, (rdcol)
+                add     a, REDWIDE
+                ld      b, a
+                ld      a, (cam)
+                add     a, 32
+                cp      b
+                jr      nc, rsright
+                ld      b, a
+rsright:        ld      a, b
+                sub     c
+                ret     z
+                ret     c
+                ld      (rdw), a
+
+                ld      a, (rdstart)    ; where that lands on screen
+                ld      b, a
+                ld      a, (cam)
+                neg
+                add     a, b
+                ld      (linecol), a
+                ld      a, (redh)
+                ld      b, a
+                ld      a, (dy)
+                sub     b
+                inc     a               ; the band ends on the block's floor
+                ld      (rowy), a
+                call    startrows
+rsrow:          push    bc
+                ld      a, (rowy)
+                cp      192
+                jr      nc, rsskip
+                call    line_addr
+                ld      (rsscr), hl
+                ld      de, work - SCREEN
+                add     hl, de
+                ld      (rswrk), hl
+                ld      a, (rowy)
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (rdstart)
+                ld      e, a
+                ld      d, 0
+                add     hl, de          ; HL = the room's row
+                ld      de, (rswrk)
+                ld      a, (rdw)
+                ld      c, a
+                ld      b, 0
+                ldir
+                ld      hl, (rswrk)
+                ld      de, (rsscr)
+                ld      a, (rdw)
+                ld      c, a
+                ld      b, 0
+                ldir
+                jr      rsnext
+rsskip:         call    startrows
+rsnext:         ld      hl, rowy
+                inc     (hl)
+                pop     bc
+                djnz    rsrow
+                ret
+
+rdcol:          db      0
+rdstart:        db      0
+rdw:            db      0
+redh:           db      63
+rsscr:          dw      0
+rswrk:          dw      0
+
 ; Remember where the sprite went, so the next frame can rub it out.
 
 keep_rect:      ld      a, (newcol)

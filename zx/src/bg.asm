@@ -2074,12 +2074,15 @@ rbwipe2:        ld      hl, rbrow
                 jr      z, rbg0
                 dec     a
 rbg0:           ld      (rbgroup), a
-                ld      a, (dy)
-                sub     62
+                ld      a, (redh)       ; only the band that changed goes
+                ld      b, a            ; back into the room: the rest of the
+                ld      a, (dy)         ; block was redrawn the same as it was
+                sub     b
+                inc     a
                 jr      nc, rbtop
                 xor     a
 rbtop:          ld      (rbrow), a
-                ld      a, 63
+                ld      a, (redh)
                 ld      (rbleftn), a
 rbline:         ld      a, (rbrow)
                 cp      192
@@ -2126,7 +2129,7 @@ rbnext:         ld      hl, rbrow
                 ld      hl, rbleftn
                 dec     (hl)
                 jp      nz, rbline
-                ret
+                jp      redshow         ; and on to the screen
 
 rbrow:          db      0
 rbleftn:        db      0
@@ -2148,6 +2151,8 @@ rbgroup:        db      0
 
 MAXTR           equ     6
 PPTIMER         equ     5
+LOOSEWIPE       equ     31              ; how deep a redraw each reaches, out
+PLATEWIPE       equ     16              ; of MOVER.S
 GATETIMER       equ     238
 MAXGATEVEL      equ     8
 LINKLOC         equ     level + 1440
@@ -2461,7 +2466,10 @@ breakloose:     ld      a, (trobst)
                 call    trobsave
                 xor     a               ; down
                 ld      (trdirec), a
-                jp      addtrob
+                call    addtrob
+                ld      a, LOOSEWIPE
+                ld      (redh), a
+                jp      redplate
 
 ; PUSHPP: the plate's own state is its index into the link tables.
 
@@ -2479,6 +2487,8 @@ pushpp:         ld      (pptype), a
                 ld      (trdirec), a
                 call    addtrob
                 call    trobsave        ; so the copy shows it pushed down
+                ld      a, PLATEWIPE
+                ld      (redh), a
                 call    redplate
                 jp      trigger
 ppagain:        ld      a, PPTIMER
@@ -2645,6 +2655,8 @@ animobj:        call    trobat
                 jr      z, aodone       ; the floor that was here has gone
                 jp      stopobj         ; none of these: off the list
 
+                xor     a
+                ld      (redwant), a
 aogate:         call    animgate
                 jr      aodone
 aoplate:        call    animplate
@@ -2654,6 +2666,9 @@ aoexit:         call    animexit
 aofloor:        call    animfloor
 
 aodone:         call    trobsave
+                ld      a, (redwant)    ; a plate that is only counting down
+                or      a               ; looks no different from one that is
+                ret     z               ; not, and a redraw is not cheap
                 ld      a, (aoid)
                 cp      BG_GATE
                 jp      z, redgate
@@ -2661,10 +2676,16 @@ aodone:         call    trobsave
                 jp      z, redright
                 jp      redplate
 
+redwant:        db      0
+
 ; A gate rises four pixels a frame, waits at the top while GATETIMER counts
 ; down through the states above GMAXVAL, and then falls under gatevel.
 
-animgate:       ld      a, (trdirec)
+animgate:       ld      a, 1
+                ld      (redwant), a
+                ld      a, 63           ; the bars fill the whole B section
+                ld      (redh), a
+                ld      a, (trdirec)
                 and     0x80
                 ret     nz              ; stopped: only the redraw is left
                 ld      a, (trdirec)
@@ -2727,7 +2748,11 @@ agf1:           ld      l, a
 
 ; The exit door only ever opens, and stops when it is all the way up.
 
-animexit:       ld      a, (trdirec)
+animexit:       ld      a, 1
+                ld      (redwant), a
+                ld      a, 63
+                ld      (redh), a
+                ld      a, (trdirec)
                 and     0x80
                 ret     nz
                 ld      a, (trobst)
@@ -2756,11 +2781,19 @@ animplate:      ld      a, (trdirec)
                 pop     af
                 cp      2
                 ret     nc              ; the count stops at one
+                ld      a, 1            ; and only now does it look different
+                ld      (redwant), a
+                ld      a, PLATEWIPE
+                ld      (redh), a
                 jp      stopobj
 
 ; A loose floor shakes for Ffalling frames and then is not there any more.
 
-animfloor:      ld      a, (trdirec)
+animfloor:      ld      a, 1            ; it shakes every frame
+                ld      (redwant), a
+                ld      a, LOOSEWIPE
+                ld      (redh), a
+                ld      a, (trdirec)
                 and     0x80
                 ret     nz
                 ld      a, (trobst)
