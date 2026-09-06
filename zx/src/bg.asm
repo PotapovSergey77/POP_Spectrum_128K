@@ -1677,3 +1677,122 @@ rbnext:         ld      hl, rbrow
 rbrow:          db      0
 rbleftn:        db      0
 rbgroup:        db      0
+
+; ---------------------------------------------------------------- loose floor
+;
+; CHECKPRESS in CTRL.S sets one going: standing on the ground with his foot
+; on the floor, whatever is under it is read, and a loose floor is broken.
+; BREAKLOOSE in MOVER.S marks it and adds it to the list of things being
+; animated; animfloor walks that list each frame, and when the count reaches
+; Ffalling the floor becomes empty space.  Each step redraws the block, and
+; the one to its right, whose B section is this piece.
+
+MAXTROB         equ     4
+
+checkpress:     ld      a, (charact)
+                cp      2               ; on the ground, or turning, or bumped
+                jr      c, cp1
+                cp      5
+                ret     nz
+cp1:            ld      a, (frame)      ; is his foot on the floor at all
+                ld      l, a
+                ld      h, 0
+                ld      de, fcheck
+                add     hl, de
+                ld      a, (hl)
+                and     F_CHECK
+                ret     z
+                call    base_x          ; and which block it is on
+                ld      l, a
+                ld      h, 0
+                ld      de, blockof
+                add     hl, de
+                ld      a, (hl)
+                cp      10
+                ret     nc
+                ld      (trcol), a
+                ld      c, a
+                ld      a, (blocky)
+                ld      b, a
+                call    blockat
+                ld      hl, (blockptr)
+                ld      a, (hl)
+                and     0x1f
+                cp      BG_LOOSE
+                ret     nz
+
+breakloose:     ld      de, 30          ; its state, if it has one yet
+                add     hl, de
+                ld      a, (hl)
+                or      a
+                ret     nz              ; already going
+                ld      (hl), 1
+                ld      a, (ntrob)      ; on to the list of animating blocks
+                cp      MAXTROB
+                ret     nc
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      de, troblist
+                add     hl, de
+                ld      a, (blocky)
+                ld      (hl), a
+                inc     hl
+                ld      a, (trcol)
+                ld      (hl), a
+                ld      hl, ntrob
+                inc     (hl)
+                ret
+
+; One step of every block on the list.
+
+animfloor:      ld      a, (ntrob)
+                or      a
+                ret     z
+                ld      (trleft), a
+                ld      hl, troblist
+                ld      (trptr), hl
+aftrob:         ld      hl, (trptr)
+                ld      a, (hl)
+                ld      (blockrow), a
+                ld      b, a
+                inc     hl
+                ld      a, (hl)
+                ld      (blockcol), a
+                ld      c, a
+                inc     hl
+                ld      (trptr), hl
+                call    blockat
+                ld      hl, (blockptr)
+                push    hl
+                ld      de, 30
+                add     hl, de
+                ld      a, (hl)         ; the count, one step on
+                inc     a
+                ld      (hl), a
+                cp      BG_FFALLING
+                jr      c, afdraw
+                pop     hl              ; time it went: the block is空 now
+                ld      (hl), BG_SPACE
+                push    hl
+                ld      hl, ntrob       ; and off the list
+                dec     (hl)
+afdraw:         pop     hl
+                call    page_art
+                call    redblock        ; the block, and the one to its right
+                ld      a, (blockcol)
+                cp      9
+                jr      nc, afnext
+                inc     a
+                ld      (blockcol), a
+                call    redblock
+afnext:         ld      hl, trleft
+                dec     (hl)
+                jp      nz, aftrob
+                ret
+
+ntrob:          db      0
+trleft:         db      0
+trcol:          db      0
+trptr:          dw      0
+troblist:       ds      MAXTROB * 2

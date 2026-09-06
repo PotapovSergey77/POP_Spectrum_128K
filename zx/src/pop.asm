@@ -158,6 +158,8 @@ mainwait:       halt
                 call    check_barr
                 call    check_floor
                 call    do_fall
+                call    checkpress
+                call    animfloor
                 call    nextroom
                 call    draw_prince
                 call    page_art
