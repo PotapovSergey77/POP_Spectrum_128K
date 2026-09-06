@@ -19,6 +19,13 @@ An image record is width (in bytes of 7 pixels), height, then width*height
 bytes -- BOTTOM row first, which is the order FASTLAY walks them in.  Bit 7
 of an image byte is the Apple's palette bit and carries no luminance, so it
 is dropped here rather than at draw time.
+
+The seven pixels are also turned round here, leftmost into bit 7, which is
+the order the Spectrum reads a byte in.  It costs nothing at export and it
+is the one thing about the art that never changes from room to room, so the
+repack at the end of a build no longer has to reverse every byte it touches.
+Composition does not care either way: it lays whole bytes down with AND, ORA,
+STA and XOR, and none of those has an opinion about which end a byte starts.
 """
 import os
 import struct
@@ -80,6 +87,9 @@ def offsets(names):
     return out
 
 
+REV = [int('{:08b}'.format(b)[::-1], 2) for b in range(256)]
+
+
 def image_table(path):
     """count, count 2-byte offsets, then the records -- bottom row first."""
     t = popimg.Table(path)
@@ -96,7 +106,7 @@ def image_table(path):
                 for y in range(img.height)]
         rows.reverse()                          # back to POP's own order
         for r in rows:
-            body += bytes(b & 0x7f for b in r)
+            body += bytes(REV[b & 0x7f] for b in r)
     head = bytearray([top])
     base = 1 + 2 * top
     for i in range(1, top + 1):

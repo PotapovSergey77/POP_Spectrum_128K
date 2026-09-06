@@ -8,10 +8,15 @@
 ; those redraw a block while the game runs.
 ;
 ; A room is composed in the Apple's own layout -- 40 bytes to a scanline,
-; seven pixels to a byte, bit 0 leftmost -- so that every piece goes down
-; where POP puts it, on a seven pixel boundary, with no shifting.  That canvas
-; lives in a bank of its own; the pieces and the tables live in another; and
-; the finished canvas is repacked into the room's 35 byte rows at the end.
+; seven pixels to a byte -- so that every piece goes down where POP puts it,
+; on a seven pixel boundary, with no shifting: XCO is a byte index there, and
+; all four of AND, ORA, STA and XOR are plain byte work.  Twenty eight pixels
+; to a block is three and a half Spectrum bytes, so composing in the screen's
+; own layout instead would put half the pieces mid-byte and every one of those
+; ops would need edge masks.  That canvas lives in a bank of its own; the
+; pieces and the tables live in another; and the finished canvas is repacked
+; into the room's 35 byte rows at the end.  The repack no longer turns bytes
+; round -- the art ships that way -- so it is only closing up the spare bit.
 ;
 ; The two banks are never wanted at the same moment.  A piece is read from the
 ; background bank into a buffer down here, and then laid into the canvas with
@@ -219,13 +224,13 @@ bgbmask:        ld      a, (bgop)       ; a mask covers what an AND clears,
                 jr      nz, bgbm1        ; rectangle of an STA
                 ld      a, (de)
                 cpl
-                and     0x7f
+                and     0xfe
                 jr      bgbmput
 bgbm1:          dec     a
                 jr      nz, bgbm2
                 ld      a, (de)
                 jr      bgbmput
-bgbm2:          ld      a, 0x7f
+bgbm2:          ld      a, 0xfe
 bgbmput:        or      (hl)
                 ld      (hl), a
 bgbytenext:     inc     hl
@@ -793,8 +798,8 @@ imgbuf:         ds      384             ; the largest piece is 378 bytes
 
 ; ---------------------------------------------------------------- repack
 ;
-; The canvas holds the room the Apple's way, seven pixels to a byte with bit 0
-; leftmost; the room wants eight to a byte with bit 7 leftmost.  Forty bytes
+; The canvas holds the room the Apple's way, seven pixels to a byte on a seven
+; pixel boundary; the room wants eight to a byte.  Forty bytes
 ; in, thirty five out, and the two banks are never in together, so a row goes
 ; through a buffer down here.
 
@@ -849,137 +854,107 @@ cvleft2:        db      0
 cvacc:          db      0
 cvbuf:          ds      CANVAS_W
 ; Eight bytes of seven pixels are exactly seven of eight, so the row divides
-; into five of these and nothing is left over.  Reversing first puts the
-; leftmost pixel in bit 7, where the Spectrum wants it, and then each output
-; byte is the tail of one source byte and the head of the next.
+; into five of these and nothing is left over.  The art is stored with its
+; leftmost pixel already in bit 7 -- see bgexport.py -- so all that is left
+; here is to close up the gap bit 0 leaves in every byte: each one written is
+; the tail of one source byte and the head of the next.  The tail is carried
+; in C from the round before, which is why nothing is read twice.
 ;
 ; In: HL = eight source bytes, DE = seven to write.  Out: both past them.
 
-cv8to7:         ld      (cvdst), de     ; where the seven are to go
-                ex      de, hl          ; DE = the eight, HL free for the table
-                ld      h, revtab / 256
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 0), a
-                inc     de
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 1), a
-                inc     de
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 2), a
-                inc     de
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 3), a
-                inc     de
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 4), a
-                inc     de
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 5), a
-                inc     de
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 6), a
-                inc     de
-                ld      a, (de)
-                ld      l, a
-                ld      a, (hl)
-                ld      (cvrev + 7), a
-                inc     de
-                ex      de, hl          ; HL past the eight
-                ld      de, (cvdst)     ; and the seven where they were
+cv8to7:         ld      c, (hl)         ; the first of the eight
 
-                ld      a, (cvrev + 0)
+                ld      a, c
                 and     0xfe
-                ld      c, a
-                ld      a, (cvrev + 1)
+                ld      b, a
+                inc     hl
+                ld      c, (hl)
+                ld      a, c
                 rlca
                 and     0x01
-                or      c
+                or      b
                 ld      (de), a
                 inc     de
 
-                ld      a, (cvrev + 1)
+                ld      a, c
                 add     a, a
                 and     0xfc
-                ld      c, a
-                ld      a, (cvrev + 2)
+                ld      b, a
+                inc     hl
+                ld      c, (hl)
+                ld      a, c
                 rlca
                 rlca
                 and     0x03
-                or      c
+                or      b
                 ld      (de), a
                 inc     de
 
-                ld      a, (cvrev + 2)
+                ld      a, c
                 add     a, a
                 add     a, a
                 and     0xf8
-                ld      c, a
-                ld      a, (cvrev + 3)
+                ld      b, a
+                inc     hl
+                ld      c, (hl)
+                ld      a, c
                 rlca
                 rlca
                 rlca
                 and     0x07
-                or      c
+                or      b
                 ld      (de), a
                 inc     de
 
-                ld      a, (cvrev + 3)
+                ld      a, c
                 add     a, a
                 add     a, a
                 add     a, a
                 and     0xf0
-                ld      c, a
-                ld      a, (cvrev + 4)
+                ld      b, a
+                inc     hl
+                ld      c, (hl)
+                ld      a, c
                 rlca
                 rlca
                 rlca
                 rlca
                 and     0x0f
-                or      c
+                or      b
                 ld      (de), a
                 inc     de
 
-                ld      a, (cvrev + 4)
+                ld      a, c
                 add     a, a
                 add     a, a
                 add     a, a
                 add     a, a
                 and     0xe0
-                ld      c, a
-                ld      a, (cvrev + 5)
+                ld      b, a
+                inc     hl
+                ld      c, (hl)
+                ld      a, c
                 rlca
                 rlca
                 rlca
                 rlca
                 rlca
                 and     0x1f
-                or      c
+                or      b
                 ld      (de), a
                 inc     de
 
-                ld      a, (cvrev + 5)
+                ld      a, c
                 add     a, a
                 add     a, a
                 add     a, a
                 add     a, a
                 add     a, a
                 and     0xc0
-                ld      c, a
-                ld      a, (cvrev + 6)
+                ld      b, a
+                inc     hl
+                ld      c, (hl)
+                ld      a, c
                 rlca
                 rlca
                 rlca
@@ -987,11 +962,11 @@ cv8to7:         ld      (cvdst), de     ; where the seven are to go
                 rlca
                 rlca
                 and     0x3f
-                or      c
+                or      b
                 ld      (de), a
                 inc     de
 
-                ld      a, (cvrev + 6)
+                ld      a, c
                 add     a, a
                 add     a, a
                 add     a, a
@@ -999,17 +974,25 @@ cv8to7:         ld      (cvdst), de     ; where the seven are to go
                 add     a, a
                 add     a, a
                 and     0x80
-                ld      c, a
-                ld      a, (cvrev + 7)
-                rrca
+                ld      b, a
+                inc     hl
+                ld      c, (hl)
+                ld      a, c
+                rlca
+                rlca
+                rlca
+                rlca
+                rlca
+                rlca
+                rlca
                 and     0x7f
-                or      c
+                or      b
                 ld      (de), a
                 inc     de
+
+                inc     hl              ; past the eighth
                 ret
 
-cvdst:          dw      0
-cvrev:          ds      8
 
 
 ; ---------------------------------------------------------------- the mask
