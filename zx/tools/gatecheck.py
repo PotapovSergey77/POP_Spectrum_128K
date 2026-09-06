@@ -1,11 +1,19 @@
 """
-A pressplate opens a gate, and the gate comes back down.
+A pressplate opens a gate, the gate comes back down, and it is drawn right
+at every height on the way.
 
 The wiring is POP's own: LINKLOC and LINKMAP say what a plate drives, and a
 gate rises four pixels a frame, waits at the top and falls.  None of that is
 visible from a screenshot until you happen to be standing in the right room,
 so this drives it directly -- push each of level one's plates, then run the
 trans list frame by frame and watch what the linked gates do.
+
+Then the drawing: a gate is the one piece whose art depends on a state that
+changes while the game runs, and every gate in level one sits at 1 or 2, so
+composing the rooms as they ship never draws one more than a pixel off the
+floor.  The second half sets each gate to nine heights in turn and compares
+the room the game builds with the one renderroom draws, the way roomcheck
+does for the rooms as they are.
 
     gatecheck.py <tap>
 """
@@ -71,6 +79,39 @@ def gates(level):
                 yield n, i
 
 
+HEIGHTS = (0, 20, 60, 100, 140, 180, GMAXVAL, 238, 255)
+
+
+def drawn(tap, sym):
+    """Every gate at every height, the game's room against renderroom's."""
+    import roomcheck
+    bad = 0
+    for scrn, block in gates(poplevel.Level(LEVEL)):
+        room = scrn if block % 10 < 9 else None
+        if room is None:                # its bars hang in the room to the
+            room = poplevel.Level(LEVEL).links(scrn)[1]   # right of this one
+            if not room:
+                continue
+        for st in HEIGHTS:
+            level = poplevel.Level(LEVEL)
+            d = bytearray(level.data)
+            d[720 + (scrn - 1) * 30 + block] = st
+            level.data = bytes(d)
+            cpu = runtap.boot(tap)
+            runtap.game_frame(cpu, sym['main'], [])
+            call(cpu, sym['page_bg'])
+            cpu.mem[sym['level'] + 720 + (scrn - 1) * 30 + block] = st
+            made = roomcheck.compose(cpu, sym, room)
+            want = roomcheck.host(level, room)
+            n = sum(1 for i in range(6720) if made[i] != want[i])
+            if n:
+                bad += 1
+                print('gate %d/%d at %3d, room %2d: %d of 6720 bytes differ'
+                      % (scrn, block, st, room, n))
+    print('%d gate heights drawn wrong' % bad)
+    return bad
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -134,7 +175,7 @@ def main(argv):
                 bad += 1
                 print('   %d/%d ended at %d, not shut' % (g[0], g[1], end))
     print('%d problems' % bad)
-    return 1 if bad else 0
+    return 1 if bad + drawn(argv[1], sym) else 0
 
 
 if __name__ == '__main__':
