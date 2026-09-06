@@ -1521,3 +1521,159 @@ nrgo:           call    newroom         ; the room and everything about it
                 ret
 
 links:          ds      4
+
+; ---------------------------------------------------------------- one block
+;
+; RedBlockSure for a single block, which is what a loose floor, a gate or a
+; pressplate wants while the game is running: they change one block and the
+; room has to follow without being built again.
+;
+; The block's own four columns of the canvas are wiped and its five passes
+; run again -- everything that writes into those columns belongs to this
+; block, since drawc and drawb draw the piece to the LEFT but at the current
+; block's column -- and then the bytes that changed are repacked.
+;
+; In: (blockrow), (blockcol).
+
+redblock:       ld      a, (blockrow)
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blockbot
+                add     hl, de
+                ld      a, (hl)
+                ld      (dy), a
+                sub     3
+                ld      (ay), a
+
+                ld      a, (blockcol)   ; the piece to its left, for drawc
+                or      a               ; and drawb
+                jr      nz, rbleft
+                xor     a
+                ld      (preced), a
+                ld      (spreced), a
+                jr      rbwipe
+rbleft:         dec     a
+                ld      c, a
+                ld      a, (blockrow)
+                ld      b, a
+                call    blockat
+                ld      hl, (blockptr)
+                ld      a, (hl)
+                and     0x1f
+                ld      (preced), a
+                ld      de, 30
+                add     hl, de
+                ld      a, (hl)
+                ld      (spreced), a
+
+rbwipe:         ld      a, (blockcol)   ; four bytes to a block
+                add     a, a
+                add     a, a
+                ld      (xco), a
+                call    page_canvas
+                ld      a, (dy)
+                ld      (rbrow), a
+                ld      b, 63
+rbwipe1:        push    bc
+                ld      a, (rbrow)
+                cp      192
+                jr      nc, rbwipe2
+                call    canvasrow
+                ld      a, (xco)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+rbwipe2:        ld      hl, rbrow
+                dec     (hl)
+                pop     bc
+                djnz    rbwipe1
+
+                call    setblock        ; and lay it down again
+                call    draw_c
+                call    draw_b
+                call    draw_mb
+                call    draw_d
+                call    draw_md
+                call    draw_a
+                call    draw_front
+
+; The groups of eight Apple bytes that cover it, repacked into the room.  A
+; block starts on a multiple of four, so it is either the first half of a
+; group or the second, and one group either side takes in whatever a piece
+; spilled.
+
+                ld      a, (blockcol)
+                add     a, a
+                add     a, a
+                srl     a               ; which group it starts in
+                srl     a
+                srl     a
+                or      a
+                jr      z, rbg0
+                dec     a
+rbg0:           ld      (rbgroup), a
+                ld      a, (dy)
+                sub     62
+                jr      nc, rbtop
+                xor     a
+rbtop:          ld      (rbrow), a
+                ld      a, 63
+                ld      (rbleftn), a
+rbline:         ld      a, (rbrow)
+                cp      192
+                jr      nc, rbnext
+
+                call    page_canvas
+                ld      a, (rbrow)
+                call    canvasrow
+                ld      a, (rbgroup)    ; eight bytes to a group
+                add     a, a
+                add     a, a
+                add     a, a
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      de, cvbuf
+                ld      bc, 24
+                ldir
+
+                call    page_art
+                ld      a, (rbrow)
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (rbgroup)    ; seven bytes out to a group
+                ld      c, a
+                add     a, a
+                add     a, a
+                add     a, a
+                sub     c
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ex      de, hl
+                ld      hl, cvbuf
+                ld      b, 3
+rbgrp:          push    bc
+                call    cv8to7
+                pop     bc
+                djnz    rbgrp
+
+rbnext:         ld      hl, rbrow
+                inc     (hl)
+                ld      hl, rbleftn
+                dec     (hl)
+                jp      nz, rbline
+                ret
+
+rbrow:          db      0
+rbleftn:        db      0
+rbgroup:        db      0
