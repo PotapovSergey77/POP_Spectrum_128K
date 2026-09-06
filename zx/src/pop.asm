@@ -42,6 +42,8 @@ stubs:          ld      a, BANK_ART
                 jr      dopage
                 ld      a, BANK_SPR3
                 jr      dopage
+                ld      a, BANK_BG
+                jr      dopage
                 jp      start
 
 ; Called from BASIC, so it has to leave everything else about the port alone
@@ -62,6 +64,7 @@ dopage:         and     7
                 ret
 
                 include "assets.inc"
+                include "bg.inc"
 
 SCREEN          equ     16384
 BUFW            equ     8               ; widest sprite plus the shift byte
@@ -95,6 +98,7 @@ start:          di
 
                 call    check_banks     ; before anything is written, and it
                                         ; leaves the art bank in
+                call    newroom         ; and the room is composed, not loaded
 
                 call    set_attrs
 
@@ -2477,6 +2481,8 @@ scraddr:        push    bc
                 ld      l, a
                 pop     bc
                 ret
+
+                include "bg.asm"
 
 ; ---------------------------------------------------------------- data
 
