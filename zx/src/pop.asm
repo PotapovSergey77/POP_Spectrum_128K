@@ -2655,7 +2655,7 @@ floorband:      incbin  "floorband.bin"
 torches:        incbin  "torches.bin"
 flametab:       incbin  "flametab.bin"
 flames:         incbin  "flames.bin"
-foreband:       incbin  "foreband.bin"
+foreband:       ds      192
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"
                 ds      (($ + 255) / 256 * 256) - $

@@ -783,7 +783,8 @@ cvgroup:        push    bc
 ; A room, start to finish: the blocks laid into the canvas, then repacked.
 
 newroom:        call    compose
-                jp      convert
+                call    convert
+                jp      build_fore
 
 ; build_fore below is written but not called yet: the rectangles it collects
 ; are right -- the row index it makes matches the one baked on the host, row
@@ -1030,7 +1031,7 @@ bfmark2:        inc     b
                 jr      nz, bfmark1
                 ld      hl, fleft
                 dec     (hl)
-                jr      nz, bfmark
+                jp      nz, bfmark
 
                 ld      hl, foreband    ; number the rows that are marked
                 ld      b, 192
@@ -1066,14 +1067,14 @@ bfpaint:        call    frontrect
                 ld      (frows), a
 bfrow:          ld      a, (frow)
                 cp      192
-                jr      nc, bfrownext
+                jp      nc, bfrownext
                 ld      l, a
                 ld      h, 0
                 ld      de, foreband
                 add     hl, de
                 ld      a, (hl)
                 inc     a
-                jr      z, bfrownext
+                jp      z, bfrownext
                 dec     a
                 call    mul35
                 ld      de, foremask
@@ -1098,12 +1099,16 @@ bfsh1:          dec     b
                 jr      bfsh1
 bfsh2:          ld      c, a            ; C = the first byte's mask
 
-                ld      a, (fx0)        ; the byte it ends in
-                ld      b, a
+                push    hl              ; the last pixel of it, which for a
+                ld      a, (fx0)        ; piece at the right hand end of the
+                ld      l, a            ; room does not fit in eight bits
+                ld      h, 0
                 ld      a, (fpx)
-                add     a, b
-                dec     a
-                ld      b, a            ; B = the last pixel
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                dec     hl
+                ld      a, l
                 and     7               ; bits down to that one stay
                 ld      d, a
                 ld      a, 7
@@ -1116,6 +1121,14 @@ bfsh3:          dec     d
                 add     a, a
                 jr      bfsh3
 bfsh4:          ld      d, a            ; D = the last byte's mask
+                srl     h               ; and B = which byte that is
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                ld      b, l
+                pop     hl
 
                 ld      a, (fx0)        ; how many bytes it spans
                 srl     a
@@ -1123,9 +1136,6 @@ bfsh4:          ld      d, a            ; D = the last byte's mask
                 srl     a
                 ld      e, a
                 ld      a, b
-                srl     a
-                srl     a
-                srl     a
                 sub     e
                 jr      nz, bfwide
                 ld      a, c            ; all in the one byte
