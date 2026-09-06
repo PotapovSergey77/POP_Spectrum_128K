@@ -2587,7 +2587,10 @@ hide_behind:    ld      hl, foremask
 ; things line up on each row: the mask, the room the mask picks out of, and
 ; the working copy he was drawn into.
 
-cover_rows:     ld      a, (newcol)
+cover_rows:     ld      a, (neww)       ; likewise: djnz would go round
+                or      a               ; 256 times for none of him
+                ret     z
+                ld      a, (newcol)
                 call    mastercol
                 ld      (masterc), a
                 ld      a, (newh)
@@ -2893,6 +2896,9 @@ show_one:       ld      de, shcol       ; col, top, width, height, in order
 showgo:         ld      a, (shh)
                 or      a
                 ret     z
+                ld      a, (shw)        ; none of him on screen: LDIR would
+                or      a               ; read a width of zero as 65536 and
+                ret     z               ; take the stack with it
                 ld      b, a
                 ld      a, (shtop)
                 ld      (rowy), a
