@@ -2263,7 +2263,11 @@ rbline:         ld      a, (rbrow)
                 add     hl, de
                 ld      de, cvbuf
                 ld      bc, 8
-                ldir
+                ld      a, (redwide)
+                or      a
+                jr      z, rbone
+                ld      c, 16
+rbone:          ldir
 
                 call    page_art
                 ld      a, (rbrow)
@@ -2282,6 +2286,10 @@ rbline:         ld      a, (rbrow)
                 ex      de, hl
                 ld      hl, cvbuf
                 call    cv8to7
+                ld      a, (redwide)    ; a piece that reaches past its own
+                or      a               ; block wants the next group too
+                jr      z, rbnext
+                call    cv8to7
 
 rbnext:         ld      hl, rbrow
                 inc     (hl)
@@ -2292,7 +2300,12 @@ rbnext:         ld      hl, rbrow
                 ld      (bandtop), a
                 ld      a, 191
                 ld      (bandbot), a
-                jp      redshow         ; and on to the screen
+                call    redshow         ; and on to the screen
+                xor     a
+                ld      (redwide), a
+                ret
+
+redwide:        db      0
 
 rbrow:          db      0
 rbleftn:        db      0
@@ -3103,7 +3116,9 @@ redright:       call    onscreen
                 ret     nc
                 inc     a
                 ld      (blockcol), a
-                call    page_art
+                ld      a, 1            ; the door is forty two pixels wide
+                ld      (redwide), a    ; and stands a byte in, so it reaches
+                call    page_art        ; into the block after this one
                 jp      redblock
 
 redgate:        call    onscreen

@@ -2960,9 +2960,16 @@ redshow:        ld      a, (blockcol)   ; the block's leftmost room byte
                 ld      a, b
 rsleft:         ld      (rdstart), a
                 ld      c, a
-                ld      a, (rdcol)
-                add     a, REDWIDE
+                ld      a, (rdcol)      ; five bytes for a block, nine when
+                add     a, REDWIDE      ; the piece reaches past it
                 ld      b, a
+                ld      a, (redwide)
+                or      a
+                jr      z, rswide1
+                ld      a, b
+                add     a, 4
+                ld      b, a
+rswide1:
                 ld      a, (cam)
                 add     a, 32
                 cp      b
