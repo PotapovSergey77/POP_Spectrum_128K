@@ -146,9 +146,39 @@ bgdsize:        add     hl, de
 bgrowloop:      push    bc
                 ld      a, (bgrow)
                 cp      192
-                jr      nc, bgrowskip
+                jp      nc, bgrowskip
+                ld      a, (bgmask)     ; into a mask, or into the picture
+                or      a
+                jp      nz, bgmaskrow
+                ld      a, (bgrow)
                 call    canvasrow       ; HL = where that row starts
-                ld      a, (xco)
+                jr      bgrowat
+bgmaskrow:      ld      a, (bgrow)      ; only the floor bands are kept
+                ld      l, a
+                ld      h, 0
+                ld      de, floorband
+                add     hl, de
+                ld      a, (hl)
+                inc     a
+                jp      z, bgrowskip
+                dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl          ; eight
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl          ; thirty two
+                add     hl, de          ; and forty
+                ld      a, (bgmask)
+                dec     a
+                ld      de, FLOORCAN
+                jr      z, bgmaskr1
+                ld      de, HALFCAN
+bgmaskr1:       add     hl, de
+bgrowat:        ld      a, (xco)
                 cp      CANVAS_W
                 jr      nc, bgrowskip
                 ld      e, a
@@ -162,6 +192,9 @@ bgrowloop:      push    bc
 bgbyte:         ld      a, c            ; anything past the row is dropped
                 cp      CANVAS_W
                 jr      nc, bgbytenext
+                ld      a, (bgmask)
+                or      a
+                jp      nz, bgbmask
                 ld      a, (bgop)
                 or      a
                 jr      nz, bgb1
@@ -180,6 +213,21 @@ bgb2:           dec     a
 bgb3:           ld      a, (de)         ; xor
                 xor     (hl)
 bgbput:         ld      (hl), a
+                jr      bgbytenext
+bgbmask:        ld      a, (bgop)       ; a mask covers what an AND clears,
+                or      a                ; what an ORA sets, and the whole
+                jr      nz, bgbm1        ; rectangle of an STA
+                ld      a, (de)
+                cpl
+                and     0x7f
+                jr      bgbmput
+bgbm1:          dec     a
+                jr      nz, bgbm2
+                ld      a, (de)
+                jr      bgbmput
+bgbm2:          ld      a, 0x7f
+bgbmput:        or      (hl)
+                ld      (hl), a
 bgbytenext:     inc     hl
                 inc     de
                 inc     c
@@ -195,7 +243,8 @@ bgrowskip:      ld      hl, (bgsrc)     ; off the screen, but the source moves
 bgrowdown:      ld      hl, bgrow
                 dec     (hl)
                 pop     bc
-                djnz    bgrowloop
+                dec     b
+                jp      nz, bgrowloop
                 ret
 
 ; A = a scanline.  Out: HL = where its forty bytes start in the canvas.
@@ -784,7 +833,8 @@ cvgroup:        push    bc
 
 newroom:        call    compose
                 call    convert
-                jp      build_fore
+                call    build_fore
+                jp      floormasks
 
 ; build_fore below is written but not called yet: the rectangles it collects
 ; are right -- the row index it makes matches the one baked on the host, row
@@ -1207,3 +1257,190 @@ frows:          db      0
 fx0:            db      0
 fpx:            db      0
 frontlist:      ds      MAXFRONT * 4
+
+; ---------------------------------------------------------------- the floor
+;
+; DRAWFLOOR and DRAWHALF: the floorpieces POP lays back over a character who
+; is falling, hanging or climbing.  What they cover is not the pixels they
+; light -- an AND covers what it clears and an STA the whole of its rectangle
+; -- so the same passes are run again with the pieces going into a mask.
+;
+; Only the fifteen rows of each floor band are kept, which is where the
+; perspective wedge is; floorband already says which row of the mask a
+; scanline is, or -1.  Two masks: the whole piece, and the shorter one
+; climbing up uses, which leaves the hands on the ledge showing.
+
+FLOORCAN        equ     CANVAS + CANVAS_W * 192
+HALFCAN         equ     FLOORCAN + CANVAS_W * 45
+
+; The tiles that have a half piece in the dungeon set.  Anything else falls
+; back to the whole floorpiece, exactly as FRAMEADV.S does.
+
+halfpiece:      ld      a, (objid)
+                cp      BG_FLOOR
+                ret     z
+                cp      BG_TORCH
+                ret     z
+                cp      BG_DPRESSPLATE
+                ret     z
+                cp      BG_EXIT
+                ret
+
+; One block's floorpiece, into whichever mask is in hand.
+
+floorpiece:     call    page_bg
+                ld      a, (bgmask)
+                dec     a
+                jr      z, fpwhole      ; the first mask is the whole piece
+                call    halfpiece
+                jr      nz, fpwhole
+                ld      a, (ay)         ; CUmask and CUpiece, the short one
+                ld      (yco), a
+                ld      a, (bgtables + T_CUMASK)
+                ld      c, BG_AND
+                call    bglay
+                call    page_bg
+                ld      a, (ay)
+                ld      (yco), a
+                ld      a, (bgtables + T_CUPIECE)
+                ld      c, BG_ORA
+                call    bglay
+                jp      draw_d
+
+fpwhole:        ld      a, (objid)      ; addamask, then adda
+                call    tab_maska
+                or      a
+                jr      z, fpa
+                ld      c, a
+                ld      a, (ay)
+                ld      (yco), a
+                ld      a, c
+                ld      c, BG_AND
+                call    bglay
+                call    page_bg
+fpa:            ld      a, (objid)
+                cp      BG_LOOSE
+                jr      nz, fppiece
+                call    loose_y
+                ld      hl, bgtables + T_LOOSEA
+                call    bgentry
+                jr      fpgo
+fppiece:        call    tab_piecea
+fpgo:           or      a
+                jr      z, fpd
+                ld      c, a
+                ld      a, (objid)
+                push    bc
+                call    tab_pieceay
+                call    bgay
+                pop     bc
+                ld      a, c
+                ld      c, BG_ORA
+                call    bglay
+                call    page_bg
+fpd:            jp      draw_d
+
+; Both masks, made and repacked.
+
+floormasks:     ld      a, 1
+                call    onemask
+                ld      hl, FLOORCAN
+                ld      (cvsrc2), hl
+                ld      hl, floormask
+                ld      (cvdst2), hl
+                call    packmask
+
+                ld      a, 2
+                call    onemask
+                ld      hl, HALFCAN
+                ld      (cvsrc2), hl
+                ld      hl, halfmask
+                ld      (cvdst2), hl
+                call    packmask
+
+                xor     a
+                ld      (bgmask), a
+                ret
+
+; A = which mask.  Runs the floorpiece pass over every block of the room.
+
+onemask:        ld      (bgmask), a
+                call    page_canvas
+                dec     a
+                ld      hl, FLOORCAN
+                jr      z, om1
+                ld      hl, HALFCAN
+om1:            ld      d, h
+                ld      e, l
+                inc     de
+                ld      bc, CANVAS_W * 45 - 1
+                ld      (hl), 0
+                ldir
+
+                ld      a, 2
+                ld      (blockrow), a
+omrow:          ld      a, (blockrow)
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blockbot
+                add     hl, de
+                ld      a, (hl)
+                ld      (dy), a
+                sub     3
+                ld      (ay), a
+                xor     a
+                ld      (preced), a
+                ld      (spreced), a
+                ld      (blockcol), a
+                ld      (xco), a
+omcol:          call    setblock
+                call    floorpiece
+                ld      a, (objid)
+                ld      (preced), a
+                ld      a, (state)
+                ld      (spreced), a
+                ld      a, (xco)
+                add     a, 4
+                ld      (xco), a
+                ld      hl, blockcol
+                inc     (hl)
+                ld      a, (hl)
+                cp      10
+                jr      c, omcol
+                ld      hl, blockrow
+                ld      a, (hl)
+                or      a
+                ret     z
+                dec     (hl)
+                jr      omrow
+
+; Forty five rows of forty Apple bytes into forty five of thirty five.
+
+packmask:       ld      a, 45
+                ld      (cvleft), a
+pmrow:          call    page_canvas
+                ld      hl, (cvsrc2)
+                ld      de, cvbuf
+                ld      bc, CANVAS_W
+                ldir
+                ld      (cvsrc2), hl
+
+                call    page_art
+                ld      de, (cvdst2)
+                ld      hl, cvbuf
+                ld      b, 5
+pmgroup:        push    bc
+                call    cv8to7
+                pop     bc
+                djnz    pmgroup
+                ld      (cvdst2), de
+
+                ld      hl, cvleft
+                dec     (hl)
+                jr      nz, pmrow
+                ret
+
+cvsrc2:         dw      0
+cvdst2:         dw      0
+bgmask:         db      0
