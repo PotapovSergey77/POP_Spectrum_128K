@@ -61,15 +61,15 @@ SINGLES = ('looseb', 'panelb0', 'panelc0', 'archpanel', 'CUmask', 'CUpiece',
 
 def front_body(imgnum, t1, t2):
     """
-    Which part of a front piece is solid enough to stand in front of him.
+    How much of a front piece stands in front of him: all of it.
 
-    A piece is not opaque across its whole rectangle.  A column is thirteen
-    pixels of body and then seven of thinly dithered shadow beside it; a
-    pillar is eight pixels of nothing and then its body.  Masking the whole
-    rectangle hides him where he should be seen; masking only the lit pixels
-    lets him through the body's own dither, which on the Apple reads as solid
-    colour at 140 and here does not.  So take the columns that are lit in half
-    their rows or more, from the first to the last.
+    I tried narrowing this to the columns that are lit in half their rows or
+    more, on the theory that a column's rectangle reached past its body.  It
+    does not: the seven thin columns to the right of a column are its shaded
+    side, and cutting them out let him show through it.  What made the mask
+    look too wide was fx0 wrapping at 255, which painted a right hand piece
+    on top of a left hand one -- the screen with the exit, which has no piece
+    far enough right to wrap, was correct all along.
 
     Out: (offset, width) in pixels, both zero if there is no piece.
     """
@@ -78,15 +78,7 @@ def front_body(imgnum, t1, t2):
     img = (t2 if imgnum & 0x80 else t1).get(imgnum & 0x7f)
     if img is None:
         return 0, 0
-    dense = []
-    for x in range(img.width * 7):
-        lit = sum(1 for y in range(img.height)
-                  if img.data[y * img.width + x // 7] & 0x7f & (1 << (x % 7)))
-        if lit * 2 >= img.height:
-            dense.append(x)
-    if not dense:
-        return 0, 0
-    return dense[0], dense[-1] - dense[0] + 1
+    return 0, img.width * 7
 
 
 def piece_tables():
