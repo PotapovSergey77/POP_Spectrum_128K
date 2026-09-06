@@ -2944,7 +2944,9 @@ trstore:        ld      l, c
 ; The object in hand: work out what it is, move it on, put the state back and
 ; only then redraw, because the drawing reads the room's copy of the state.
 
-animobj:        call    trobat
+animobj:        xor     a               ; nothing wants redrawing yet -- and
+                ld      (redwant), a    ; this has to be before the dispatch,
+                call    trobat          ; which jumps past anything after it
                 ld      (aoid), a
                 cp      BG_GATE
                 jr      z, aogate
@@ -2960,8 +2962,6 @@ animobj:        call    trobat
                 jr      z, aodone       ; the floor that was here has gone
                 jp      stopobj         ; none of these: off the list
 
-                xor     a
-                ld      (redwant), a
 aogate:         call    animgate
                 jr      aodone
 aoplate:        call    animplate
