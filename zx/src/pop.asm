@@ -84,10 +84,15 @@ ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
 FLOOR_HEIGHT    equ     15              ; GAMEEQ.S, the thickness of a floor
 ; The room runs from block 0 to block 9, and a character on block b has his
-; anchor between 28b+2 and 28b+29.  Only walls should stop him inside that --
-; these are just to keep him on the map.
-X_MIN           equ     14
-X_MAX           equ     255
+; anchor between 28b+2 and 28b+29 -- so the room is 280 pixels wide and his
+; coordinate does not fit in a byte.  POP keeps FCharX in two, and so must we:
+; capping it at 255 stopped him a whole tile short of the right hand wall and
+; forced the room to change before he had left the screen.
+;
+; Nothing but a wall should stop him inside the room; these are a backstop for
+; a coordinate that has gone wrong, no more.  The cut fires well before them.
+X_MIN           equ     -40
+X_MAX           equ     320
 
 ; ---------------------------------------------------------------- entry
 
@@ -110,8 +115,8 @@ start:          di
                 call    repaint
 
 
-                ld      a, START_X
-                ld      (charx), a
+                ld      hl, START_X
+                ld      (charx), hl
                 ld      a, START_Y
                 ld      (chary), a
                 ld      a, START_ROW
@@ -296,22 +301,30 @@ camera:         ld      a, (cam)
                 add     a, a
                 add     a, a
                 add     a, a
-                ld      c, a            ; the view's left edge
-                ld      a, (charx)
-                sub     c               ; where he stands on screen
+                ld      e, a            ; the view's left edge
+                ld      d, 0
+                ld      hl, (charx)
+                or      a
+                sbc     hl, de          ; where he stands on screen
+                bit     7, h
+                jr      nz, camback     ; off the left of it
+                ld      a, h
+                or      a
+                jr      nz, camfwd      ; and off the right
+                ld      a, l
                 cp      160
-                jr      c, camnear
-                ld      a, b
-                cp      CAM_MAX
+                jr      nc, camfwd
+                cp      96
                 ret     nc
-                inc     b
-                jr      camset
-camnear:        cp      96
-                ret     nc
-                ld      a, b
+camback:        ld      a, b
                 or      a
                 ret     z
                 dec     b
+                jr      camset
+camfwd:         ld      a, b
+                cp      CAM_MAX
+                ret     nc
+                inc     b
 camset:         ld      a, b
                 ld      (cam), a
                 ld      a, 1
@@ -1102,35 +1115,30 @@ movepos:        add     a, a
                 or      a
                 jp      p, moveadd
                 dec     d               ; sign extend into DE
-moveadd:        ld      a, (charx)
-                ld      l, a
-                ld      h, 0
+moveadd:        ld      hl, (charx)
                 add     hl, de
-                ld      a, h
+                push    hl              ; only a coordinate that has gone
+                ld      de, X_MIN       ; wrong is caught here
                 or      a
-                jr      z, moverange
-                bit     7, h            ; ran off one end or the other
-                jr      z, movehigh
-                ld      l, X_MIN
+                sbc     hl, de
+                pop     hl
+                jp      p, movetop
+                ld      hl, X_MIN
                 jr      movestore
-movehigh:       ld      l, X_MAX
-                jr      movestore
-moverange:      ld      a, l
-                cp      X_MIN
-                jr      nc, movetop
-                ld      l, X_MIN
-                jr      movestore
-movetop:        cp      X_MAX
-                jr      c, movestore
-                ld      l, X_MAX
+movetop:        push    hl
+                ld      de, X_MAX
+                or      a
+                sbc     hl, de
+                pop     hl
+                jp      m, movestore
+                ld      hl, X_MAX
 ; ADDCHARX, and nothing more.  A chx in the byte code just moves him: POP
 ; does not test anything here, and neither may we -- climbup steps five units
 ; forward while his own block is still the wall he is climbing, and a test in
 ; the middle of the sequence refuses that and leaves him hanging in the air.
 ; Collisions are a pass of their own, below.
 
-movestore:      ld      a, l
-                ld      (charx), a
+movestore:      ld      (charx), hl
                 ret
 
 ; CHECKBARR: having moved, he may be standing in a wall.  Push him back out
@@ -1159,27 +1167,28 @@ check_barr:     ld      a, (charact)
 cbgo:           xor     a
                 ld      (blocked), a
                 ld      b, 32           ; he cannot be deeper in than this
-cbtry:          ld      a, (charx)      ; his own coordinate, not his foot:
+cbtry:          ld      hl, (charx)     ; his own coordinate, not his foot:
                 call    tile_flags      ; the wall stops his body
                 call    cmp_barr
                 ret     z
                 ld      a, 1
                 ld      (blocked), a
+                ld      hl, (charx)
                 ld      a, (facing)
                 or      a
-                ld      a, (charx)
                 jr      z, cbback
-                dec     a               ; facing right: back is left
+                dec     hl              ; facing right: back is left
                 jr      cbset
-cbback:         inc     a
-cbset:          ld      (charx), a
+cbback:         inc     hl
+cbset:          ld      (charx), hl
                 djnz    cbtry
                 ret
 
-; A = a screen x.  Out: A = the tile's flags there, zero off the room.
+; HL = a room x, which may be off either end.  Out: A = the tile's flags
+; there, zero off the room.
 
-tile_flags:     ld      l, a
-                ld      h, 0
+tile_flags:     call    inroom
+                jr      nc, tilenone
                 ld      de, blockof
                 add     hl, de
                 ld      a, (hl)
@@ -1193,6 +1202,24 @@ tile_flags:     ld      l, a
                 and     0x1f            ; getobjid: the low five bits of it
                 ret
 tilenone:       xor     a
+                ret
+
+; Carry set if HL is a room x the tables cover -- blockof and distof run one
+; block past the room's 280 so the block ahead can be asked for.
+
+inroom:         bit     7, h
+                jr      nz, notinroom   ; behind the left hand wall
+                ld      a, h
+                or      a
+                jr      z, inroomyes    ; under 256, and the table is longer
+                dec     a
+                jr      nz, notinroom
+                ld      a, l
+                cp      280 + 8 - 256   ; the tables run a block past the room
+                jr      nc, notinroom
+inroomyes:      scf
+                ret
+notinroom:      or      a
                 ret
 
 ; CMPSPACE and CMPBARR out of CTRLSUBS.S, as the tables they may as well be.
@@ -1219,8 +1246,8 @@ cmp_barr:       ld      l, a
 ; In: A = a screen x, C = a block row.  Out: A = that tile's flags.  The row
 ; is free here, which tile_flags cannot afford -- it runs inside movetry.
 
-tile_in_row:    ld      l, a
-                ld      h, 0
+tile_in_row:    call    inroom
+                jr      nc, tilenone
                 ld      de, blockof
                 add     hl, de
                 ld      a, (hl)
@@ -1685,7 +1712,7 @@ crop_char:      xor     a
 
                 ld      a, (croprow)
                 ld      c, a
-                ld      a, (curleft)
+                ld      hl, (curleft)
                 call    tile_in_row
                 call    crop_solid
                 ret     z               ; open over his left: leave him be
@@ -1701,17 +1728,16 @@ crop_char:      xor     a
 
 cropboth:       ld      a, (croprow)
                 ld      c, a
-                ld      a, (curleft)    ; and the block over his right
-                ld      b, a
-                ld      a, (curw)
+                ld      a, (curw)       ; and the block over his right
                 add     a, a
                 add     a, a
                 add     a, a
-                add     a, b
-                jr      c, cropwide     ; his picture runs off the screen
-                dec     a
+                ld      e, a
+                ld      d, 0
+                ld      hl, (curleft)
+                add     hl, de
+                dec     hl
                 jr      cropright
-cropwide:       ld      a, 255
 cropright:      call    tile_in_row
                 call    crop_solid
                 ret     z
@@ -1798,9 +1824,13 @@ base_x:         ld      a, (frame)
                 ld      a, b
                 jr      nz, bxfwd
                 neg
-bxfwd:          ld      b, a
-                ld      a, (charx)
-                add     a, b
+bxfwd:          ld      e, a            ; sign extend the offset and add
+                ld      d, 0
+                or      a
+                jp      p, bxpos
+                dec     d
+bxpos:          ld      hl, (charx)
+                add     hl, de
                 ret
 
 ; Out: A = the flags of the tile he is standing on.
@@ -1816,12 +1846,12 @@ front_flags:    ld      a, (facing)
                 or      a
                 jr      z, ffback
 fffwd:          call    base_x
-                add     a, BLOCK_PX
-                jr      c, ffnone
+                ld      de, BLOCK_PX
+                add     hl, de
                 jp      tile_flags
 ffback:         call    base_x
-                sub     BLOCK_PX
-                jr      c, ffnone
+                ld      de, -BLOCK_PX
+                add     hl, de
                 jp      tile_flags
 ffnone:         xor     a
                 ret
@@ -1837,33 +1867,26 @@ above_flags:    call    base_x
                 jr      arow
 abovebehind_flags:
                 call    base_x
-                ld      b, a
                 ld      a, (facing)
                 or      a
-                ld      a, b
                 jr      nz, afleft      ; behind is the other way round
                 jr      afright
 
 abovefront_flags:
                 call    base_x
-                ld      b, a
                 ld      a, (facing)
                 or      a
-                ld      a, b
                 jr      z, afleft
-afright:
-                add     a, BLOCK_PX
-                jr      c, ffnone
+afright:        ld      de, BLOCK_PX
+                add     hl, de
                 jr      arow
-afleft:         sub     BLOCK_PX
-                jr      c, ffnone
-arow:           ld      b, a
-                ld      a, (blocky)
+afleft:         ld      de, -BLOCK_PX
+                add     hl, de
+arow:           ld      a, (blocky)
                 or      a
                 jr      z, ffnone       ; nothing above the top row
                 dec     a
                 ld      c, a
-                ld      a, b
                 jp      tile_in_row
 
 ; InsideBlock in CTRL.S.  A solid block reads as clear to cmpspace, so a
@@ -1898,9 +1921,10 @@ ibreland:       call    move_by
 ; is offset 7, so seven units to the edge behind and six to the one ahead.
 
 get_dist:       call    base_x
-                ld      l, a
-                ld      h, 0
-                ld      de, distof
+                call    inroom
+                jr      c, gd1
+                ld      hl, 0           ; off the map: the near edge will do
+gd1:            ld      de, distof
                 add     hl, de
                 ld      b, (hl)
                 ld      a, (facing)
@@ -2058,19 +2082,25 @@ dpxoff:         ld      a, (hl)
 ; The anchor is the leading edge, so the offset differs with facing and is
 ; kept with the sprite rather than worked out here.
 
-                ld      a, (charx)
-                ld      b, a
-                ld      a, (curoff)
-                add     a, b
-                ld      b, a
-                ld      (curleft), a    ; CROPCHAR wants the picture's edges
+                ld      a, (curoff)     ; signed, and his coordinate is two
+                ld      e, a            ; bytes wide
+                ld      d, 0
+                or      a
+                jp      p, shoff
+                dec     d
+shoff:          ld      hl, (charx)
+                add     hl, de
+                ld      (curleft), hl   ; CROPCHAR wants the picture's edges
+                ld      a, l
                 and     7
                 ld      (curshift), a
-                ld      a, b
-                rra
-                rra
-                rra
-                and     31
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                ld      a, l
                 ld      b, a            ; the room's byte column; the camera
                 ld      a, (cam)        ; says where that is on screen
                 neg
@@ -2827,7 +2857,7 @@ scraddr:        push    bc
 
 
 
-charx:          db      0
+charx:          dw      0
 chary:          db      0
 facing:         db      0               ; 0 left, 1 right
 frame:          db      0
@@ -2849,7 +2879,7 @@ tilerow:        dw      0
 spacerow:       ds      10
 charcu:         db      0               ; FCharCU, the row his picture is cut at
 fchary:         db      0
-curleft:        db      0
+curleft:        dw      0
 croprow:        db      0
 croptop:        db      0
 yvel:           db      0

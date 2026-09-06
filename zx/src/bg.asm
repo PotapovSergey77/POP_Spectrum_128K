@@ -1904,12 +1904,7 @@ nextroom:       ld      a, (blocky)     ; POP counts the row over the screen
                 dec     a
                 cp      3
                 jr      nc, nrdown
-                ld      a, (charx)
-                cp      X_MIN + 2
-                jr      c, nrleft
-                cp      X_MAX - 1
-                jr      nc, nrright
-                ret
+                jp      cutchar
 
 ; The rooms stack 189 scanlines apart -- the bottom of the row below the
 ; screen against the bottom of the top row of the next one -- so falling
@@ -1927,7 +1922,7 @@ nrup:           ld      a, (links + 2)
                 ld      a, (blocky)
                 add     a, 3
                 ld      (blocky), a
-                jr      nrgo
+                jp      nrgo
 
 nrdown:         ld      a, (links + 3)
                 or      a
@@ -1939,21 +1934,154 @@ nrdown:         ld      a, (links + 3)
                 ld      a, (blocky)
                 sub     3
                 ld      (blocky), a
-                jr      nrgo
+                jp      nrgo
+
+; CUTCHAR in AUTO.S.  A cut is not a matter of getting near the edge: the
+; picture itself has to have left the screen, by four of POP's units -- eight
+; pixels -- past the side he is walking off.  Which edge counts depends on
+; which way he faces, because the far one is still on screen.
+;
+; ScrnLeft is 58 and ScrnRight 197 in POP's 140 wide space, so LeftCutEdge
+; and RightCutEdge come out at -8 and 286 in the room's own 280.
+
+CUTLEFTX        equ     -8
+CUTRIGHTX       equ     286
+
+cutchar:        ld      a, (charact)    ; not while he turns
+                cp      7
+                ret     z
+                ld      a, (frame)      ; nor part way through a stand up, a
+                cp      110             ; climb, or a sword stroke
+                jr      c, cc1
+                cp      120
+                ret     c
+cc1:            cp      135
+                jr      c, cc2
+                cp      163
+                ret     c
+                cp      166
+                jr      c, cc2
+                cp      169
+                ret     c
+
+cc2:            call    char_edges
+                ld      a, (facing)
+                or      a
+                jr      nz, ccright
+
+                ld      hl, (edgel)     ; facing left: his left edge decides
+                ld      de, CUTLEFTX + 1
+                call    cmp16
+                jp      c, nrleft
+                ld      hl, (edgel)
+                ld      de, 280
+                call    cmp16
+                jp      nc, nrright
+                ret
+
+ccright:        ld      hl, (edger)     ; facing right: his right one
+                ld      de, CUTRIGHTX
+                call    cmp16
+                jr      c, ccnotr
+                call    panelahead      ; a panel across the way blocks the
+                jp      nc, nrright     ; view, and POP does not cut through it
+ccnotr:         ld      hl, (edger)
+                ld      de, 0
+                call    cmp16
+                jp      c, nrleft
+                ret
+
+; Carry set if the last block of his row is a panel.
+
+panelahead:     ld      a, (blocky)
+                cp      3
+                ccf
+                ret     nc
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de          ; ten blocks to the row
+                ld      de, roomids + 9
+                add     hl, de
+                ld      a, (hl)
+                cp      BG_PANELWIF
+                scf
+                ret     z
+                cp      BG_PANELWOF
+                scf
+                ret     z
+                or      a
+                ret
+
+; HL - DE as signed numbers.  Out: carry set if HL is the smaller.
+
+cmp16:          or      a
+                sbc     hl, de
+                ld      a, h
+                rlca
+                ret
+
+; GETEDGES: where his picture actually starts and ends, which is what a cut
+; is measured against.  The frame table says how wide it is and how far the
+; anchor sits from its leading edge.
+
+char_edges:     call    page_canvas
+                call    frame_entry
+                ld      a, (hl)
+                ld      c, a            ; width in bytes
+                inc     hl
+                inc     hl              ; past the height
+                ld      a, (facing)
+                or      a
+                jr      z, ce1
+                inc     hl
+ce1:            ld      a, (hl)         ; the anchor offset, signed
+                call    page_art
+                ld      e, a
+                ld      d, 0
+                or      a
+                jp      p, ce2
+                dec     d
+ce2:            ld      hl, (charx)
+                add     hl, de
+                ld      (edgel), hl
+                ld      a, c
+                add     a, a
+                add     a, a
+                add     a, a            ; eight pixels to a byte
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (edger), hl
+                ret
+
+edgel:          dw      0
+edger:          dw      0
+
+; CUT: a whole screen's width sideways, three block rows and 189 scanlines up
+; or down.
 
 nrleft:         ld      a, (links)
                 or      a
                 ret     z
                 ld      (roomnum), a
-                ld      a, X_MAX - 30
-                ld      (charx), a
-                jr      nrgo
+                ld      hl, (charx)
+                ld      de, 280
+                add     hl, de
+                ld      (charx), hl
+                jp      nrgo
 nrright:        ld      a, (links + 1)
                 or      a
                 ret     z
                 ld      (roomnum), a
-                ld      a, X_MIN + 30
-                ld      (charx), a
+                ld      hl, (charx)
+                ld      de, -280
+                add     hl, de
+                ld      (charx), hl
 
 nrgo:           call    newroom         ; the room and everything about it
                 call    readlinks
@@ -2423,8 +2551,8 @@ cpground:       ld      a, (frame)      ; is his foot on the floor at all
                 and     F_CHECK
                 ret     z
                 call    base_x          ; and which block it is on
-                ld      l, a
-                ld      h, 0
+                call    inroom
+                ret     nc
                 ld      de, blockof
                 add     hl, de
                 ld      a, (hl)
