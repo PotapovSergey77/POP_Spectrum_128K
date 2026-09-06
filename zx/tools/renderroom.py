@@ -254,9 +254,12 @@ class Room:
     # half brick beside the rubble is struck again from nothing: it had to go
     # as dark as the rubble, so it is redrawn in the rubble's dither with its
     # own column of shadow.  The pair in the top course only wants taking
-    # down a little, so the original stands and one dot in sixteen is knocked
-    # out of it -- 76 per cent of the brick lit against 69, which is about
-    # the least that reads as darker at all.  Nothing is ever
+    # down a little, so the original stands and a dot is knocked out of it
+    # every fourth column and every fourth row -- one in sixteen, 76 per cent
+    # of the brick lit against 68, about the least that reads as darker at
+    # all.  Straight up and down and along, deliberately: put on a diagonal
+    # it lines up with the dither underneath and draws slanted stripes
+    # instead of simply darkening.  Nothing is ever
     # lit that was not, so the shadow the original throws comes through
     # untouched.  The middle course is
     # rows 22..41, columns 16..27 -- the joint to the tile edge -- and the
@@ -273,7 +276,7 @@ class Room:
     FACE_HEIGHT = 60
     BRICK_DENSITY = 2                   # dots per four, against the brick's 3
 
-    TOPCOURSE = (1, 21, 0, 28, 16)
+    TOPCOURSE = (1, 21, 0, 28, 4)
     MIDCOURSE = (22, 42, 16, 28, 1, 0)
 
     # The middle floor: the second and fourth brick of its top course,
@@ -312,8 +315,8 @@ class Room:
         return None
 
     def thin(self, row, col, course):
-        """Knock one dot in `every` out of the brick as it was drawn."""
-        r0, r1, x0, x1, every = course
+        """Knock a dot out of the brick every `step` across and down."""
+        r0, r1, x0, x1, step = course
         top = BLOCKBOT[row + 1] - 3 - self.FACE_HEIGHT + 1
         for r in range(r0, r1):
             y = top + r
@@ -324,7 +327,7 @@ class Room:
                 x = col * BLOCK_PX + c
                 if not 0 <= x < WIDTH_BYTES * 7:
                     continue
-                if (x - 2 * y) % every == 0:
+                if x % step == 0 and y % step == 0:
                     line[x // 7] &= ~(1 << (x % 7)) & 0xff
 
     def hatch(self, row, col, course):
