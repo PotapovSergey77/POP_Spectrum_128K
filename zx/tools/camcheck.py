@@ -40,7 +40,8 @@ def run(tap, sym, pin, keys, upto):
     """[(camera at the moment the screen was written, the screen)]"""
     cpu = runtap.boot(tap)
     if pin:
-        cpu.mem[sym['camera']] = 0xC9           # ret: the view never moves
+        cpu.mem[sym['camera']] = 0xC9           # ret: the view never moves --
+        cpu.mem[sym['camhome']] = 0xC9          # neither of the two that move it
     script = runtap.parse(keys)
     out = []
     for n in range(1, upto):

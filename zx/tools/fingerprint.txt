@@ -1,6 +1,6 @@
 walk left 1 0 0 0 0 0
-walk left 2 260 21 15 3 41
-walk left 3 278 19 15 3 41
+walk left 2 260 19 15 3 41
+walk left 3 278 18 15 3 41
 walk left 4 305 18 15 4 41
 walk left 5 366 18 16 4 40
 walk left 6 377 18 17 4 39
@@ -42,9 +42,9 @@ walk left 41 512 8 79 4 40
 walk left 42 501 8 80 4 39
 walk left 43 515 7 81 5 38
 walk right 1 0 0 0 0 0
-walk right 2 260 21 15 3 41
-walk right 3 272 19 17 3 39
-walk right 4 310 18 17 3 39
+walk right 2 260 19 15 3 41
+walk right 3 272 18 17 3 39
+walk right 4 310 17 17 3 39
 walk right 5 380 17 16 4 40
 walk right 6 393 17 16 4 40
 walk right 7 274 18 15 3 41
@@ -101,8 +101,8 @@ walk right 57 494 24 15 3 41
 walk right 58 494 24 15 3 41
 walk right 59 494 24 15 3 41
 fall 1 0 0 0 0 0
-fall 2 260 21 15 3 41
-fall 3 278 19 15 3 41
+fall 2 260 19 15 3 41
+fall 3 278 18 15 3 41
 fall 4 305 18 15 4 41
 fall 5 366 18 16 4 40
 fall 6 377 18 17 4 39
@@ -144,8 +144,8 @@ fall 41 575 8 89 5 30
 fall 42 613 8 86 5 33
 fall 43 418 8 84 4 35
 jump up 1 0 0 0 0 0
-jump up 2 260 21 15 3 41
-jump up 3 260 20 15 3 41
+jump up 2 260 19 15 3 41
+jump up 3 260 19 15 3 41
 jump up 4 260 19 15 3 41
 jump up 5 260 19 15 3 41
 jump up 6 260 19 15 3 41
@@ -183,8 +183,8 @@ jump up 37 266 18 15 3 41
 jump up 38 266 18 15 3 41
 jump up 39 266 18 15 3 41
 crouch 1 0 0 0 0 0
-crouch 2 260 21 15 3 41
-crouch 3 260 20 15 3 41
+crouch 2 260 19 15 3 41
+crouch 3 260 19 15 3 41
 crouch 4 260 19 15 3 41
 crouch 5 260 19 15 3 41
 crouch 6 260 19 15 3 41

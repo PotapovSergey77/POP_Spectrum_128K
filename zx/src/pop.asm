@@ -121,6 +121,7 @@ start:          di
                 ld      (chary), a
                 ld      a, START_ROW
                 ld      (blocky), a
+                call    camhome         ; and the view where he is, not adrift
                 xor     a
                 ld      (yvel), a
                 ld      (facing), a
@@ -326,9 +327,9 @@ camback:        ld      a, b
 ; arrives at the far side of it, and a view that started over would be seen
 ; scrolling across to find him.
 
-camhome:        ld      hl, (charx)
-                ld      de, 128         ; the middle of the band the camera
-                or      a               ; holds him in
+camhome:        ld      hl, (charx)     ; the first step that brings him
+                ld      de, 152         ; under 160, which is where the camera
+                or      a               ; would come to rest by itself
                 sbc     hl, de
                 bit     7, h
                 jr      nz, chzero
@@ -1335,12 +1336,12 @@ tile_in_row:    call    blockcol_of
 
 blockcol_of:    ld      de, -ANGLE_PX   ; GETBLOCKXP takes `angle` off first
                 add     hl, de
-                ld      c, 0
-bcup:           bit     7, h            ; up out of the negatives, counting
+                ld      b, 0            ; B, not C: the caller keeps the row
+bcup:           bit     7, h            ; there, and tile_in_row wants it
                 jr      z, bcdown
                 ld      de, 28
                 add     hl, de
-                dec     c
+                dec     b
                 jr      bcup
 bcdown:         ld      a, h            ; then down a block at a time
                 or      a
@@ -1350,9 +1351,9 @@ bcdown:         ld      a, h            ; then down a block at a time
                 jr      c, bcgot
 bcsub:          ld      de, -28
                 add     hl, de
-                inc     c
+                inc     b
                 jr      bcdown
-bcgot:          ld      a, c
+bcgot:          ld      a, b
                 ret
 
 ; The handler of RDBLOCK in CTRLSUBS.S.  A block index outside the screen
