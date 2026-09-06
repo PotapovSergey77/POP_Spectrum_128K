@@ -3141,9 +3141,9 @@ fillhi:         db      0
 filllo:         db      0
 rowy:           db      0
 
+; show_one and keep_rect copy these four as one record -- col, top, width,
+; height, in that order -- so nothing may be put between them.
 newcol:         db      0
-rawcol:         db      0
-spskip:         db      0
 newtop:         db      0
 neww:           db      0
 newh:           db      0
@@ -3152,6 +3152,9 @@ oldcol:         db      0
 oldtop:         db      0
 oldw:           db      0
 oldh:           db      0
+
+rawcol:         db      0               ; where his picture wanted to go,
+spskip:         db      0               ; and what the left edge cut off
 
 cam:            db      0               ; the view's left edge, in bytes
 fullshow:       db      0
