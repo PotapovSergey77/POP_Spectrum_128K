@@ -1471,8 +1471,11 @@ readlinks:      call    page_bg
 
 ; He is at one end of the room or the other, and there is a room that way.
 
-nextroom:       ld      a, (chary)      ; fallen out of the bottom of it
-                cp      244
+nextroom:       ld      a, (blocky)     ; POP counts the row over the screen
+                inc     a                ; as -1 and the row under it as 3, so
+                jr      z, nrup          ; which way he went is not a guess
+                dec     a
+                cp      3
                 jr      nc, nrdown
                 ld      a, (charx)
                 cp      X_MIN + 2
@@ -1485,6 +1488,20 @@ nextroom:       ld      a, (chary)      ; fallen out of the bottom of it
 ; screen against the bottom of the top row of the next one -- so falling
 ; through takes that off his height and puts him on the top row.
 
+; CUT in AUTO.S: three block rows and 189 scanlines, whichever way he went.
+
+nrup:           ld      a, (links + 2)
+                or      a
+                ret     z
+                ld      (roomnum), a
+                ld      a, (chary)
+                add     a, 189
+                ld      (chary), a
+                ld      a, (blocky)
+                add     a, 3
+                ld      (blocky), a
+                jr      nrgo
+
 nrdown:         ld      a, (links + 3)
                 or      a
                 ret     z
@@ -1492,7 +1509,8 @@ nrdown:         ld      a, (links + 3)
                 ld      a, (chary)
                 sub     189
                 ld      (chary), a
-                xor     a
+                ld      a, (blocky)
+                sub     3
                 ld      (blocky), a
                 jr      nrgo
 

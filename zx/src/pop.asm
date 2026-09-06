@@ -164,9 +164,9 @@ mainwait:       halt
                 call    check_floor
                 call    do_fall
                 call    page_art
+                call    nextroom        ; before anything reads his row again
                 call    checkpress
                 call    animfloor
-                call    nextroom
                 call    draw_prince
                 call    page_art
                 call    hide_floor
@@ -1251,7 +1251,12 @@ tile_in_row:    ld      l, a
 ; tile_flags stays short and leaves C alone for movetry.
 
 set_row:        ld      a, (blocky)
-                ld      l, a
+                cp      3               ; the rows over and under the screen
+                jr      c, srin         ; belong to the next room along, and
+                ld      hl, spacerow    ; until the cut there is nothing there
+                ld      (tilerow), hl
+                ret
+srin:           ld      l, a
                 ld      h, 0
                 add     hl, hl          ; two
                 ld      d, h
@@ -1984,12 +1989,9 @@ fallplane:      call    floor_plane
                 call    inside_block
 dfspace:        call    cmp_space
                 jr      nz, hit_floor
-                ld      hl, blocky      ; straight through, keep going
-                ld      a, (hl)
-                cp      3
-                ret     nc              ; nothing below the bottom row
-                inc     (hl)
-                jp      set_row
+                ld      hl, blocky      ; straight through, keep going.
+                inc     (hl)            ; Three is the row under the screen,
+                jp      set_row         ; and CUT takes him to it
 
 hit_floor:      call    floor_plane
                 ld      (chary), a
@@ -2740,6 +2742,7 @@ blockid:        db      0
 blocked:        db      0
 blocky:         db      0
 tilerow:        dw      0
+spacerow:       ds      10
 charcu:         db      0               ; FCharCU, the row his picture is cut at
 fchary:         db      0
 curleft:        db      0
