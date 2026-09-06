@@ -966,6 +966,12 @@ do_crouch:      ld      a, SQ_STOOP
 ; Out: A = how far he may go, and fwdkind = what he is stepping up to:
 ; 0 an edge, 1 a barrier, 2 clear ground, as GETFWDDIST reports in X.
 
+; GETFWDDIST in COLL.S.  A careful step stops at the edge of the block it is
+; on when what lies ahead is not to be trodden on: empty space, of course,
+; but a floor that is already loose as well -- step on to that and it gives
+; way under you.  A plate, a sword or a flask stop him short too, unless he
+; is already at the edge, in which case he steps across.
+
 get_fwd_dist:   call    front_flags
                 ld      c, a
                 call    cmp_barr
@@ -974,14 +980,33 @@ get_fwd_dist:   call    front_flags
                 ld      (fwdkind), a
                 jp      get_dist
 fwdnobarr:      ld      a, c
+                cp      BG_LOOSE        ; it would give way under him
+                jr      z, fwdedge
+                cp      BG_PRESSPLATE
+                jr      z, fwdshort
+                cp      BG_UPRESSPLATE
+                jr      z, fwdshort
+                cp      BG_SWORD
+                jr      z, fwdshort
+                cp      BG_FLASK
+                jr      z, fwdshort
+                ld      a, c
                 call    cmp_space
                 jr      nz, fwdclear
-                xor     a               ; an edge
+fwdedge:        xor     a               ; an edge: stop at the end of this one
                 ld      (fwdkind), a
                 jp      get_dist
+fwdshort:       call    get_dist        ; already at the edge: step across
+                or      a
+                jr      z, fwdclear
+                push    af
+                xor     a
+                ld      (fwdkind), a
+                pop     af
+                ret
 fwdclear:       ld      a, 2
                 ld      (fwdkind), a
-                ld      a, 14
+                ld      a, 11           ; POP's own natural step
                 ret
 
 ; POP keeps fourteen step sequences so that a step always ends where it
@@ -1308,26 +1333,26 @@ tile_in_row:    call    blockcol_of
 ; HL = a room x.  Out: A = the block column, signed, -2 to 11.  The table
 ; runs from -64 to 319 so an index just off either side still resolves.
 
-blockcol_of:    ld      de, BLOCKOF_BIAS
+blockcol_of:    ld      de, -ANGLE_PX   ; GETBLOCKXP takes `angle` off first
                 add     hl, de
-                bit     7, h
-                jr      nz, bcolow
-                ld      a, h
+                ld      c, 0
+bcup:           bit     7, h            ; up out of the negatives, counting
+                jr      z, bcdown
+                ld      de, 28
+                add     hl, de
+                dec     c
+                jr      bcup
+bcdown:         ld      a, h            ; then down a block at a time
                 or      a
-                jr      z, bcook
-                dec     a
-                jr      nz, bcohigh
+                jr      nz, bcsub
                 ld      a, l
-                cp      BLOCKOF_LEN - 256
-                jr      nc, bcohigh
-bcook:          ld      de, blockof
+                cp      28
+                jr      c, bcgot
+bcsub:          ld      de, -28
                 add     hl, de
-                ld      a, (hl)
-                sub     2               ; the table is biased by two columns
-                ret
-bcolow:         ld      a, -2
-                ret
-bcohigh:        ld      a, 11
+                inc     c
+                jr      bcdown
+bcgot:          ld      a, c
                 ret
 
 ; The handler of RDBLOCK in CTRLSUBS.S.  A block index outside the screen
@@ -3240,7 +3265,6 @@ flametab:       incbin  "flametab.bin"
 flames:         incbin  "flames.bin"
 flamemask:      incbin  "flamemask.bin"
 foreband:       ds      192
-blockof:        incbin  "blockof.bin"
                 ds      (($ + 255) / 256 * 256) - $
 rowaddr:        incbin  "rowaddr.bin"
 fcheck:         incbin  "fcheck.bin"

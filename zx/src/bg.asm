@@ -2982,8 +2982,33 @@ animobj:        xor     a               ; nothing wants redrawing yet -- and
                 jr      z, aodone       ; the floor that was here has gone
                 jp      stopobj         ; none of these: off the list
 
-aogate:         call    animgate
+; The bars are drawn at state/4, clamped, so most of a gate's life changes
+; nothing to look at: fifty frames waiting at the top with the state above
+; GMAXVAL, and a descent of one unit a frame that moves them every fourth.
+; Redrawing all of that was the slowdown that lasted until he left the room.
+
+aogate:         ld      a, (trobst)
+                call    gatedrawn
+                ld      (agwas), a
+                call    animgate
+                ld      a, (trobst)
+                call    gatedrawn
+                ld      hl, agwas
+                cp      (hl)
+                jr      nz, aodone
+                xor     a               ; the bars are where they were
+                ld      (redwant), a
                 jr      aodone
+
+gatedrawn:      cp      GMAXVAL
+                jr      c, gdr1
+                ld      a, GMAXVAL
+gdr1:           rrca
+                rrca
+                and     0x3f
+                ret
+
+agwas:          db      0
 aoplate:        call    animplate
                 jr      aodone
 aoexit:         call    animexit
