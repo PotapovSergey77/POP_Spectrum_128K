@@ -11,7 +11,7 @@ cp build/assets.inc build/bg.inc build/bin/*.bin src/
 cd src
 ../tools/pasmo.exe --bin pop.asm ../build/pop.bin ../build/pop.sym
 cd ..
-python tools/maketap.py build/pop.tap build/pop.bin 24576        6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/sprtab.bin
+python tools/maketap.py build/pop.tap build/pop.bin 24576        6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin
 python - <<'PY'
 import re, json, os
 sym = {}

@@ -124,10 +124,14 @@ start:          di
                 ld      a, revtab / 256 ; the reversal table's page
                 ld      (mrev1 + 1), a
                 ld      (mrev2 + 1), a
+                call    page_canvas     ; paging has A, so it goes first
                 ld      a, SQ_STAND
                 call    jumpseq
+                call    page_art
 
+                call    page_canvas
                 call    step_seq
+                call    page_art
                 call    draw_prince
                 call    page_art
                 call    hide_floor
@@ -153,11 +157,13 @@ mainwait:       halt
 
                 call    camera
                 call    erase_prince
-                call    input_step
+                call    page_canvas     ; the sequences live there, and
+                call    input_step      ; everything down to here starts one
                 call    step_seq
                 call    check_barr
                 call    check_floor
                 call    do_fall
+                call    page_art
                 call    checkpress
                 call    animfloor
                 call    nextroom
@@ -2803,8 +2809,6 @@ tbuf:           ds      BUFW * 2
                 ds      64
 stack:
 
-seqs:           incbin  "seqs.bin"
-seqtab:         incbin  "seqtab.bin"
 cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"

@@ -376,6 +376,15 @@ def main(argv):
         bytes(FLAME_FRAMES.index(n) for n in FLAME_TABLE))
 
 
+    seq, code, entry = build_sequences()
+    used = seq.walk(KID_SEQS)
+    table, blobs = build_sprites(used)
+    # The frame table and the sequences share the canvas bank.  Both are
+    # read at points in a frame where nothing wants the room, so they are
+    # paged in for those, and the canvas starts after them.
+    spare = table + code + entry
+    open(os.path.join(binout, 'bank_spare.bin'), 'wb').write(spare)
+
     # The background bank: the two dungeon image tables, the piece tables of
     # BGDATA.S and the level's blueprint, in a shape a Z80 can index.  A room
     # is composed out of these when it is walked into, the way POP does it.
@@ -391,7 +400,9 @@ def main(argv):
            # top of a draw, before anything wants the room, so the two never
            # collide.  It goes first so the tape can drop it at the window.
            'sprites     equ %d' % PAGE_WINDOW,
-           'CANVAS      equ %d' % (PAGE_WINDOW + 1376)]
+           'seqs        equ %d' % (PAGE_WINDOW + len(table)),
+           'seqtab      equ %d' % (PAGE_WINDOW + len(table) + len(code)),
+           'CANVAS      equ %d' % (PAGE_WINDOW + len(spare) + 3)]
     for k, v in bgat.items():
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
     for n, o in bgoffs:
@@ -405,12 +416,7 @@ def main(argv):
     inc.append('BG_FFALLING equ %d' % renderroom.bg.Ffalling)
     open(os.path.join(out, 'bg.inc'), 'w').write(chr(10).join(inc) + chr(10))
 
-    seq, code, entry = build_sequences()
-    open(os.path.join(binout, 'seqs.bin'), 'wb').write(code)
-    open(os.path.join(binout, 'seqtab.bin'), 'wb').write(entry)
 
-    used = seq.walk(KID_SEQS)
-    table, blobs = build_sprites(used)
 
     # Every judgement about edges is made from GETBASEX, not from CharX: the
     # frame's own Fdx and the footmark in the low bits of Fcheck say where his
