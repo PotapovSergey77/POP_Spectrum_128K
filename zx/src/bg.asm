@@ -1963,13 +1963,7 @@ readlinks:      call    page_bg
 
 ; He is at one end of the room or the other, and there is a room that way.
 
-nextroom:       ld      a, (blocky)     ; POP counts the row over the screen
-                inc     a                ; as -1 and the row under it as 3, so
-                jr      z, nrup          ; which way he went is not a guess
-                dec     a
-                cp      3
-                jr      nc, nrdown
-                jp      cutchar
+nextroom:       jp      cutchar
 
 ; The rooms stack 189 scanlines apart -- the bottom of the row below the
 ; screen against the bottom of the top row of the next one -- so falling
@@ -2012,7 +2006,33 @@ nrdown:         ld      a, (links + 3)
 CUTLEFTX        equ     -8
 CUTRIGHTX       equ     286
 
-cutchar:        ld      a, (charact)    ; not while he turns
+; The vertical cut is not "his block row has changed", it is how far his
+; coordinate has gone past the screen -- TopCutEdge and BotCutEdge in AUTO.S,
+; ten pixels above the top and twenty four below the bottom.  Cutting on the
+; row instead took the screen away the instant the floor let go, so the fall
+; was never seen at all.
+
+TOPCUTPL        equ     10
+TOPCUTMI        equ     240             ; ScrnTop - 16, as a byte
+BOTCUT          equ     215             ; ScrnBottom + 24
+
+cutchar:        ld      a, (charact)    ; falling: only the bottom counts
+                cp      3
+                jr      z, ccnotup
+                cp      4
+                jr      z, ccnotup
+                cp      5
+                jr      z, ccnotup
+                ld      a, (chary)
+                cp      TOPCUTPL
+                jp      c, nrup
+                cp      TOPCUTMI
+                jp      nc, nrup
+ccnotup:        ld      a, (chary)
+                cp      BOTCUT
+                jp      nc, nrdown
+
+                ld      a, (charact)    ; not while he turns
                 cp      7
                 ret     z
                 ld      a, (frame)      ; nor part way through a stand up, a
@@ -3156,15 +3176,43 @@ redright:       call    onscreen
                 call    page_art        ; into the block after this one
                 jp      redblock
 
-redgate:        call    onscreen
-                ret     nz
-                call    trrowcol
+; CHECKRIGHT in CTRLSUBS.S marks the block to the right, and that block may
+; be in the room next door -- which is where four of level one's five gates
+; keep their bars.  Asking whether the GATE's room is on screen was therefore
+; the wrong question: the room to watch is the one the bars are drawn in.
+
+redgate:        call    trrowcol
                 ld      a, (blockcol)
                 cp      9
-                ret     nc
+                jr      nc, rgnext      ; the bars hang in the next room along
                 inc     a
                 ld      (blockcol), a
-                call    page_art
+                call    onscreen
+                ret     nz
+                jr      rgdraw
+
+rgnext:         call    page_bg         ; the room to its right, if there is
+                ld      a, (trscrn)     ; one, and if that is the one we see
+                dec     a
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                ld      de, level + 1952 + 1
+                add     hl, de
+                ld      a, (hl)
+                ld      b, a            ; page_art hands back the bank number
+                call    page_art        ; in A, so the answer goes aside
+                ld      a, b
+                or      a
+                ret     z
+                ld      hl, roomnum
+                cp      (hl)
+                ret     nz
+                xor     a               ; its leftmost column
+                ld      (blockcol), a
+
+rgdraw:         call    page_art
                 call    redblock
                 ld      a, (blockrow)
                 or      a
