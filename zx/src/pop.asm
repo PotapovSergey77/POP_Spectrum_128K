@@ -1182,6 +1182,7 @@ tile_flags:     ld      l, a
                 ld      de, (tilerow)   ; the row he stands on
                 add     hl, de
                 ld      a, (hl)
+                and     0x1f            ; getobjid: the low five bits of it
                 ret
 tilenone:       xor     a
                 ret
@@ -1232,9 +1233,10 @@ tile_in_row:    ld      l, a
                 ld      e, b
                 ld      d, 0
                 add     hl, de
-                ld      de, tiles
+                ld      de, roomids
                 add     hl, de
                 ld      a, (hl)
+                and     0x1f
                 ret
 
 ; Ten tiles to a block row.  Worked out only when the row changes, so that
@@ -1249,7 +1251,7 @@ set_row:        ld      a, (blocky)
                 add     hl, hl
                 add     hl, hl          ; eight
                 add     hl, de          ; ten
-                ld      de, tiles
+                ld      de, roomids     ; the room in hand, not a baked one
                 add     hl, de
                 ld      (tilerow), hl
                 ret
@@ -2801,7 +2803,6 @@ stack:
 
 seqs:           incbin  "seqs.bin"
 seqtab:         incbin  "seqtab.bin"
-tiles:          incbin  "tiles.bin"
 cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
