@@ -44,6 +44,8 @@ stubs:          ld      a, BANK_ART
                 jr      dopage
                 ld      a, BANK_BG
                 jr      dopage
+                ld      a, BANK_CANVAS
+                jr      dopage
                 jp      start
 
 ; Called from BASIC, so it has to leave everything else about the port alone
@@ -1385,21 +1387,89 @@ flrow:          push    bc
 ; map is the room's width and the camera slides over it in whole cells, so
 ; the window is simply copied out -- again when the view moves.
 
-set_attrs:      ld      hl, attrs
+set_attrs:      ld      hl, SCREEN + 6144
+                ld      de, SCREEN + 6145
+                ld      bc, 767
+                ld      (hl), INK_ROOM
+                ldir
+
+                ld      a, (torches)    ; and red where a torch burns
+                or      a
+                ret     z
+                ld      (flleft), a
+                ld      hl, torches + 1
+                ld      (flrec), hl
+sanext:         ld      hl, (flrec)
+                ld      a, (hl)         ; its column, less the camera
+                inc     hl
+                ld      b, a
                 ld      a, (cam)
+                neg
+                add     a, b
+                ld      (sacol), a
+                ld      a, (hl)         ; the top of it, in cells
+                inc     hl
+                ld      b, a
+                srl     a
+                srl     a
+                srl     a
+                ld      (sarow), a
+                ld      a, (hl)         ; how many cells across
+                inc     hl
+                ld      (sawide), a
+                ld      a, (hl)         ; and down: the last row it reaches
+                add     a, b
+                dec     a
+                srl     a
+                srl     a
+                srl     a
+                ld      b, a
+                ld      a, (sarow)
+                neg
+                add     a, b
+                inc     a
+                ld      (satall), a
+                ld      de, 4           ; on to the next torch's record
+                add     hl, de
+                ld      (flrec), hl
+
+                ld      a, (satall)
+                ld      b, a
+                ld      a, (sarow)
+sarowloop:      push    bc
+                push    af
+                ld      l, a            ; thirty two cells to the row
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                ld      de, SCREEN + 6144
+                add     hl, de
+                ld      a, (sacol)
                 ld      e, a
                 ld      d, 0
                 add     hl, de
-                ld      de, SCREEN + 6144
-                ld      b, 24
-saloop:         push    bc
-                ld      bc, 32
-                ldir
-                ld      bc, ROOM_BYTES - 32
-                add     hl, bc
+                ld      a, (sawide)
+                ld      b, a
+sacell:         ld      (hl), INK_FLAME
+                inc     hl
+                djnz    sacell
+                pop     af
+                inc     a
                 pop     bc
-                djnz    saloop
+                djnz    sarowloop
+
+                ld      hl, flleft
+                dec     (hl)
+                jr      nz, sanext
                 ret
+
+sacol:          db      0
+sarow:          db      0
+sawide:         db      0
+satall:         db      0
 
 ; And on to the screen, wherever the view has put them.
 
@@ -1788,7 +1858,8 @@ frame_entry:    ld      a, (frame)
 
 ; ---------------------------------------------------------------- draw
 
-draw_prince:    call    frame_entry
+draw_prince:    call    page_canvas     ; the frame table lives there now
+                call    frame_entry
                 ld      a, (hl)
                 ld      (curw), a
                 inc     hl
@@ -1819,6 +1890,7 @@ dpxoff:         ld      a, (hl)
                 ld      hl, sprblob
                 add     hl, de
                 ld      (curdat), hl
+                call    page_art        ; and the room is wanted again
 
 ; The anchor is the leading edge, so the offset differs with facing and is
 ; kept with the sprite rather than worked out here.
@@ -2583,7 +2655,6 @@ floorband:      incbin  "floorband.bin"
 torches:        incbin  "torches.bin"
 flametab:       incbin  "flametab.bin"
 flames:         incbin  "flames.bin"
-attrs:          incbin  "attrs.bin"
 foreband:       incbin  "foreband.bin"
 blockof:        incbin  "blockof.bin"
 distof:         incbin  "distof.bin"
@@ -2597,7 +2668,6 @@ fill:           incbin  "fill.bin"
 shifthi:        incbin  "shifthi.bin"
 shiftlo:        incbin  "shiftlo.bin"
 revtab:         incbin  "revtab.bin"
-sprites:        incbin  "sprtab.bin"        ; the pixels live in a bank
 codeend:
 
 ; The tape carries one block, so both bank images ride along inside it.

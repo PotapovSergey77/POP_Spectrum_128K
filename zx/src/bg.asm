@@ -17,7 +17,6 @@
 ; background bank into a buffer down here, and then laid into the canvas with
 ; the canvas bank in.
 
-CANVAS          equ     0xC000          ; the Apple layout room, 40 x 192
 CANVAS_W        equ     40
 APPLE_PX        equ     CANVAS_W * 7
 
