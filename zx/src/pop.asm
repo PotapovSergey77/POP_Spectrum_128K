@@ -71,7 +71,6 @@ dopage:         and     7
 SCREEN          equ     16384
 FRAMES          equ     23672           ; the ROM's own count of interrupts,
                                         ; kept by the handler at 0x38
-BUFW            equ     8               ; widest sprite plus the shift byte
 ; 50Hz interrupt periods per game frame.  The Apple ran the kid at about ten
 ; a second; three periods is sixteen and two thirds, which is as near as whole
 ; periods come to the thirty per cent more that plays comfortably.
@@ -135,9 +134,6 @@ start:          di
                 ld      (yvel), a
                 ld      (facing), a
                 ld      (oldw), a       ; nothing to erase on the first pass
-                ld      a, revtab / 256 ; the reversal table's page
-                ld      (mrev1 + 1), a
-                ld      (mrev2 + 1), a
                 call    page_canvas     ; paging has A, so it goes first
                 ld      a, SQ_STAND
                 call    jumpseq
@@ -3010,14 +3006,6 @@ shoff:          ld      hl, (charx)
                 add     hl, de
                 ld      a, (hl)
                 ld      (filllo), a
-                ld      a, e
-                add     a, shifthi / 256
-                ld      (bmhi + 1), a
-                ld      (bdhi + 1), a
-                ld      a, e
-                add     a, shiftlo / 256
-                ld      (bmlo + 1), a
-                ld      (bdlo + 1), a
 
                 ld      a, (curw)       ; the shift needs one byte more
                 inc     a
@@ -3071,19 +3059,25 @@ clipdone:
 ; Only now: everything above reads the room and the tables, and the sprite's
 ; bank goes over the top of the room.
 
+                ld      a, (neww)       ; none of him on the screen
+                or      a
+                ret     z
+                call    dfsetup
+
                 call    page_frame
 
                 ld      a, (newh)       ; the calls above have had A
+                or      a               ; and no rows is not 256 of them
+                ret     z
                 ld      b, a
                 ld      a, (newcol)     ; before HL is loaded: startrows has it
                 ld      (linecol), a
                 call    startrows
                 ld      hl, (curdat)
+                ld      (dfrow), hl
                 ld      a, (newtop)
                 ld      (rowy), a
 drawrow:        push    bc
-                call    build_row       ; HL walks over the source row
-                push    hl
                 ld      a, (rowy)
                 cp      192
                 jr      nc, drawblank
@@ -3096,147 +3090,236 @@ drawrow:        push    bc
                 jr      drawskip        ; counts towards where the next one is
 drawblank:      call    startrows
                 jr      drawskip
-drawgo:         ld      a, (neww)       ; wholly off the side of the screen
-                or      a
-                jr      z, drawskip
-                call    line_addr
+drawgo:         call    line_addr
                 ld      bc, work - SCREEN
                 add     hl, bc          ; draw into the working copy
-                ld      de, mbuf        ; past what the left edge cut off
-                ld      a, (spskip)
-                add     a, a            ; two bytes to a pixel byte here
-                ld      c, a
-                ld      b, 0
                 ex      de, hl
+                ld      hl, (dfsrc)     ; and read from the first pair wanted
+                ld      bc, (dfrow)
                 add     hl, bc
                 ex      de, hl
-                ld      a, (neww)
-                ld      b, a
-drawblit:       ld      a, (de)         ; mask
-                and     (hl)
-                ld      c, a
-                inc     de
-                ld      a, (de)         ; data
-                or      c
-                ld      (hl), a
-                inc     de
-                inc     hl
-                djnz    drawblit
+dfcall:         call    0               ; dfleft or dfmirror
 drawskip:       ld      hl, rowy
                 inc     (hl)
-                pop     hl
+                ld      hl, (dfrow)     ; on to the next row of pairs
+                ld      bc, (dfrowlen)
+                add     hl, bc
+                ld      (dfrow), hl
                 pop     bc
                 djnz    drawrow
                 ret
 
-; Copy one source row into mbuf as (mask, data) pairs, then shift it right.
-; In: HL = source.  Out: HL past the row.
+; A row of him goes straight from its (mask, data) pairs into the working
+; copy: each byte through the shift's two tables, the part that stays OR'd
+; with what spilled from the pair before, and laid down there and then.  It
+; used to go through two buffers and three passes first -- copied aside,
+; turned about when he faces right, shifted into (mask, data) pairs, and
+; only then blitted -- and that was half of all a frame did.
+;
+; The alternate registers carry what a row needs from pair to pair: D and E
+; the pages of the two tables, B and C what the mask and the data spilled.
+;
+; The edges come out of CROPCHAR's clipping: spskip bytes cut off at the
+; left, neww bytes shown.  Worked out once a frame --
+;   dfsrc    how far into a row the first pair to read is
+;   dfcnt    how many whole pairs are laid down
+;   dfspill  whether the byte the last pair spills into is on the screen
+; A pair the left edge cut off still spills into the first byte shown, so
+; with spskip set the row starts one pair early and reads it for that alone.
 
-build_row:      ld      a, (curw)       ; take the row aside
-                add     a, a
+dfsetup:        ld      a, (neww)
                 ld      c, a
-                ld      b, 0
-                ld      de, tbuf
-                ldir
-
+                ld      a, (curw)
+                ld      b, a
+                add     a, a
+                ld      (dfrowlen), a
+                ld      d, 0
+                ld      a, (spskip)
+                ld      e, a
+                add     a, c            ; skip + shown = pairs + 1: the spill
+                dec     a               ; byte is on the screen
+                cp      b
+                ld      a, c
+                jr      nz, dfnospill
+                dec     a
+                inc     d
+dfnospill:      ld      (dfcnt), a
+                ld      a, d
+                ld      (dfspill), a
+                ld      a, e            ; the pair read first, counted from
+                or      a               ; the left of the picture as shown:
+                jr      nz, dfskip1     ; the one before the first shown
+                inc     a
+dfskip1:        ld      e, a
                 ld      a, (facing)
                 or      a
-                call    nz, mirror_row
-
-                push    hl              ; HL is wanted back past the row
-                ld      de, mbuf        ; mask plane: ones shift in at the left
-                ld      hl, tbuf
-                ld      a, (fillhi)
+                jr      nz, dfsetm
+                ld      a, e            ; facing left, rows run as stored
+                dec     a
+                ld      hl, dfleft
+                jr      dfset
+dfsetm:         ld      a, b            ; facing right, from the end of the
+                sub     e               ; row back
+                ld      hl, dfmirror
+dfset:          add     a, a
+                ld      (dfsrc), a
+                ld      (dfcall + 1), hl
+                ld      a, (curshift)   ; and the tables' pages, for good
                 ld      c, a
-                ld      a, (curw)
-                ld      b, a
-bmask:          ld      a, (hl)
-                inc     hl
-                inc     hl
-                push    hl
-bmhi:           ld      h, 0            ; patched with the hi table's page
-                ld      l, a
-                ld      a, (hl)
-                or      c
-                ld      (de), a
-                inc     de
-                inc     de
-bmlo:           ld      h, 0            ; and with the lo table's
-                ld      c, (hl)
-                pop     hl
-                djnz    bmask
-                ld      a, (filllo)
-                or      c
-                ld      (de), a
-
-                ld      de, mbuf + 1    ; data plane: zeros shift in
-                ld      hl, tbuf + 1
-                ld      c, 0
-                ld      a, (curw)
-                ld      b, a
-bdata:          ld      a, (hl)
-                inc     hl
-                inc     hl
-                push    hl
-bdhi:           ld      h, 0
-                ld      l, a
-                ld      a, (hl)
-                or      c
-                ld      (de), a
-                inc     de
-                inc     de
-bdlo:           ld      h, 0
-                ld      c, (hl)
-                pop     hl
-                djnz    bdata
+                exx
+                add     a, shifthi / 256
+                ld      d, a
+                exx
                 ld      a, c
-                ld      (de), a
-                pop     hl
+                exx
+                add     a, shiftlo / 256
+                ld      e, a
+                exx
                 ret
 
-; Facing right is the same picture the other way round: the pairs come in
-; reverse order and every byte has its bits turned about.
+; In: DE = the first pair to read, HL = where its byte goes.
 
-mirror_row:     push    hl
-                ld      a, (curw)
+dfleft:         ld      a, (spskip)
+                or      a
+                call    z, dffill
+                jr      z, dflgo
+                ld      a, (de)         ; the pair cut off, for its spill
+                inc     de
+                exx
+                ld      l, a
+                ld      h, e
+                ld      b, (hl)
+                exx
+                ld      a, (de)
+                inc     de
+                exx
+                ld      l, a
+                ld      h, e
+                ld      c, (hl)
+                exx
+dflgo:          ld      a, (dfcnt)
+                or      a
+                jr      z, dfend
                 ld      b, a
-                add     a, a
-                ld      e, a
-                ld      d, 0
-                ld      hl, tbuf
-                add     hl, de
-                dec     hl
-                dec     hl
-                ld      de, mbuf        ; mbuf is free until the shift runs
-mrloop:         ld      a, (hl)
-                push    hl
-mrev1:          ld      h, 0            ; patched with the reversal table
-                ld      l, a
-                ld      a, (hl)
-                pop     hl
-                ld      (de), a
+dflpair:        ld      a, (de)         ; the mask
                 inc     de
-                inc     hl
-                ld      a, (hl)
-                push    hl
-mrev2:          ld      h, 0
+                exx
                 ld      l, a
-                ld      a, (hl)
-                pop     hl
-                ld      (de), a
-                inc     de
-                dec     hl
-                dec     hl
-                dec     hl
-                djnz    mrloop
-                ld      a, (curw)
-                add     a, a
+                ld      h, d
+                ld      a, (hl)         ; what stays
+                or      b               ; and what came over from the left
+                ld      h, e
+                ld      b, (hl)         ; what goes over to the right
+                exx
+                and     (hl)
                 ld      c, a
-                ld      b, 0
-                ld      hl, mbuf
-                ld      de, tbuf
-                ldir
-                pop     hl
+                ld      a, (de)         ; the data
+                inc     de
+                exx
+                ld      l, a
+                ld      h, d
+                ld      a, (hl)
+                or      c
+                ld      h, e
+                ld      c, (hl)
+                exx
+                or      c
+                ld      (hl), a
+                inc     l               ; a screen row never crosses a page
+                djnz    dflpair
+                jr      dfend
+
+; Facing right: the pairs from the end of the row back, and every byte with
+; its bits turned about on the way to the shift.
+
+dfmirror:       ld      a, (spskip)
+                or      a
+                call    z, dffill
+                jr      z, dfmgo
+                ld      a, (de)
+                inc     de
+                exx
+                ld      l, a
+                ld      h, revtab / 256
+                ld      l, (hl)
+                ld      h, e
+                ld      b, (hl)
+                exx
+                ld      a, (de)
+                dec     de
+                dec     de
+                dec     de
+                exx
+                ld      l, a
+                ld      h, revtab / 256
+                ld      l, (hl)
+                ld      h, e
+                ld      c, (hl)
+                exx
+dfmgo:          ld      a, (dfcnt)
+                or      a
+                jr      z, dfend
+                ld      b, a
+dfmpair:        ld      a, (de)
+                inc     de
+                exx
+                ld      l, a
+                ld      h, revtab / 256
+                ld      l, (hl)
+                ld      h, d
+                ld      a, (hl)
+                or      b
+                ld      h, e
+                ld      b, (hl)
+                exx
+                and     (hl)
+                ld      c, a
+                ld      a, (de)
+                dec     de
+                dec     de
+                dec     de
+                exx
+                ld      l, a
+                ld      h, revtab / 256
+                ld      l, (hl)
+                ld      h, d
+                ld      a, (hl)
+                or      c
+                ld      h, e
+                ld      c, (hl)
+                exx
+                or      c
+                ld      (hl), a
+                inc     l
+                djnz    dfmpair
+
+; The byte the last pair spills into, the mask's ones filling its right.
+
+dfend:          ld      a, (dfspill)
+                or      a
+                ret     z
+                ld      a, (filllo)
+                exx
+                or      b
+                exx
+                and     (hl)
+                ld      c, a
+                exx
+                ld      a, c
+                exx
+                or      c
+                ld      (hl), a
+                ret
+
+; Nothing cut off at the left: the mask's ones shift in there, and no data.
+; Out: Z still set.
+
+dffill:         ld      a, (fillhi)
+                exx
+                ld      b, a
+                ld      c, 0
+                exx
+                xor     a
                 ret
 
 ; ---------------------------------------------------------------- walls
@@ -3979,8 +4062,11 @@ shtop:          db      0
 shw:            db      0
 shh:            db      0
 
-mbuf:           ds      BUFW * 2
-tbuf:           ds      BUFW * 2
+dfrow:          dw      0               ; the fused row's pair, and its
+dfrowlen:       dw      0               ; bookkeeping: see dfsetup
+dfsrc:          dw      0
+dfcnt:          db      0
+dfspill:        db      0
 
                 ds      64
 stack:
