@@ -2320,6 +2320,17 @@ sarw:           ld      e, (hl)
                 ld      b, 3
 sarr:           push    bc
                 push    af
+                ld      a, 3            ; which of the flame's three rows of
+                sub     b               ; cells this is, and so its colour
+                ld      hl, flcolour
+                add     a, l
+                ld      l, a
+                jr      nc, sarc
+                inc     h
+sarc:           ld      a, (hl)
+                ld      (sacolr), a
+                pop     af
+                push    af
                 ld      l, a            ; thirty two cells to the row
                 ld      h, 0
                 add     hl, hl
@@ -2343,7 +2354,8 @@ sacc:           srl     d               ; this cell's bit
                 ld      l, a
                 jr      nc, sac1
                 inc     h
-sac1:           ld      (hl), INK_FLAME
+sac1:           ld      a, (sacolr)
+                ld      (hl), a
                 pop     hl
 sacskip:        inc     c
                 djnz    sacc
@@ -2359,6 +2371,8 @@ sacskip:        inc     c
 
 sacol:          db      0
 sarow:          db      0
+sacolr:         db      0               ; this row's colour
+flcolour:       db      INK_FLAME_TOP, INK_FLAME_MID, INK_FLAME_LOW
 flcells:        dw      FLCELLS0, FLCELLS1, FLCELLS2  ; shift three
                 dw      FLCELLS3, FLCELLS4, FLCELLS5  ; shift seven
 

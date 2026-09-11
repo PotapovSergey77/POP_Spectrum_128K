@@ -79,7 +79,9 @@ FLAME_TABLE = [0x52, 0x53, 0x54, 0x55, 0x56, 0x61, 0x62, 0x63, 0x64,
 FLAME_UP = 43
 
 INK_ROOM = 0x05                 # cyan on black, the whole room
-INK_FLAME = 0x06                # and yellow where a torch burns
+INK_FLAME_TOP = 0x02            # and where a torch burns: dark red at the
+INK_FLAME_MID = 0x42            # tip, bright red in the middle and yellow
+INK_FLAME_LOW = 0x06            # where it comes off the torch
 ROOM_PX = ROOM_BYTES * 8
 CAM_MAX = ROOM_BYTES - 32
 
@@ -547,7 +549,9 @@ def main(argv):
         for i, n in enumerate(BANK_SPR):
             f.write('BANK_SPR%d   equ %d' % (i + 1, n) + chr(10))
         f.write('INK_ROOM    equ %d' % INK_ROOM + chr(10))
-        f.write('INK_FLAME   equ %d' % INK_FLAME + chr(10))
+        f.write('INK_FLAME_TOP equ %d' % INK_FLAME_TOP + chr(10))
+        f.write('INK_FLAME_MID equ %d' % INK_FLAME_MID + chr(10))
+        f.write('INK_FLAME_LOW equ %d' % INK_FLAME_LOW + chr(10))
         f.write('BLK_BLOCK   equ %d' % renderroom.bg.block + chr(10))
         f.write('F_CHECK     equ %d' % 0x40 + chr(10))
         f.write('F_FOOTMARK  equ %d' % 0x1f + chr(10))
