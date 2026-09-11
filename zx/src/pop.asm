@@ -3464,7 +3464,7 @@ show_rect:      ld      a, (fullshow)
 
                 xor     a
                 ld      (fullshow), a
-                ld      (dirtyh), a
+                ld      (dirtyn), a
                 ld      (rowy), a
                 ld      (linecol), a
                 call    startrows
@@ -3520,13 +3520,21 @@ fs_sprite:      ld      a, (neww)
 ; where he is.  The box would take in corners neither of them covers, and the
 ; working copy is only ever put right under the two.
 
-showpart:       ld      a, (dirtyh)     ; whatever a block redraw changed
-                or      a
+showpart:       ld      a, (dirtyn)     ; whatever the block redraws changed,
+                or      a               ; a rectangle at a time
                 jr      z, showold
-                ld      hl, dirtycol
+                ld      b, a
+                ld      hl, dirtyq
+showdq:         push    bc
+                push    hl
                 call    show_one
+                pop     hl
+                ld      de, 4
+                add     hl, de
+                pop     bc
+                djnz    showdq
                 xor     a
-                ld      (dirtyh), a
+                ld      (dirtyn), a
 showold:        ld      a, (oldw)
                 or      a
                 jr      z, shownew
@@ -3672,64 +3680,44 @@ rsnext:         ld      hl, rowy
                 djnz    rsrow
                 ret
 
-; The rectangle a block redraw left behind, grown to hold all of them, and
-; sent at the top of the next frame -- before his own two, so that he wins.
+; The rectangle a block redraw left behind, queued for the top of the next
+; frame -- before his own two, so that he wins.  One rectangle each, never
+; the box around them: the working copy is only right under the rectangles
+; themselves, and after the view has moved everything else in it is the room
+; a byte out.  The box round a gate at one end and a plate at the other sent
+; all of that to the screen, beside and above the plate, and it stayed there.
+; Growing the box used B, too, which redshow is counting its rows in.
+;
+; Out: BC as it was.
 
-dirty_add:      ld      a, (dirtyh)
-                or      a
-                jr      z, dirtyset     ; nothing there yet: take it whole
-                ld      a, (dirtycol)   ; else grow it to hold both
-                ld      b, a
-                ld      a, (linecol)
-                cp      b
-                jr      nc, dirty1
-                ld      b, a
-dirty1:         ld      a, (dirtycol)
-                ld      c, a
-                ld      a, (dirtyw)
-                add     a, c            ; the old right hand edge
-                ld      c, a
-                ld      a, (linecol)
-                ld      hl, rdw
-                add     a, (hl)
-                cp      c
-                jr      nc, dirty2
-                ld      a, c
-dirty2:         sub     b
-                ld      (dirtyw), a
-                ld      a, b
-                ld      (dirtycol), a
-                ld      a, (dirtytop)
-                ld      b, a
-                ld      a, (rowy)
-                cp      b
-                jr      nc, dirty3
-                ld      b, a
-dirty3:         ld      a, (dirtytop)
-                ld      c, a
-                ld      a, (dirtyh)
-                add     a, c
-                ld      c, a
-                ld      a, (rowy)
-                ld      hl, redh
-                add     a, (hl)
-                cp      c
-                jr      nc, dirty4
-                ld      a, c
-dirty4:         sub     b
-                ld      (dirtyh), a
-                ld      a, b
-                ld      (dirtytop), a
+DIRTYMAX        equ     6
+
+dirty_add:      ld      a, (dirtyn)
+                cp      DIRTYMAX
+                jr      c, dirtyset
+                ld      a, 1            ; more than a frame ever has: the whole
+                ld      (fullshow), a   ; screen comes from the room instead
                 ret
 
-dirtyset:       ld      a, (linecol)
-                ld      (dirtycol), a
+dirtyset:       ld      l, a            ; four bytes to a rectangle, in the
+                inc     a               ; order show_one takes them
+                ld      (dirtyn), a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                ld      de, dirtyq
+                add     hl, de
+                ld      a, (linecol)
+                ld      (hl), a
+                inc     hl
                 ld      a, (rowy)
-                ld      (dirtytop), a
+                ld      (hl), a
+                inc     hl
                 ld      a, (rdw)
-                ld      (dirtyw), a
+                ld      (hl), a
+                inc     hl
                 ld      a, (redh)
-                ld      (dirtyh), a
+                ld      (hl), a
                 ret
 
 rdcol:          db      0
@@ -3738,10 +3726,8 @@ rdw:            db      0
 redh:           db      63
 rsscr:          dw      0
 rswrk:          dw      0
-dirtycol:       db      0
-dirtytop:       db      0
-dirtyw:         db      0
-dirtyh:         db      0
+dirtyn:         db      0               ; rectangles waiting for the blit
+dirtyq:         ds      4 * DIRTYMAX    ; col, top, width, height each
 
 ; Remember where the sprite went, so the next frame can rub it out.
 
