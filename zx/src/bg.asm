@@ -36,6 +36,20 @@ page_bg:        ld      a, BANK_BG
 page_canvas:    ld      a, BANK_CANVAS
                 jp      pageset
 
+; The canvas's own pixels are not in the canvas bank: the second screen took
+; the bottom of it, and they went to the bank the last sprites leave half
+; empty.  The frame table, the sequences and the two floorpiece masks stayed.
+
+page_pixels:    ld      a, BANK_CVS
+                jp      pageset
+
+; Whichever bgdraw is laying into: the picture, or one of the masks.
+
+page_target:    ld      a, (bgmask)
+                or      a
+                jr      z, page_pixels
+                jr      page_canvas
+
 ; ---------------------------------------------------------------- the tables
 ;
 ; BGDATA.S, one array to a piece id, thirty entries each.  In: A = the piece
@@ -176,7 +190,7 @@ bgdk1:          ld      a, b
                 ld      de, imgbuf
                 ldir
 
-                call    page_canvas
+                call    page_target
 
                 ld      a, (bgmask)     ; which of the seven ways to lay a
                 or      a               ; byte down.  It is the same one for
@@ -325,7 +339,7 @@ bgrowdown:      ld      hl, (bgcanp)    ; a row up is forty bytes back
 ; bgrowskip, and with this in between a mask's first row was its only one.
 
 bgdnone:        pop     hl              ; none of it lands -- and the canvas
-                jp      page_canvas     ; is left in, as the full way leaves
+                jp      page_target     ; is left in, as the full way leaves
                                         ; it: the callers draw on after
 
 
@@ -971,7 +985,7 @@ compose:        xor     a               ; no front pieces noted yet
                 ld      (recfront), a
                 inc     a
                 ld      (frontok), a
-                call    page_canvas     ; a clean canvas first
+                call    page_pixels     ; a clean canvas first
                 ld      hl, CANVAS
                 ld      de, CANVAS + 1
                 ld      bc, CANVAS_W * 192 - 1
@@ -1370,7 +1384,7 @@ convert:        xor     a
                 ld      (cvrow), a
                 ld      a, 192
                 ld      (cvleft), a
-cvline:         call    page_canvas
+cvline:         call    page_pixels
                 ld      a, (cvrow)
                 call    canvasrow
                 ld      de, cvbuf
@@ -1849,7 +1863,7 @@ frontlist:      ds      MAXFRONT * 5    ; five bytes an entry, as frontrec
 ; scanline is, or -1.  Two masks: the whole piece, and the shorter one
 ; climbing up uses, which leaves the hands on the ledge showing.
 
-FLOORCAN        equ     CANVAS + CANVAS_W * 192
+FLOORCAN        equ     MASKCAN         ; in the canvas bank, past the tables
 HALFCAN         equ     FLOORCAN + CANVAS_W * 45
 
 ; The tiles that have a half piece in the dungeon set.  Anything else falls
@@ -2641,7 +2655,7 @@ rbxco:          ld      a, (blockcol)   ; four bytes to a block
                 ld      (xco), a
                 ret
 
-rbwipe:         call    page_canvas
+rbwipe:         call    page_pixels
                 ld      a, (rbbot)
                 ld      (rbrow), a
                 ld      a, (rbh)
@@ -2750,7 +2764,7 @@ rbb2:           ld      (rbbn), a
                 sub     b
                 ld      (rbleftn), a
 
-                call    page_canvas     ; the batch out of the canvas
+                call    page_pixels     ; the batch out of the canvas
                 ld      hl, (rbcanp)
                 ld      de, imgbuf
                 ld      a, (rbbn)

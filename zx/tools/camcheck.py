@@ -33,6 +33,9 @@ SCENES = [
     ('fall+climb', 55, ['left@1-20', 'down@26-34', 'up@46-120']),
     ('jump up',    40, ['up@14-20']),
     ('run jump',   17, ['left@1-14', 'up@8-12']),
+    # Out to the right and back past the start: a view made in each of the
+    # two screens in turn, and both shown.
+    ('there+back', 70, ['right@1-20', 'left@25-70']),
 ]
 
 
@@ -49,7 +52,7 @@ def run(tap, sym, pin, keys, upto):
         # so what is on the screen belongs to the camera as it was.
         cam = cpu.mem[sym['cam']]
         runtap.game_frame(cpu, sym['main'], runtap.held(script, n))
-        out.append((cam, bytes(cpu.mem[16384:16384 + 6144])))
+        out.append((cam, cpu.screen()[:6144]))
     return out
 
 

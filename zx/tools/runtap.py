@@ -170,7 +170,7 @@ def main(argv):
 
     cpu = boot(argv[1])
     steps = play(cpu, frames, parse(held))
-    scr = bytes(cpu.mem[16384:16384 + 6912])
+    scr = cpu.screen()
     zxscreen.preview(scr, out)
     print('%s: %d frames, %d instructions, PC=%04X -> %s'
           % (argv[1], cpu.frames, steps, cpu.pc, out))

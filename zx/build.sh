@@ -21,7 +21,9 @@ for line in open('build/pop.sym'):
         sym[m.group(1)] = int(m.group(2), 16)
 json.dump(sym, open('build/sym.json', 'w'))
 work = sym['work'] + 6144
-print('код %04X..%04X, рабочий буфер до %04X, свободно %d байт'
-      % (sym['start'], sym['codeend'], work, 0xC000 - work))
+print('код %04X..%04X, рабочий буфер %04X..%04X, до него свободно %d байт'
+      % (sym['start'], sym['codeend'], sym['work'], work,
+         sym['work'] - sym['codeend']))
+assert sym['work'] % 0x800 == 0, 'рабочий буфер не на границе 2K'
 assert work <= 0xC000, 'рабочий буфер налез на окно банков'
 PY

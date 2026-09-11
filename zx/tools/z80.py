@@ -57,6 +57,7 @@ class Z80:
         # swapped in and out of the flat 64K array when the port is written.
         self.banks = [bytearray(0x4000) for _ in range(8)]
         self.page = 0
+        self.shadow = False     # bit 3: the ULA shows bank 7, not bank 5
 
     def set_page(self, n):
         """Put RAM bank n at 0xC000, keeping what the old one held."""
@@ -72,6 +73,16 @@ class Z80:
         # 128K program addresses it.
         if not port & 0x8002:
             self.set_page(value & 7)
+            self.shadow = bool(value & 8)
+
+    def screen(self):
+        """The 6912 bytes the ULA is showing: bank 5 at 0x4000, or bank 7
+        when bit 3 of the port asks for the second screen."""
+        if not self.shadow:
+            return bytes(self.mem[0x4000:0x5B00])
+        if self.page == 7:
+            return bytes(self.mem[0xC000:0xDB00])
+        return bytes(self.banks[7][:6912])
 
     # -- registers ------------------------------------------------------
 

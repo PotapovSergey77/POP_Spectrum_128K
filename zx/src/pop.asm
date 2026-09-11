@@ -111,8 +111,15 @@ start:          di
                 xor     a
                 out     (254), a
 
-                call    check_banks     ; before anything is written, and it
-                                        ; leaves the art bank in
+                call    check_banks     ; before anything is written
+
+                ld      a, BANK_CANVAS  ; the frame table and the sequences
+                call    pageset         ; came in at the window, where the
+                ld      hl, 0xC000 + SPARE_LEN - 1      ; second screen goes:
+                ld      de, sprites + SPARE_LEN - 1     ; up past it they go,
+                ld      bc, SPARE_LEN                   ; last byte first, as
+                lddr                                    ; the two overlap
+                call    page_art
                 call    newroom         ; and the room is composed, not loaded
                 call    readlinks
 
@@ -4115,7 +4122,6 @@ floorband:      incbin  "floorband.bin"
 torches:        ds      1 + 6 * 7
 flametab:       incbin  "flametab.bin"
 flamemask:      incbin  "flamemask.bin"
-foreband:       ds      192
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
@@ -4137,6 +4143,13 @@ codeend:
 ; the tape image rather than taking six kilobytes of loading time.  It mirrors
 ; the bitmap and not the attributes, which nothing here touches.
 
-work            equ     codeend
+;
+; The erase walks it with nextline, which steps a screen address from one
+; scanline to the next, and that holds for the copy only if it sits a whole
+; number of eight pages above the screen: on a 2K boundary, then -- A800,
+; with the code ending before it.  A page short of that, every eighth row of
+; the erase went down on the wrong line.
+
+work            equ     (codeend + 0x7FF) / 0x800 * 0x800
 
                 end     start

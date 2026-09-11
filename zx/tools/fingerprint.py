@@ -48,12 +48,13 @@ def counts(tap, sym):
             col, top, w, h = (cpu.mem[sym[k]]
                               for k in ('oldcol', 'oldtop', 'oldw', 'oldh'))
             ink = 0
+            scr = cpu.screen()
             for j in range(h):
                 y = (top + j) & 0xff
                 if y >= 192:
                     continue
                 for xb in range(col, min(32, col + w)):
-                    b = cpu.mem[16384 + zxscreen.bitmap_offset(xb, y)]
+                    b = scr[zxscreen.bitmap_offset(xb, y)]
                     ink += bin(b).count('1')
             rows.append((n, ink, col, top, w, h))
         out.append((name, rows))
