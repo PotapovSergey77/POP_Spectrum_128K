@@ -2027,7 +2027,30 @@ omcol:          call    setblock
 ;
 ; In: (blockrow), (blockcol).
 
-maskblock:      ld      a, (blockcol)   ; four bytes to a block
+maskblock:      call    mbsetup
+                ld      a, 1
+                call    maskone
+                ld      a, 2
+                call    maskone
+mbout:          xor     a               ; and out of mask mode
+                ld      (bgmask), a
+                ret
+
+; The queue's two steps: A = 0 the floor's mask, 1 the half's.  Out: carry
+; when the half's is still to come.
+
+mb_step:        push    af
+                call    mbsetup
+                pop     af
+                inc     a
+                push    af
+                call    maskone
+                call    mbout
+                pop     af
+                cp      2
+                ret
+
+mbsetup:        ld      a, (blockcol)   ; four bytes to a block
                 add     a, a
                 add     a, a
                 ld      (xco), a
@@ -2074,20 +2097,13 @@ mbleft:         dec     a
                 add     hl, de
                 ld      a, (hl)
                 ld      (spreced), a
-                jr      mbdone
+                ret
 
 mbtake:         ld      a, (hl)
                 ld      (preced), a
                 inc     hl
                 ld      a, (hl)
                 ld      (spreced), a
-
-mbdone:         ld      a, 1
-                call    maskone
-                ld      a, 2
-                call    maskone
-                xor     a               ; and out of mask mode
-                ld      (bgmask), a
                 ret
 
 ; A = which mask.  Wipes the block's four columns over its own band, draws
@@ -2491,41 +2507,86 @@ links:          ds      4
 ;
 ; In: (blockrow), (blockcol).
 
-; A block redraw in two halves: rb_draw lays it down again in the canvas,
-; rb_pack puts the band that changed back into the room and on towards the
-; screen.  redblock does both at once; the redraw queue does them a frame
-; apart when a block is too big for both to fit in one.
+; A block redraw goes a band at a time, from its floor line up: each band
+; wiped, every pass laid down again over it alone -- bgdraw keeps to the rows
+; between bandtop and bandbot -- and repacked into the room, so a band done
+; is a band finished, whatever comes after it.  redblock does them all at
+; once; the redraw queue does one a frame, which keeps any step small: the
+; exit door alone was 58000 T in one pass and its repack 46000 more.
 
-redblock:       call    rb_draw
-                call    rb_pack
+RQBAND          equ     16
+
+redblock:       xor     a               ; every band of it, at once
+rbloop:         push    af
+                call    rb_step
+                jr      nc, rbend
+                pop     af
+                inc     a
+                jr      rbloop
+rbend:          pop     af
                 call    redshow         ; and on to the screen
                 xor     a
                 ld      (redwide), a
                 ret
 
-; rb_draw is two steps itself, split between the block's own B section and
-; the moving one: a gate's bars and the floor restorebot lays back under them
-; are some 46000 T on their own, and the whole of it did not fit in a period.
-; Each step sets up again, since a frame may go by between them.
+; One band.  In: (blockrow), (blockcol), (redh), (redwide), A = which band,
+; counted up from the floor line.  Out: carry when there is another above.
 
-rb_draw:        call    rb_draw1
-                jp      rb_draw2
-
-rb_draw1:       call    rb_setup
+rb_step:        push    af
+                call    rb_setup
+                pop     af
+                call    rbband
+                push    af
                 call    rbwipe
                 call    setblock
                 call    draw_c
                 call    draw_mc
                 call    draw_b
-                jr      rbband0
-
-rb_draw2:       call    rb_setup
-                call    setblock
                 call    draw_mb
                 call    draw_d
                 call    draw_md
                 call    draw_a
                 call    draw_front
+                call    rbband0
+                call    rb_pack
+                pop     af
+                ret
+
+; The rows of band A: RQBAND of them up from the floor line and each band
+; above the last, the top one stopping where the block's own band does.
+; What falls outside the block's band is redrawn exactly as it was, so
+; leaving it alone is the same picture for a third of the work.
+
+rbband:         add     a, a            ; sixteen rows to a band
+                add     a, a
+                add     a, a
+                add     a, a
+                ld      b, a
+                ld      a, (dy)
+                sub     b
+                ld      (bandbot), a
+                ld      (rbbot), a
+                sub     RQBAND - 1
+                ld      c, a            ; C = the top of a full band
+                ld      a, (redh)
+                ld      b, a
+                ld      a, (dy)
+                sub     b
+                inc     a
+                ld      d, a            ; D = the top of the block's band
+                cp      c
+                jr      nc, rbbtop      ; which ends in this one
+                ld      a, c
+rbbtop:         ld      (bandtop), a
+                ld      e, a
+                ld      a, (bandbot)
+                sub     e
+                inc     a
+                ld      (rbh), a
+                ld      a, d            ; carry: rows still above this band
+                cp      e
+                ret
+
 rbband0:        xor     a               ; the next whole room wants them all
                 ld      (bandtop), a
                 ld      a, 191
@@ -2574,14 +2635,6 @@ rbleft:         dec     a
                 ld      a, (hl)
                 ld      (spreced), a
 
-                ld      a, (redh)       ; the band, for the wipe, the five
-                ld      b, a            ; passes and the repack alike -- what
-                ld      a, (dy)         ; falls outside it is redrawn exactly
-                ld      (bandbot), a    ; as it was, so leaving it alone is
-                sub     b               ; the same picture for a third of the
-                inc     a               ; work
-                ld      (bandtop), a
-
 rbxco:          ld      a, (blockcol)   ; four bytes to a block
                 add     a, a
                 add     a, a
@@ -2589,9 +2642,9 @@ rbxco:          ld      a, (blockcol)   ; four bytes to a block
                 ret
 
 rbwipe:         call    page_canvas
-                ld      a, (dy)
+                ld      a, (rbbot)
                 ld      (rbrow), a
-                ld      a, (redh)
+                ld      a, (rbh)
                 ld      b, a
 rbwipe1:        push    bc
                 ld      a, (rbrow)
@@ -2622,14 +2675,6 @@ rb_pack:        ld      a, (blockcol)   ; a second group only if the piece
                 ld      a, (redwide)    ; other half of the same group, and
                 and     b               ; packing the next as well was 42000
                 ld      (rbwide), a     ; T for nothing
-                ld      a, (blockrow)   ; the floor line again: a frame may
-                inc     a               ; have gone by since rb_draw
-                ld      l, a
-                ld      h, 0
-                ld      de, blockbot
-                add     hl, de
-                ld      a, (hl)
-                ld      (dy), a
 
 ; The groups of eight Apple bytes that cover it, repacked into the room.  A
 ; block starts on a multiple of four, so it is either the first half of a
@@ -2640,9 +2685,9 @@ rb_pack:        ld      a, (blockcol)   ; a second group only if the piece
                 srl     a               ; that holds the block: four bytes to
                 ld      (rbgroup), a    ; a block, eight to a group, so it is
                                         ; always the column halved
-                ld      a, (redh)       ; only the band that changed goes
-                ld      b, a            ; back into the room: the rest of the
-                ld      a, (dy)         ; block was redrawn the same as it was
+                ld      a, (rbh)        ; only the band drawn goes back into
+                ld      b, a            ; the room
+                ld      a, (rbbot)
                 sub     b
                 inc     a
                 jr      nc, rbtop
@@ -2652,7 +2697,7 @@ rbtop:          ld      (rbrow), a
                 ld      a, 192          ; the bottom of the screen
                 sub     l
                 ld      b, a
-                ld      a, (redh)
+                ld      a, (rbh)
                 cp      b
                 jr      c, rbn1
                 ld      a, b
@@ -2769,6 +2814,8 @@ rbwide:         db      0               ; two groups to pack, not one
 rbcanp:         dw      0               ; where the next batch starts in the
 rbroomp:        dw      0               ; canvas and in the room
 rbgroup:        db      0
+rbbot:          db      0               ; the band in hand: its bottom row
+rbh:            db      0               ; and how many
 
 ; ------------------------------------------------------- gates and pressplates
 ;
@@ -3611,25 +3658,25 @@ redplate:       call    onscreen
 ; happens around him -- a plate going down, a gate going up, a floor giving
 ; way -- can make his frame late.  The state of a thing moves on at once;
 ; only its picture waits, and the picture drawn is always the latest, so a
-; gate that moves while it waits simply comes out further up.  A block with
-; a band taller than RQSPLIT goes in two halves, on two frames.
+; gate that moves while it waits simply comes out further up.  A block goes
+; a band of RQBAND rows at a time, a step each, and a floor's two masks a
+; step each.
 ;
 ; An entry: row, column, band, flags -- bit 0 wide, bit 1 a floorpiece mask
-; rather than the picture, bit 5 its second step drawn, bit 6 asked for
-; again while under way, bit 7 under way (its first step drawn).
+; rather than the picture, bits 2 and 3 the step it is on, bit 6 asked for
+; again while under way.
 ;
 ; How much a frame has room for is not guessed: the queue is worked at the
 ; end of the frame, when his own work is all done, and a step is begun only
 ; while the ROM's frame count says the frame is still in the first two of
-; its three periods.  No step costs as much as a period -- the halves of a
-; 63 row block are about 32000 and 47000 T, a floor's two masks 36000 -- so
-; one begun in time is always done before the third period ends.  A frame
+; its three periods.  No step costs as much as a period -- a band of the
+; exit door, the heaviest, is under 40000 T -- so one begun in time is done
+; before the third period ends.  A frame
 ; that was heavy on its own, a run or a scroll, leaves the queue for the
 ; next, and on the real machine the clock counts what contended memory
 ; costs as well.
 
 RQMAX           equ     8
-RQSPLIT         equ     24
 
 rq_block:       xor     a               ; the picture of the block in hand
                 jr      rq_add
@@ -3663,7 +3710,9 @@ rqfind:         ld      a, (blockrow)   ; the same block already waiting?
                 ld      a, c            ; keep any width
                 and     1
                 or      (hl)
-                bit     7, a            ; half done: once more after it
+                ld      b, a
+                and     0x0c            ; under way: once more after it
+                ld      a, b
                 jr      z, rqset
                 set     6, a
 rqset:          ld      (hl), a
@@ -3741,38 +3790,34 @@ rqhead:         ld      a, 1
                 ld      (rqflags), a
                 and     1
                 ld      (redwide), a
+                ld      a, (rqflags)    ; the step it is on
+                rrca
+                rrca
+                and     3
+                ld      c, a
                 ld      a, (rqflags)
                 bit     1, a
+                ld      a, c
                 jr      nz, rqmaskgo
-                bit     5, a
-                jr      nz, rqpack
-                bit     7, a
-                jr      nz, rqdraw2
-                ld      a, (redh)
-                cp      RQSPLIT + 1
-                jr      c, rqwhole
-                call    rb_draw1        ; the first step, and it waits
-                ld      hl, rqq + 3
-                set     7, (hl)
-                jr      rqloop
-rqwhole:        call    rb_draw
-                call    rb_pack
+                call    rb_step         ; carry: another band to come
+                push    af
                 call    rq_showadd
-                jr      rqdone
-rqdraw2:        call    rb_draw2        ; the second
-                ld      hl, rqq + 3
-                set     5, (hl)
-                jr      rqloop
-rqpack:         call    rb_pack         ; and into the room
-                call    rq_showadd
-                ld      hl, rqq + 3
+                pop     af
+                jr      nc, rqlast
+rqmore:         ld      hl, rqq + 3     ; on to its next step
+                ld      a, (hl)
+                add     a, 4
+                ld      (hl), a
+                jp      rqloop
+rqmaskgo:       call    mb_step
+                jr      c, rqmore
+rqlast:         ld      hl, rqq + 3
                 bit     6, (hl)         ; moved again meanwhile: from the top
                 jr      z, rqdone
                 ld      a, (hl)
                 and     3               ; width and kind are all it keeps
                 ld      (hl), a
-                jr      rqloop
-rqmaskgo:       call    maskblock
+                jp      rqloop
 rqdone:         ld      a, (rqn)        ; off the head
                 dec     a
                 ld      (rqn), a
@@ -3813,10 +3858,17 @@ rqsa1:          ld      l, a
                 ld      a, (blockcol)
                 ld      (hl), a
                 inc     hl
-                ld      a, (redh)
+                ld      a, (rbh)        ; the band just drawn
                 ld      (hl), a
                 inc     hl
+                ld      a, (rbbot)      ; how far up from the floor line it
+                ld      b, a            ; sits, and wide
+                ld      a, (dy)
+                sub     b
+                add     a, a
+                ld      b, a
                 ld      a, (redwide)
+                or      b
                 ld      (hl), a
                 xor     a
                 ld      (redwide), a
@@ -3841,14 +3893,21 @@ rqsh1:          push    bc
                 ld      (redwide), a
                 inc     hl
                 push    hl
-                ld      a, (blockrow)   ; its floor line
-                inc     a
+                ld      a, (blockrow)   ; its floor line, and the band that
+                inc     a               ; far above it
                 ld      l, a
                 ld      h, 0
                 ld      de, blockbot
                 add     hl, de
+                ld      a, (redwide)
+                srl     a
+                ld      c, a
                 ld      a, (hl)
+                sub     c
                 ld      (dy), a
+                ld      a, (redwide)
+                and     1
+                ld      (redwide), a
                 call    page_art
                 call    redshow
                 xor     a
