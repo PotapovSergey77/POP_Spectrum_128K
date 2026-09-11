@@ -5,7 +5,7 @@ walk left 4 305 19 15 4 41
 walk left 5 366 19 16 4 40
 walk left 6 377 19 17 4 39
 walk left 7 394 18 18 5 38
-walk left 8 362 17 18 5 38
+walk left 8 362 18 18 5 38
 walk left 9 388 17 17 5 39
 walk left 10 461 16 16 6 40
 walk left 11 470 16 16 6 40
@@ -48,12 +48,12 @@ walk right 4 310 19 17 3 39
 walk right 5 380 19 16 4 40
 walk right 6 393 19 16 4 40
 walk right 7 274 20 15 3 41
-walk right 8 302 19 15 4 41
+walk right 8 302 18 15 4 41
 walk right 9 364 18 16 4 40
 walk right 10 378 18 17 4 39
 walk right 11 392 18 18 5 38
-walk right 12 338 19 18 5 38
-walk right 13 390 20 17 5 39
+walk right 12 338 18 18 5 38
+walk right 13 390 19 17 5 39
 walk right 14 461 19 16 6 40
 walk right 15 438 19 16 6 40
 walk right 16 559 21 17 5 39
@@ -107,7 +107,7 @@ fall 4 305 19 15 4 41
 fall 5 366 19 16 4 40
 fall 6 377 19 17 4 39
 fall 7 394 18 18 5 38
-fall 8 362 17 18 5 38
+fall 8 362 18 18 5 38
 fall 9 388 17 17 5 39
 fall 10 461 16 16 6 40
 fall 11 470 16 16 6 40

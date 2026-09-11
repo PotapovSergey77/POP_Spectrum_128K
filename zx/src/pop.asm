@@ -383,20 +383,17 @@ vw_all:         ld      hl, vwmap
 va1:            ld      (hl), 0xff
                 inc     hl
                 djnz    va1
-                ld      a, b
-                dec     a
-                ld      (vwatt), a
+                ld      a, 192
+                ld      (vwcnt), a      ; all 192 rows
+                ld      (vwatt), a      ; and, not nought, the colours
                 ret
 
-; Z: nothing of the view left to do.
+; Z: nothing of the view left to do.  The rows are counted as they are
+; marked and copied, so the question costs nothing to ask.
 
-vwany:          ld      hl, vwmap
-                ld      b, 24
-                ld      a, (vwatt)
-va2:            or      (hl)
-                inc     hl
-                djnz    va2
-                or      a
+vwany:          ld      a, (vwcnt)
+                ld      hl, vwatt
+                or      (hl)
                 ret
 
 ; Rows the room has just changed in: the view being made wants them again.
@@ -407,8 +404,14 @@ vm1:            ld      a, c
                 cp      192
                 jr      nc, vm2
                 call    vwbit
+                ld      d, a
+                and     (hl)
+                jr      nz, vm2         ; wanted already
+                ld      a, d
                 or      (hl)
                 ld      (hl), a
+                ld      hl, vwcnt
+                inc     (hl)
 vm2:            inc     c
                 djnz    vm1
                 ret
@@ -435,17 +438,17 @@ vb2:            rrca
                 jr      nz, vb2
                 ret
 
-; What is left of a frame after the queue: the view ahead, a row at a time,
-; right up to the interrupt the next frame starts on.  A row is short enough
-; that the frame can begin the moment it is done, with the beam still in the
-; border, instead of waiting at the halt.  That is the third interrupt; a
-; frame that has overrun it will start on the next one whatever happens, so
-; the view has until then.  And VWMIN rows go whatever the clock says: on a
-; machine slower than this one a frame had nothing left over, and the view
-; never moved at all.  So few rows are over before the beam leaves the
-; border even when they begin just ahead of the interrupt.
+; What is left of a frame after the queue: the view ahead, a run of rows at
+; a time, right up to the interrupt the next frame starts on.  A run is short
+; enough that the frame can begin the moment it is done, with the beam still
+; in the border, instead of waiting at the halt.  That is the third
+; interrupt; a frame that has overrun it will start on the next one whatever
+; happens, so the view has until then.  And VWMIN runs go whatever the clock
+; says: on a machine slower than this one a frame had nothing left over, and
+; the view never moved at all.
 
-VWMIN           equ     6
+VWMIN           equ     2
+VWBATCH         equ     4
 
 vw_fill:        ld      a, (vwcam)
                 inc     a
@@ -463,10 +466,10 @@ vwf1:           ld      a, (vwatt)
                 jr      nz, vwfatt
                 call    vwany
                 ret     z               ; ready, and waiting for him
-                call    vw_row
+                call    vw_batch
                 jr      vwf2
 vwfatt:         call    vw_attrs
-vwf2:           ld      hl, vwmin       ; the rows it has whatever happens
+vwf2:           ld      hl, vwmin       ; the runs it has whatever happens
                 dec     (hl)
                 jp      p, vwf1
                 inc     (hl)
@@ -506,58 +509,107 @@ vwa1:           call    set_attrs_at
                 ld      (cam), a
                 jp      page_art
 
-; The next row the view still wants: the room's, from where the view will
-; stand, into the screen not shown -- through a buffer down here when that
-; is bank 7, which wants the window the room is in.
+; The next run of rows the view still wants, up to VWBATCH of them together
+; so that the search, the two addresses and the paging are paid once for the
+; run and the addresses walk from row to row after that: the room's, from
+; where the view will stand, into the screen not shown -- through the buffer
+; down here when that is bank 7, which wants the window the room is in.  A
+; row at a time, with all of that for every one, spent twice what the
+; copying did.
 
-vw_row:         ld      a, (vwrow)
-vr1:            cp      192
-                jr      c, vr2
+vw_batch:       ld      a, (vwrow)      ; the first row still wanted
+vbs1:           cp      192
+                jr      c, vbs2
                 xor     a
-vr2:            ld      (vwrow), a
+vbs2:           ld      (vwrow), a
+                call    vwbit
+                and     (hl)
+                jr      nz, vbs3
+                ld      a, (vwrow)
+                inc     a
+                jr      vbs1
+vbs3:           ld      a, (vwrow)      ; it and the rows after it, while
+                ld      (vwfirst), a    ; they are wanted too, off the map
+                ld      b, 0
+vbs4:           ld      a, (vwrow)
                 call    vwbit
                 ld      d, a
                 and     (hl)
-                jr      nz, vr3
-                ld      a, (vwrow)
-                inc     a
-                jr      vr1
-vr3:            ld      a, d            ; off the map
+                jr      z, vbs5
+                ld      a, d
                 cpl
                 and     (hl)
                 ld      (hl), a
+                ld      hl, vwcnt
+                dec     (hl)
+                inc     b
+                ld      hl, vwrow
+                inc     (hl)
+                ld      a, (hl)
+                cp      192
+                jr      nc, vbs5
+                ld      a, b
+                cp      VWBATCH
+                jr      c, vbs4
+vbs5:           ld      a, b
+                ld      (vwn), a
                 call    page_art
-                ld      a, (vwrow)
+                ld      a, (vwfirst)    ; the room's first row, for the view
                 call    mul35
                 ld      de, room
                 add     hl, de
                 ld      a, (vwcam)
                 add     a, l
                 ld      l, a
-                jr      nc, vr4
+                jr      nc, vbs6
                 inc     h
-vr4:            ld      (roomp), hl
+vbs6:           push    hl
                 ld      e, 0
-                ld      a, (vwrow)
-                call    scraddr         ; its line on the screen
+                ld      a, (vwfirst)
+                call    scraddr         ; and its line on the screen
+                ex      de, hl
+                pop     hl
+                ld      a, (vwn)
+                ld      b, a
                 ld      a, (scrsel + 1)
                 or      a
-                jr      z, vrbounce
-                ex      de, hl          ; bank 7 shown: into bank 5, straight
-                ld      hl, (roomp)
-                jp      copy32
-vrbounce:       push    hl
-                ld      hl, (roomp)
-                ld      de, imgbuf
+                jr      z, vbbounce
+vbdirect:       push    bc              ; bank 7 shown: into bank 5, straight
+                push    de
                 call    copy32
-                ld      a, BANK_CANVAS
+                ld      de, ROOM_BYTES - 32
+                add     hl, de
+                pop     de
+                ex      de, hl
+                call    nextline
+                ex      de, hl
+                pop     bc
+                djnz    vbdirect
+                ret
+vbbounce:       push    de              ; bank 5 shown: the run into the
+                ld      de, imgbuf      ; buffer with the room's bank in
+vbb1:           push    bc
+                call    copy32
+                ld      bc, ROOM_BYTES - 32
+                add     hl, bc
+                pop     bc
+                djnz    vbb1
+                ld      a, BANK_CANVAS  ; and out of it with bank 7's
                 call    pageset
                 pop     de
-                ld      a, d
-                or      0x80
-                ld      d, a
+                set     7, d            ; 0x4000 is 0xC000 in bank 7
                 ld      hl, imgbuf
+                ld      a, (vwn)
+                ld      b, a
+vbb2:           push    bc
+                push    de
                 call    copy32
+                pop     de
+                ex      de, hl
+                call    nextline
+                ex      de, hl
+                pop     bc
+                djnz    vbb2
                 jp      page_art
 
 ; The room's code back where it runs, from the two banks it is kept in: see
@@ -4161,6 +4213,9 @@ fullshow:       db      0
 vwcam:          db      0xff            ; the view being made, or none
 vwatt:          db      0               ; its colours still to do
 vwrow:          db      0               ; where to look for its next row
+vwcnt:          db      0               ; how many rows it still wants
+vwfirst:        db      0               ; the run in hand: its first row
+vwn:            db      0               ; and how many
 flipnow:        db      0               ; show it at the top of the next frame
 nohalt:         db      0               ; the fill ran up to the interrupt
 vwstop:         db      0               ; the one it runs up to
