@@ -2633,7 +2633,11 @@ pushpp:         ld      (pptype), a
                 call    trobsave        ; so the copy shows it pushed down
                 ld      a, PLATEWIPE
                 ld      (redh), a
-                call    redplate
+                ld      a, 1            ; and first in the line: a plate is
+                ld      (rqprio), a     ; down for a count, and a press that
+                call    redplate        ; waited behind shaking floors was
+                xor     a               ; drawn as it came back up
+                ld      (rqprio), a
                 jp      trigger
 ppagain:        ld      a, PPTIMER
                 call    chgtimer
@@ -2843,7 +2847,15 @@ aodone:         call    trobsave
                 jp      z, redgate
                 cp      BG_EXIT
                 jp      z, redright
-                call    redplate
+                cp      BG_PRESSPLATE   ; a plate coming back up goes first too
+                jr      z, aoprio
+                cp      BG_UPRESSPLATE
+                jr      nz, aoplain
+aoprio:         ld      a, 1
+                ld      (rqprio), a
+aoplain:        call    redplate
+                xor     a
+                ld      (rqprio), a
                 ld      a, (mskwant)    ; a floor that has gone takes its own
                 or      a               ; wedge with it and gives one to the
                 ret     z               ; block on its right
@@ -3036,7 +3048,8 @@ redplate:       call    onscreen
 ;
 ; An entry: row, column, band, flags -- bit 0 wide, bit 1 a floorpiece mask
 ; rather than the picture, bits 2 and 3 the step it is on, bit 6 asked for
-; again while under way.
+; again while under way, bit 7 first in the line: a plate, whose press lasts
+; a count and is lost if its picture waits.
 ;
 ; How much a frame has room for is not guessed: the queue is worked at the
 ; end of the frame, when his own work is all done, and a step is begun only
@@ -3057,6 +3070,11 @@ rq_add:         ld      c, a
                 ld      a, (redwide)    ; and wide, which redblock would have
                 or      c               ; spent
                 ld      c, a
+                ld      a, (rqprio)     ; and first in the line, if it is
+                or      a
+                jr      z, rqa1
+                set     7, c
+rqa1:
                 xor     a
                 ld      (redwide), a
                 ld      a, (rqn)
@@ -3079,8 +3097,8 @@ rqfind:         ld      a, (blockrow)   ; the same block already waiting?
                 xor     c
                 and     2
                 jr      nz, rqback
-                ld      a, c            ; keep any width
-                and     1
+                ld      a, c            ; keep any width, and going first
+                and     0x81
                 or      (hl)
                 ld      b, a
                 and     0x0c            ; under way: once more after it
@@ -3091,9 +3109,13 @@ rqset:          ld      (hl), a
                 dec     hl              ; and the taller band
                 ld      a, (redh)
                 cp      (hl)
-                ret     c
+                jr      c, rqs1
                 ld      (hl), a
-                ret
+rqs1:           bit     7, c            ; up the line, if it goes first
+                ret     z
+                dec     hl
+                dec     hl
+                jr      rqfront
 rqback:         dec     hl
                 dec     hl
                 dec     hl
@@ -3129,6 +3151,53 @@ rqput:          ld      l, a
                 ld      (hl), a
                 inc     hl
                 ld      (hl), c
+                bit     7, c            ; up the line, if it goes first
+                ret     z
+                dec     hl
+                dec     hl
+                dec     hl
+
+; The entry at HL goes up the line, to just behind any others that go first.
+
+rqfront:        push    hl
+                ld      de, rqtmp       ; aside
+                ld      bc, 4
+                ldir
+                pop     hl
+                ld      de, rqq
+rqf1:           or      a               ; nothing ahead of it but those that
+                sbc     hl, de          ; go first: it is where it belongs
+                add     hl, de
+                ret     z
+                inc     de
+                inc     de
+                inc     de
+                ld      a, (de)
+                inc     de
+                bit     7, a
+                jr      nz, rqf1        ; that one goes first too: past it
+                dec     de
+                dec     de
+                dec     de
+                dec     de
+                push    de              ; the rest move down one
+                or      a
+                sbc     hl, de
+                ld      b, h
+                ld      c, l
+                add     hl, de
+                dec     hl
+                ld      d, h
+                ld      e, l
+                inc     de
+                inc     de
+                inc     de
+                inc     de
+                lddr
+                pop     de              ; and it goes in there
+                ld      hl, rqtmp
+                ld      bc, 4
+                ldir
                 ret
 
 ; Once a frame, at its end: as much of the queue as the clock allows.
@@ -3140,15 +3209,18 @@ rqput:          ld      l, a
 ; frame leaves over, and a frame or two later it is taken and the queue goes
 ; on where it was; what the gate is doing moves on meanwhile regardless.
 
-rq_run:         ld      a, (vwwait)
-                or      a
-                ret     nz
-                xor     a
+rq_run:         xor     a
                 ld      (rqdid), a
 rqloop:         ld      a, (rqn)
                 or      a
                 ret     z
-                call    rqtime
+                ld      a, (vwwait)     ; the view due: only what goes first
+                or      a               ; goes on, a plate's short press
+                jr      z, rqgo
+                ld      a, (rqq + 3)
+                bit     7, a
+                ret     z
+rqgo:           call    rqtime
                 ret     nc
                 ld      hl, rqq         ; the head, in hand
                 ld      a, (hl)
@@ -3189,8 +3261,8 @@ rqlast:         ld      hl, rqq + 3
                 bit     6, (hl)         ; moved again meanwhile: from the top
                 jr      z, rqdone
                 ld      a, (hl)
-                and     3               ; width and kind are all it keeps
-                ld      (hl), a
+                and     0x83            ; width, kind and going first are all
+                ld      (hl), a         ; it keeps
                 jp      rqloop
 rqdone:         ld      a, (rqn)        ; off the head
                 dec     a
@@ -3314,6 +3386,8 @@ rqsh1:          push    bc
 
 rqn:            db      0               ; entries waiting
 rqflags:        db      0
+rqprio:         db      0               ; the next request goes first
+rqtmp:          ds      4               ; an entry, on its way up the line
 rqdid:          db      0               ; a step done this frame
 rqq:            ds      4 * RQMAX
 rqsn:           db      0               ; blocks waiting to be shown
