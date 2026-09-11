@@ -79,7 +79,7 @@ FLAME_TABLE = [0x52, 0x53, 0x54, 0x55, 0x56, 0x61, 0x62, 0x63, 0x64,
 FLAME_UP = 43
 
 INK_ROOM = 0x05                 # cyan on black, the whole room
-INK_FLAME = 0x02                # and red where a torch burns
+INK_FLAME = 0x06                # and yellow where a torch burns
 ROOM_PX = ROOM_BYTES * 8
 CAM_MAX = ROOM_BYTES - 32
 
@@ -381,6 +381,27 @@ def main(argv):
                 if 0 <= x < 14:
                     line[b8] |= 0x80 >> bit
         flamemask += line
+    # Where a flame is coloured: the cells its pixels actually reach, over
+    # all nine frames, for each of the two shifts and each of the three
+    # heights a torch can burn at -- the flame's sixteen rows start four,
+    # three and two lines into a cell on the three block rows.  An odd
+    # column's flame comes out a cross, an even one's two cells by three;
+    # the three by three box it is drawn in turned the wall the flame's
+    # colour.  Bit 0 is the top left cell, then along and down.
+    flcells = []
+    for ai in range(2):
+        for br in range(3):
+            top = renderroom.BLOCKBOT[br + 1] - 3 - 43 - 15
+            cells = 0
+            for f in range(len(FLAME_FRAMES)):
+                base = (ai * len(FLAME_FRAMES) + f) * FLAME_W * FLAME_H
+                for r in range(FLAME_H):
+                    for c in range(FLAME_W):
+                        if flames[base + r * FLAME_W + c]:
+                            cr = (top + r) // 8 - top // 8
+                            cells |= 1 << (cr * 3 + c)
+            flcells.append(cells)
+
     open(os.path.join(binout, 'flamemask.bin'), 'wb').write(bytes(flamemask))
     open(os.path.join(binout, 'flametab.bin'), 'wb').write(
         bytes(FLAME_FRAMES.index(n) for n in FLAME_TABLE))
@@ -448,6 +469,8 @@ def main(argv):
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
     inc.append('flames      equ %d' % (PAGE_WINDOW + flames_at))
     inc.append('FLAME_BYTES equ %d' % (FLAME_W * FLAME_H))
+    for i, cells in enumerate(flcells):
+        inc.append('FLCELLS%d    equ %d' % (i, cells))
     for n, o in bgoffs:
         inc.append('T_%-9s equ %d' % (n.upper(), o))
     for n in ('space', 'floor', 'posts', 'gate', 'panelwif', 'pillartop',

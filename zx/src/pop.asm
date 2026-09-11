@@ -2271,50 +2271,54 @@ set_attrs:      ld      hl, SCREEN + 6144
                 ld      (flleft), a
                 ld      hl, torches + 1
                 ld      (flrec), hl
+; Colour where a torch burns: the cells its flame actually reaches, as
+; mkassets works them out from the flame's own pixels -- a cross for an odd
+; column, two cells by three for an even one -- not the three by three box
+; the flame is drawn in, which turned the wall around it the same colour.
+
 sanext:         ld      hl, (flrec)
                 ld      a, (hl)         ; its column, less the camera
-                push    hl
-                call    flvis           ; and how much of it is in view
-                ld      (sawide), a
-                pop     hl
-                ld      a, (hl)
-                inc     hl
                 ld      b, a
                 ld      a, (cam)
                 neg
                 add     a, b
                 ld      (sacol), a
-                ld      a, (hl)         ; the top of it, in cells
                 inc     hl
-                ld      b, a
+                ld      a, (hl)         ; the top of it, in cells
+                ld      c, a
                 srl     a
                 srl     a
                 srl     a
                 ld      (sarow), a
-                inc     hl              ; its width: flvis has it
-                ld      a, (hl)         ; and down: the last row it reaches
-                add     a, b
-                dec     a
-                srl     a
-                srl     a
-                srl     a
-                ld      b, a
-                ld      a, (sarow)
-                neg
-                add     a, b
-                inc     a
-                ld      (satall), a
-                ld      de, 4           ; on to the next torch's record
-                add     hl, de
+                inc     hl              ; past the width, the height and the
+                inc     hl              ; size of a frame
+                inc     hl
+                inc     hl
+                ld      a, (hl)         ; the frame offset says which shift
+                inc     hl
+                or      (hl)
+                inc     hl
                 ld      (flrec), hl
+                ld      hl, flcells
+                jr      z, sash
+                ld      de, 6
+                add     hl, de
+sash:           ld      a, c            ; and the top which block row: 4, 67
+                cp      67              ; or 130
+                jr      c, sarw
+                inc     hl
+                inc     hl
+                cp      130
+                jr      c, sarw
+                inc     hl
+                inc     hl
+sarw:           ld      e, (hl)
+                inc     hl
+                ld      d, (hl)         ; DE = the nine cells, top left first
 
-                ld      a, (sawide)     ; out of view altogether
-                or      a
-                jr      z, sadone
-                ld      a, (satall)
-                ld      b, a
                 ld      a, (sarow)
-sarowloop:      push    bc
+                ld      b, 3
+sarr:           push    bc
                 push    af
                 ld      l, a            ; thirty two cells to the row
                 ld      h, 0
@@ -2323,31 +2327,40 @@ sarowloop:      push    bc
                 add     hl, hl
                 add     hl, hl
                 add     hl, hl
-                ld      de, SCREEN + 6144
-                add     hl, de
+                ld      bc, SCREEN + 6144
+                add     hl, bc
                 ld      a, (sacol)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                ld      a, (sawide)
-                ld      b, a
-sacell:         ld      (hl), INK_FLAME
-                inc     hl
-                djnz    sacell
+                ld      c, a
+                ld      b, 3
+sacc:           srl     d               ; this cell's bit
+                rr      e
+                jr      nc, sacskip
+                ld      a, c
+                cp      32              ; past the right of the view
+                jr      nc, sacskip
+                push    hl
+                add     a, l
+                ld      l, a
+                jr      nc, sac1
+                inc     h
+sac1:           ld      (hl), INK_FLAME
+                pop     hl
+sacskip:        inc     c
+                djnz    sacc
                 pop     af
                 inc     a
                 pop     bc
-                djnz    sarowloop
+                djnz    sarr
 
-sadone:         ld      hl, flleft
+                ld      hl, flleft
                 dec     (hl)
-                jr      nz, sanext
+                jp      nz, sanext
                 ret
 
 sacol:          db      0
 sarow:          db      0
-sawide:         db      0
-satall:         db      0
+flcells:        dw      FLCELLS0, FLCELLS1, FLCELLS2  ; shift three
+                dw      FLCELLS3, FLCELLS4, FLCELLS5  ; shift seven
 
 ; Where a room's torches are.  FRAMEADV.S draws a flame as the B section of
 ; the block to the torch's RIGHT, one byte in and 43 scanlines above that
