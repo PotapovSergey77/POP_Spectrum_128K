@@ -47,11 +47,11 @@ walk right 3 272 19 17 3 39
 walk right 4 310 19 17 3 39
 walk right 5 380 19 16 4 40
 walk right 6 393 19 16 4 40
-walk right 7 274 20 15 3 41
+walk right 7 274 19 15 3 41
 walk right 8 302 18 15 4 41
 walk right 9 364 18 16 4 40
-walk right 10 378 18 17 4 39
-walk right 11 392 18 18 5 38
+walk right 10 378 17 17 4 39
+walk right 11 392 17 18 5 38
 walk right 12 338 18 18 5 38
 walk right 13 390 19 17 5 39
 walk right 14 461 19 16 6 40

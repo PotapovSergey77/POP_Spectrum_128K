@@ -3133,7 +3133,17 @@ rqput:          ld      l, a
 
 ; Once a frame, at its end: as much of the queue as the clock allows.
 
-rq_run:         xor     a
+; A step of the view that is due and not yet made comes first: while a gate
+; went up, each band the queue put into the room was a band the view had to
+; copy again, and the view was never ready -- the camera did not move until
+; the gate was done.  So the queue waits, the view has the whole of what a
+; frame leaves over, and a frame or two later it is taken and the queue goes
+; on where it was; what the gate is doing moves on meanwhile regardless.
+
+rq_run:         ld      a, (vwwait)
+                or      a
+                ret     nz
+                xor     a
                 ld      (rqdid), a
 rqloop:         ld      a, (rqn)
                 or      a

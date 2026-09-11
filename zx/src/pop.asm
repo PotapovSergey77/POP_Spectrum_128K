@@ -299,7 +299,9 @@ nextrow:        ld      de, ROOM_BYTES - 32
 ; for it, and show_rect turns the screens round at the top of the frame
 ; after.
 
-camera:         call    camsched        ; C = where the rule puts the view
+camera:         xor     a               ; nothing waits for the view yet
+                ld      (vwwait), a
+                call    camsched        ; C = where the rule puts the view
                 ld      c, a
                 ld      b, 0            ; B = 1: the step ahead is due now
                 ld      a, (facing)
@@ -323,12 +325,18 @@ camfl:          or      a               ; facing left: a step left
 camwant:        ld      hl, vwcam       ; the view being made?
                 cp      (hl)
                 jr      z, camready
-                ld      (hl), a         ; no: that one, all of it
+                ld      (hl), a         ; no: that one, all of it -- and if
+                ld      a, b            ; it is wanted now, the queue waits
+                ld      (vwwait), a
                 jr      vw_all
 camready:       dec     b               ; wanted now, and ready?
                 ret     nz
                 call    vwany
-                ret     nz
+                jr      z, camtake
+                ld      a, 1            ; not yet: the queue waits for it
+                ld      (vwwait), a
+                ret
+camtake:
                 ld      a, (vwcam)
                 ld      (cam), a
                 ld      a, 1
@@ -3515,54 +3523,80 @@ hide_behind:    ld      hl, foremask
 cover_rows:     ld      a, (neww)       ; likewise: djnz would go round
                 or      a               ; 256 times for none of him
                 ret     z
-                ld      a, (newcol)
-                call    mastercol
+                ld      a, (newcol)     ; first: mastercol has B, which is
+                call    mastercol       ; about to be the rows
                 ld      (masterc), a
                 ld      a, (newh)
+                or      a
+                ret     z
                 ld      b, a
                 ld      a, (newtop)
+                call    cliprows        ; C = his first row on the screen
+                ret     c
+                ld      a, c
                 ld      (rowy), a
 
-; Most of his rows have nothing of the mask on them, so the band is asked
-; first and the three addresses are worked out only for a row that has.
+; The room and the working copy are worked out at his first row and walked
+; from there, a row at a time, and so is the mask, from one row of it to the
+; next: a front piece is tall, and its rows follow on.  Worked out afresh for
+; every row they cost more than laying the mask down did.
+
+                ld      a, c
+                call    mul35
+                ld      de, room
+                call    covercol
+                ld      (covr), hl
+                ld      a, (newcol)
+                ld      e, a
+                ld      a, c
+                call    scraddr
+                ld      de, work - SCREEN
+                add     hl, de
+                ld      (covw), hl
+                ld      a, 0xfe         ; no row of the mask in hand yet
+                ld      (covi), a
 
 coverrow:       push    bc
                 ld      a, (rowy)
-                cp      192
-                jr      nc, covernxt
                 ld      l, a
                 ld      h, 0
                 ld      de, (coverb)
                 add     hl, de
-                ld      a, (hl)
+                ld      a, (hl)         ; the mask's row for this line, or -1
+                cp      0xff
+                jr      z, covernxt     ; the mask has nothing on this one
+                ld      c, a
+                ld      a, (covi)       ; the one after the last: a step on
                 inc     a
-                jr      z, covernxt     ; the mask has nothing on this row
-                dec     a
-                call    mul35
+                cp      c
+                ld      a, c
+                ld      (covi), a
+                ld      hl, (covm)
+                ld      de, ROOM_BYTES
+                add     hl, de
+                jr      z, covmask
+                call    mul35           ; or worked out, the first of a run
                 ld      de, (coverm)
                 call    covercol
-                push    hl              ; the mask's row
-                ld      a, (rowy)
-                call    mul35
-                ld      de, room
-                call    covercol
-                push    hl              ; the room's
-                ld      a, (newcol)
-                ld      e, a
-                ld      a, (rowy)
-                call    scraddr
-                ld      de, work - SCREEN
-                add     hl, de
-                push    hl              ; the working copy, into the
-                exx                     ; alternate DE
+covmask:        ld      (covm), hl
+                ld      hl, (covw)      ; the working copy, into the
+                push    hl              ; alternate DE
+                exx
                 pop     de
                 exx
-                pop     de              ; the room
-                pop     hl              ; the mask
+                ld      hl, (covm)      ; the mask
+                ld      de, (covr)      ; the room
                 ld      a, (neww)
                 ld      b, a
                 call    cover_apply
-covernxt:       ld      hl, rowy
+covernxt:       ld      hl, (covr)      ; a row down, in the room and in the
+                ld      de, ROOM_BYTES  ; working copy
+                add     hl, de
+                ld      (covr), hl
+                ld      hl, (covw)
+                call    nextline
+                ld      (covw), hl
+                ld      hl, rowy
                 inc     (hl)
                 pop     bc
                 djnz    coverrow
@@ -4218,11 +4252,16 @@ vwfirst:        db      0               ; the run in hand: its first row
 vwn:            db      0               ; and how many
 flipnow:        db      0               ; show it at the top of the next frame
 nohalt:         db      0               ; the fill ran up to the interrupt
+vwwait:         db      0               ; a step is due: the queue waits
 vwstop:         db      0               ; the one it runs up to
 vwmin:          db      0               ; rows still owed it this frame
 atbase:         dw      0               ; the colours set_attrs writes
 masterc:        db      0
 coverm:         dw      0
+covm:           dw      0               ; cover_rows' three: the mask's row,
+covr:           dw      0               ; the room's and the working copy's,
+covw:           dw      0               ; and which row of the mask that is
+covi:           db      0
 coverb:         dw      0
 workp:          dw      0
 roomp:          dw      0
