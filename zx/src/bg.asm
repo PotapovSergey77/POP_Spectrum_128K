@@ -3712,14 +3712,21 @@ rqput:          ld      l, a
 
 ; Once a frame, at its end: as much of the queue as the clock allows.
 
-rq_run:         ld      a, (rqn)
-                or      a
-                ret     z
+rq_run:         xor     a               ; the first step of a frame goes
+                ld      (rqdid), a      ; whatever the clock says: on the
+rqloop:         ld      a, (rqn)        ; machine a frame's own work ends in
+                or      a               ; its third period more often than
+                ret     z               ; not, and waiting for the second
+                ld      a, (rqdid)      ; drew nothing at all -- no plate went
+                or      a               ; down, no gate went up
+                jr      z, rqhead
                 ld      a, (FRAMES)     ; into the third period already: the
                 ld      hl, frstart     ; next frame begins before another
                 sub     (hl)            ; step could end
                 cp      2
                 ret     nc
+rqhead:         ld      a, 1
+                ld      (rqdid), a
                 ld      hl, rqq         ; the head, in hand
                 ld      a, (hl)
                 ld      (blockrow), a
@@ -3747,7 +3754,7 @@ rq_run:         ld      a, (rqn)
                 call    rb_draw1        ; the first step, and it waits
                 ld      hl, rqq + 3
                 set     7, (hl)
-                jr      rq_run
+                jr      rqloop
 rqwhole:        call    rb_draw
                 call    rb_pack
                 call    rq_showadd
@@ -3755,7 +3762,7 @@ rqwhole:        call    rb_draw
 rqdraw2:        call    rb_draw2        ; the second
                 ld      hl, rqq + 3
                 set     5, (hl)
-                jr      rq_run
+                jr      rqloop
 rqpack:         call    rb_pack         ; and into the room
                 call    rq_showadd
                 ld      hl, rqq + 3
@@ -3764,12 +3771,12 @@ rqpack:         call    rb_pack         ; and into the room
                 ld      a, (hl)
                 and     3               ; width and kind are all it keeps
                 ld      (hl), a
-                jr      rq_run
+                jr      rqloop
 rqmaskgo:       call    maskblock
 rqdone:         ld      a, (rqn)        ; off the head
                 dec     a
                 ld      (rqn), a
-                jr      z, rq_run
+                jp      z, rqloop
                 add     a, a
                 add     a, a
                 ld      c, a
@@ -3777,7 +3784,7 @@ rqdone:         ld      a, (rqn)        ; off the head
                 ld      hl, rqq + 4
                 ld      de, rqq
                 ldir
-                jp      rq_run
+                jp      rqloop
 
 ; A block that has gone back into the room still has to reach the working
 ; copy, and at the end of a frame he has just been drawn into it: the room
@@ -3855,6 +3862,7 @@ rqsh1:          push    bc
 
 rqn:            db      0               ; entries waiting
 rqflags:        db      0
+rqdid:          db      0               ; a step done this frame
 rqq:            ds      4 * RQMAX
 rqsn:           db      0               ; blocks waiting to be shown
 rqs:            ds      4 * RQMAX       ; row, column, band, wide

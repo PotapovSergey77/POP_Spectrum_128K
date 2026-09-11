@@ -44,6 +44,11 @@ class Z80:
         self.halted = False
         self.frames = 0
         self.next_tick = FRAME_TSTATES      # when the interrupt next comes
+        # POP_SLOW stretches every instruction, a rough stand-in for the
+        # memory contention a real 128K has and this core does not model.
+        import os
+        self.slow = float(os.environ.get('POP_SLOW', '1.0'))
+        self.halted_now = False
         self.cycles = 0
         self.ports = {}          # port -> value returned by IN
         self.default_in = 0xFF
@@ -196,13 +201,20 @@ class Z80:
     # -- execution ------------------------------------------------------
 
     def step(self):
-        self._step()
+        if self.slow == 1.0:
+            self._step()
+        else:                                       # contended memory,
+            c = self.cycles                         # roughly: every
+            self._step()                            # instruction a little
+            if not self.halted_now:                 # longer than the book
+                self.cycles = c + int((self.cycles - c) * self.slow + 0.5)
         while self.cycles >= self.next_tick:        # the interrupt: the ROM
             if self.iff1:                           # counts a frame
                 self.tick_frames()
             self.next_tick += FRAME_TSTATES
 
     def _step(self):
+        self.halted_now = False
         op = self.fetch()
         self.cycles += 4
 
@@ -216,6 +228,7 @@ class Z80:
                 # the question the pace of the game turns on.
                 self.cycles += FRAME_TSTATES - self.cycles % FRAME_TSTATES
                 self.frames += 1
+                self.halted_now = True
             else:
                 self.halted = True
             return
