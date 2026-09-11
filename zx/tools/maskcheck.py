@@ -127,7 +127,42 @@ def main(argv):
                   % (n, where(masks(cpu, sym)[0], alone[0]) or '-',
                      where(masks(cpu, sym)[1], alone[1]) or '-'))
     print('%d rooms whose masks depend on what came before' % carried)
-    return 1 if bad or carried else 0
+
+    # And the picture: a block redrawn with nothing changed has to leave the
+    # room exactly as it was -- every pass, the wipe, the repack -- and the
+    # working copy under the rectangle it sends has to be the room.
+    import zxscreen
+    redraw = 0
+    for n in rooms:
+        cpu.mem[sym['roomnum']] = n
+        call(cpu, sym['newroom'])
+        call(cpu, sym['repaint'])
+        room0 = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
+        for h in (16, 63):
+            for loc in range(30):
+                row, col = loc // 10, loc % 10
+                cpu.mem[sym['blockrow']] = row
+                cpu.mem[sym['blockcol']] = col
+                cpu.mem[sym['redh']] = h
+                call(cpu, sym['redblock'])
+                now = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
+                cam = cpu.mem[sym['cam']]
+                d = [i for i in range(6720) if now[i] != room0[i]]
+                w = [(y, c) for y in range(192) for c in range(32 - cam)
+                     if cpu.mem[sym['work'] + zxscreen.bitmap_offset(c, y)]
+                     != now[y * 35 + c + cam]
+                     and (lambda top, bot: top <= y <= bot)(
+                         [2, 65, 128, 191][row + 1] - h + 1,
+                         [2, 65, 128, 191][row + 1])
+                     and col * 28 // 8 - cam <= c < col * 28 // 8 - cam + 5]
+                if d or w:
+                    redraw += 1
+                    print('room %2d block %d/%d, %2d rows: room %d bytes, '
+                          'working copy %d bytes' % (n, row, col, h, len(d),
+                                                      len(w)))
+                    cpu.mem[sym['room']:sym['room'] + 6720] = room0
+    print('%d block redraws that change what nothing changed' % redraw)
+    return 1 if bad or carried or redraw else 0
 
 
 if __name__ == '__main__':

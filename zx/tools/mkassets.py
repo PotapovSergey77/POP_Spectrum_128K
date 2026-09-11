@@ -299,12 +299,6 @@ def main(argv):
     # row of it a scanline is, or -1 for the rest of the screen.
     foreband, foremask = band_mask(fore)
 
-    # The screen's thirds and interleave cost a dozen instructions a row to
-    # work out, and four passes a frame do it.  192 words is cheaper.
-    rows = bytearray()
-    for y in range(192):
-        rows += (0x4000 + zxscreen.bitmap_offset(0, y)).to_bytes(2, 'little')
-    open(os.path.join(binout, 'rowaddr.bin'), 'wb').write(bytes(rows))
 
     # The art bank: the room first, then the foreground mask behind it, and a
     # signature the program checks -- a bank that did not load leaves a black

@@ -2595,36 +2595,31 @@ rbwipe2:        ld      hl, rbrow
                 jr      nc, rbtop
                 xor     a
 rbtop:          ld      (rbrow), a
+                ld      l, a            ; the rows the band holds, stopped at
+                ld      a, 192          ; the bottom of the screen
+                sub     l
+                ld      b, a
                 ld      a, (redh)
-                ld      (rbleftn), a
-rbline:         ld      a, (rbrow)
-                cp      192
-                jr      nc, rbnext
+                cp      b
+                jr      c, rbn1
+                ld      a, b
+rbn1:           ld      (rbleftn), a
 
-                call    page_canvas
-                ld      a, (rbrow)
-                call    canvasrow
-                ld      a, (rbgroup)    ; eight bytes to a group
+                ld      a, (rbrow)      ; where they start in the canvas and
+                call    canvasrow       ; in the room
+                ld      a, (rbgroup)
                 add     a, a
                 add     a, a
                 add     a, a
                 ld      e, a
                 ld      d, 0
                 add     hl, de
-                ld      de, cvbuf
-                ld      bc, 8
-                ld      a, (redwide)
-                or      a
-                jr      z, rbone
-                ld      c, 16
-rbone:          ldir
-
-                call    page_art
+                ld      (rbcanp), hl
                 ld      a, (rbrow)
                 call    mul35
                 ld      de, room
                 add     hl, de
-                ld      a, (rbgroup)    ; seven bytes out to a group
+                ld      a, (rbgroup)
                 ld      c, a
                 add     a, a
                 add     a, a
@@ -2633,19 +2628,84 @@ rbone:          ldir
                 ld      e, a
                 ld      d, 0
                 add     hl, de
-                ex      de, hl
-                ld      hl, cvbuf
+                ld      (rbroomp), hl
+
+; A batch at a time: the canvas and the room are in two banks, and paging
+; both for every row was a fifth of the work.  imgbuf is free by now and
+; holds 48 rows of one group, or 24 of two.
+
+rbbatch:        ld      a, (rbleftn)
+                or      a
+                jp      z, rbdone
+                ld      b, 48
+                ld      a, (redwide)
+                or      a
+                jr      z, rbb1
+                ld      b, 24
+rbb1:           ld      a, (rbleftn)
+                cp      b
+                jr      c, rbb2
+                ld      a, b
+rbb2:           ld      (rbbn), a
+                ld      b, a
+                ld      a, (rbleftn)
+                sub     b
+                ld      (rbleftn), a
+
+                call    page_canvas     ; the batch out of the canvas
+                ld      hl, (rbcanp)
+                ld      de, imgbuf
+                ld      a, (rbbn)
+                ld      b, a
+rbcopy:         push    bc
+                ldi                     ; LDI counts BC down, so the stride
+                ldi                     ; is loaded after, not before
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ld      bc, CANVAS_W - 8
+                ld      a, (redwide)
+                or      a
+                jr      z, rbc1
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ld      bc, CANVAS_W - 16
+rbc1:           add     hl, bc
+                pop     bc
+                djnz    rbcopy
+                ld      (rbcanp), hl
+
+                call    page_art        ; and into the room
+                ld      hl, imgbuf
+                ld      de, (rbroomp)
+                ld      a, (rbbn)
+                ld      b, a
+rbconv:         push    bc
+                push    de
                 call    cv8to7
                 ld      a, (redwide)    ; a piece that reaches past its own
                 or      a               ; block wants the next group too
-                jr      z, rbnext
-                call    cv8to7
+                call    nz, cv8to7
+                pop     de
+                ex      de, hl
+                ld      bc, 35
+                add     hl, bc
+                ex      de, hl
+                pop     bc
+                djnz    rbconv
+                ld      (rbroomp), de
+                jp      rbbatch
 
-rbnext:         ld      hl, rbrow
-                inc     (hl)
-                ld      hl, rbleftn
-                dec     (hl)
-                jp      nz, rbline
+rbdone:         call    page_art        ; redshow reads the room
                 xor     a               ; the next whole room wants them all
                 ld      (bandtop), a
                 ld      a, 191
@@ -2659,6 +2719,9 @@ redwide:        db      0
 
 rbrow:          db      0
 rbleftn:        db      0
+rbbn:           db      0               ; the rows in this batch
+rbcanp:         dw      0               ; where the next batch starts in the
+rbroomp:        dw      0               ; canvas and in the room
 rbgroup:        db      0
 
 ; ------------------------------------------------------- gates and pressplates

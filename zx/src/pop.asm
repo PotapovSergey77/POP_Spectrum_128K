@@ -3722,35 +3722,43 @@ rsright:        ld      a, b
                 ld      (rowy), a
                 call    startrows
                 call    dirty_add       ; and the blit takes it from there
+                push    bc
+                ld      a, (rowy)       ; the room's row, stepped by 35 from
+                call    mul35           ; here on rather than multiplied out
+                ld      de, room        ; for every one
+                add     hl, de
+                ld      a, (rdstart)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (rsroomp), hl
+                pop     bc
 rsrow:          push    bc
                 ld      a, (rowy)
                 cp      192
                 jr      nc, rsskip
                 call    line_addr
-                ld      (rsscr), hl
                 ld      de, work - SCREEN
                 add     hl, de
-                ld      (rswrk), hl
-                ld      a, (rowy)
-                call    mul35
-                ld      de, room
-                add     hl, de
-                ld      a, (rdstart)
-                ld      e, a
-                ld      d, 0
-                add     hl, de          ; HL = the room's row
-                ld      de, (rswrk)
+                ex      de, hl          ; DE = the working copy
+                ld      hl, (rsroomp)   ; HL = the room
                 ld      a, (rdw)
                 ld      c, a
                 ld      b, 0
                 ldir
                 jr      rsnext
 rsskip:         call    startrows
-rsnext:         ld      hl, rowy
+rsnext:         ld      hl, (rsroomp)
+                ld      de, 35
+                add     hl, de
+                ld      (rsroomp), hl
+                ld      hl, rowy
                 inc     (hl)
                 pop     bc
                 djnz    rsrow
                 ret
+
+rsroomp:        dw      0
 
 ; The rectangle a block redraw left behind, queued for the top of the next
 ; frame -- before his own two, so that he wins.  One rectangle each, never
@@ -3796,8 +3804,6 @@ rdcol:          db      0
 rdstart:        db      0
 rdw:            db      0
 redh:           db      63
-rsscr:          dw      0
-rswrk:          dw      0
 dirtyn:         db      0               ; rectangles waiting for the blit
 dirtyq:         ds      4 * DIRTYMAX    ; col, top, width, height each
 
@@ -3818,22 +3824,26 @@ keep_rect:      ld      a, (newcol)
 ; A = scanline, E = byte column.  Out: HL = screen address.
 
 ; In: A = a scanline, E = a byte column.  Out: HL = the screen address.
-; A table beats working the interleave out: four passes a frame ask for it.
+; Worked out, not looked up: each pass asks for its first row only and
+; walks the rest with nextline, and the table was 384 bytes of the map.
 
-scraddr:        push    bc
+scraddr:        ld      l, a            ; 010 t t l l l -- the third, and the
+                and     0x07            ; line within the character row
+                or      0x40
+                ld      h, a
+                ld      a, l
+                rra
+                rra
+                rra
+                and     0x18
+                or      h
+                ld      h, a
+                ld      a, l            ; r r r c c c c c -- the character
+                rla                     ; row, and the column
+                rla
+                and     0xe0
+                add     a, e
                 ld      l, a
-                ld      h, 0
-                add     hl, hl
-                ld      bc, rowaddr
-                add     hl, bc
-                ld      a, (hl)
-                inc     hl
-                ld      h, (hl)
-                ld      l, a
-                ld      a, e
-                add     a, l
-                ld      l, a
-                pop     bc
                 ret
 
                 include "bg.asm"
@@ -3982,12 +3992,6 @@ torches:        ds      1 + 6 * 7
 flametab:       incbin  "flametab.bin"
 flamemask:      incbin  "flamemask.bin"
 foreband:       ds      192
-rowaddr:        incbin  "rowaddr.bin"   ; these two are reached by a full
-                                        ; sixteen bit add, so they need no
-                                        ; page of their own -- the padding
-                                        ; that used to go here was up to 255
-                                        ; bytes thrown away.  Fcheck, Fdx and
-                                        ; Fdy are in the canvas bank now
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
