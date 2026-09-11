@@ -140,11 +140,31 @@ bgdsize:        add     hl, de
 
                 call    page_canvas
 
+                ld      a, (bgmask)     ; which of the seven ways to lay a
+                or      a               ; byte down.  It is the same one for
+                ld      hl, bgpict      ; every byte of the piece, and asking
+                jr      z, bgdtab       ; twice a byte was the single biggest
+                ld      hl, bgmasks     ; cost in a block redraw
+bgdtab:         ld      a, (bgop)
+                cp      3
+                jr      c, bgdop
+                ld      a, 3
+bgdop:          add     a, a
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                ld      (bginner + 1), de
+
 ; FASTLAY: the first stored row lands on YCO and the rest climb.
 
                 ld      a, (yco)
                 ld      (bgrow), a
-                ld      hl, imgbuf
+                call    canvasrow       ; the rows are walked one at a time, so
+                ld      (bgcanp), hl    ; the address steps by forty instead of
+                ld      hl, imgbuf      ; being multiplied out for each of them
                 ld      (bgsrc), hl
                 ld      a, (imgh)
                 ld      b, a
@@ -162,8 +182,7 @@ bgband1:        ld      hl, bandtop
                 ld      a, (bgmask)     ; into a mask, or into the picture
                 or      a
                 jp      nz, bgmaskrow
-                ld      a, (bgrow)
-                call    canvasrow       ; HL = where that row starts
+                ld      hl, (bgcanp)    ; where that row starts
                 jr      bgrowat
 bgmaskrow:      ld      a, (bgrow)      ; only the floor bands are kept
                 ld      l, a
@@ -196,68 +215,88 @@ bgrowat:        ld      a, (xco)
                 ld      e, a
                 ld      d, 0
                 add     hl, de          ; HL = canvas
-                ld      de, (bgsrc)     ; DE = the piece
+                ld      a, (imgw)       ; how many of its bytes the row can
+                add     a, e            ; hold: the same answer for all of
+                cp      CANVAS_W + 1    ; them, so it is worked out once
                 ld      a, (imgw)
+                jr      c, bgfits
+                ld      a, CANVAS_W
+                sub     e
+bgfits:         or      a
+                jr      z, bgrowskip    ; none of it lands on the row
                 ld      b, a
-                ld      a, (xco)
-                ld      c, a
-bgbyte:         ld      a, c            ; anything past the row is dropped
-                cp      CANVAS_W
-                jr      nc, bgbytenext
-                ld      a, (bgmask)
-                or      a
-                jp      nz, bgbmask
-                ld      a, (bgop)
-                or      a
-                jr      nz, bgb1
-                ld      a, (de)         ; and
+                ld      de, (bgsrc)     ; DE = the piece
+bginner:        jp      bgpand          ; whichever way this piece is laid
+
+bgpand:         ld      a, (de)
                 and     (hl)
-                jr      bgbput
-bgb1:           dec     a
-                jr      nz, bgb2
-                ld      a, (de)         ; ora
-                or      (hl)
-                jr      bgbput
-bgb2:           dec     a
-                jr      nz, bgb3
-                ld      a, (de)         ; sta
-                jr      bgbput
-bgb3:           ld      a, (de)         ; xor
-                xor     (hl)
-bgbput:         ld      (hl), a
-                jr      bgbytenext
-bgbmask:        ld      a, (bgop)       ; a mask covers what an AND clears,
-                or      a                ; what an ORA sets, and the whole
-                jr      nz, bgbm1        ; rectangle of an STA
-                ld      a, (de)
-                cpl
-                and     0xfe
-                jr      bgbmput
-bgbm1:          dec     a
-                jr      nz, bgbm2
-                ld      a, (de)
-                jr      bgbmput
-bgbm2:          ld      a, 0xfe
-bgbmput:        or      (hl)
                 ld      (hl), a
-bgbytenext:     inc     hl
+                inc     hl
                 inc     de
-                inc     c
-                djnz    bgbyte
-                ld      (bgsrc), de
-                jr      bgrowdown
-bgrowskip:      ld      hl, (bgsrc)     ; off the screen, but the source moves
+                djnz    bgpand
+                jr      bgrowskip
+
+bgpora:         ld      a, (de)
+                or      (hl)
+                ld      (hl), a
+                inc     hl
+                inc     de
+                djnz    bgpora
+                jr      bgrowskip
+
+bgpsta:         ld      a, (de)
+                ld      (hl), a
+                inc     hl
+                inc     de
+                djnz    bgpsta
+                jr      bgrowskip
+
+bgpxor:         ld      a, (de)
+                xor     (hl)
+                ld      (hl), a
+                inc     hl
+                inc     de
+                djnz    bgpxor
+                jr      bgrowskip
+
+bgmand:         ld      a, (de)         ; a mask covers what an AND clears,
+                cpl                     ; what an ORA sets, and the whole
+                and     0xfe            ; rectangle of an STA
+                or      (hl)
+                ld      (hl), a
+                inc     hl
+                inc     de
+                djnz    bgmand
+                jr      bgrowskip
+
+bgmsta:         ld      a, 0xfe
+                or      (hl)
+                ld      (hl), a
+                inc     hl
+                inc     de
+                djnz    bgmsta
+
+bgrowskip:      ld      hl, (bgsrc)     ; the source moves on by the whole
                 ld      a, (imgw)
                 ld      e, a
                 ld      d, 0
                 add     hl, de
                 ld      (bgsrc), hl
-bgrowdown:      ld      hl, bgrow
+bgrowdown:      ld      hl, (bgcanp)    ; a row up is forty bytes back
+                ld      de, -CANVAS_W
+                add     hl, de
+                ld      (bgcanp), hl
+                ld      hl, bgrow
                 dec     (hl)
                 pop     bc
                 dec     b
                 jp      nz, bgrowloop
                 ret
+
+bgcanp:         dw      0               ; the canvas row the draw is on
+
+bgpict:         dw      bgpand, bgpora, bgpsta, bgpxor
+bgmasks:        dw      bgmand, bgpora, bgmsta, bgmsta
 
 bandtop:        db      0               ; the rows a draw may touch
 bandbot:        db      191
@@ -1192,6 +1231,12 @@ read_room:      call    rr_copy
 rrsub:          push    bc
                 push    hl
                 ld      a, (hl)
+                and     0x1f            ; getobjid1 works on the id alone, and
+                                        ; a blueprint byte carries three bits
+                                        ; of modifier above it -- unmasked, no
+                                        ; plate was ever substituted here, so a
+                                        ; room entered with one held down drew
+                                        ; it standing up
                 ld      de, 30
                 add     hl, de
                 ld      c, (hl)
@@ -1258,7 +1303,7 @@ ay:             db      0
 blockrow:       db      0
 blockcol:       db      0
 blockptr:       dw      0
-roomnum:        db      1
+roomnum:        db      START_ROOM      ; the way into the level
 blockbot:       db      2, 65, 128, 191, 254
 roomids:        ds      60              ; thirty ids, then thirty states
 imgbuf:         ds      384             ; the largest piece is 378 bytes
@@ -2852,11 +2897,7 @@ cpnothang:      ld      a, (charact)
 cpground:       ld      a, (frame)
                 cp      79              ; jumping up to touch the ceiling
                 jr      z, cpceil
-                ld      l, a            ; is his foot on the floor at all
-                ld      h, 0
-                ld      de, fcheck
-                add     hl, de
-                ld      a, (hl)
+                call    frame_check     ; is his foot on the floor at all
                 and     F_CHECK
                 ret     z
                 xor     a               ; the block he stands on
@@ -3442,6 +3483,19 @@ rgnext:         call    page_bg         ; the room to its right, if there is
                 ld      hl, roomnum
                 cp      (hl)
                 ret     nz
+
+                ld      a, (blockrow)   ; getprev's answer was taken when the
+                add     a, a            ; room was entered, and the bars have
+                ld      l, a            ; risen since: a redraw of column zero
+                ld      h, 0            ; reads that cached column and would
+                ld      de, prevblk     ; keep drawing the gate as it stood
+                add     hl, de
+                ld      a, (aoid)
+                ld      (hl), a
+                inc     hl
+                ld      a, (trobst)
+                ld      (hl), a
+
                 xor     a               ; its leftmost column
                 ld      (blockcol), a
 

@@ -600,19 +600,8 @@ facejstk:       ld      a, (facing)
 
 input_step:     call    read_input
                 call    facejstk
-                call    ctrl_all
+                call    ctrl
                 jp      facejstk
-
-ctrl_all:       ld      a, (blocked)
-                or      a
-                jr      z, ctrl
-                ld      a, (frame)
-                cp      7
-                jr      z, tostopnow
-                cp      11
-                jp      nz, ctrl
-tostopnow:      ld      a, SQ_RUNSTOP
-                jp      jumpseq
 
 ; GENCTRL.  Falling and being bumped are not under control; otherwise what he
 ; does next depends on what he is doing now, which CTRL.S reads off CharPosn,
@@ -817,10 +806,10 @@ crouching:      ld      a, (jstky)      ; still holding down?
                 jr      z, crawlmaybe
                 ld      a, SQ_STANDUP
                 jp      jumpseq
-crawlmaybe:     ld      a, (clrf)
-                or      a
-                ret     p
-                call    clrall
+crawlmaybe:     ld      a, (clrf)       ; a fresh push forward, and only
+                or      a               ; that one is spent: CTRL.S sets
+                ret     p               ; clrF to 1 and leaves the others
+                ld      a, 1
                 ld      (clrf), a
                 ld      a, SQ_CRAWL
                 jp      jumpseq
@@ -992,14 +981,48 @@ do_crouch:      ld      a, SQ_STOOP
 ; way under you.  A plate, a sword or a flask stop him short too, unless he
 ; is already at the edge, in which case he steps across.
 
-get_fwd_dist:   call    front_flags
+get_fwd_dist:   call    cd_edges        ; his edges, then GetBaseBlock
+                call    base_x
+                call    blockcol_of
+                ld      (fwdbx), a
+                ld      a, (blocky)     ; a barrier in the block underfoot
                 ld      c, a
+                ld      a, (fwdbx)
+                call    tile_at
+                ld      (fwdid), a
+                call    cmp_barr
+                jr      z, fwdnext
+                ld      a, (fwdbx)
+                call    dbarr
+                bit     7, a
+                jr      z, fwdtobarr
+fwdnext:        ld      a, (facing)     ; or in the one in front
+                or      a
+                ld      a, (fwdbx)
+                jr      z, fwdl
+                inc     a
+                inc     a
+fwdl:           dec     a
+                ld      (fwdinx), a
+                ld      a, (blocky)
+                ld      c, a
+                ld      a, (fwdinx)
+                call    tile_at
+                ld      (fwdid), a
+                cp      BG_PANELWOF     ; facing right it is only the end of
+                jr      nz, fwd99       ; this block
+                ld      a, (facing)
+                or      a
+                jr      nz, fwdedge
+fwd99:          ld      a, (fwdid)
                 call    cmp_barr
                 jr      z, fwdnobarr
-                ld      a, 1
-                ld      (fwdkind), a
-                jp      get_dist
-fwdnobarr:      ld      a, c
+                ld      a, (fwdinx)
+                call    dbarr
+                bit     7, a
+                jr      z, fwdtobarr
+fwdnobarr:      ld      a, (fwdid)
+                ld      c, a
                 cp      BG_LOOSE        ; it would give way under him
                 jr      z, fwdedge
                 cp      BG_PRESSPLATE
@@ -1027,6 +1050,45 @@ fwdshort:       call    get_dist        ; already at the edge: step across
 fwdclear:       ld      a, 2
                 ld      (fwdkind), a
                 ld      a, 11           ; POP's own natural step
+                ret
+fwdtobarr:      cp      14              ; more than a step away: a whole one
+                jr      nc, fwdclear
+                ld      c, a
+                ld      a, 1
+                ld      (fwdkind), a
+                ld      a, c
+                ret
+
+; DBARR: from his leading edge to the barrier in the block at column A, just
+; read -- negative if the barrier is behind him.  A gate counts only while it
+; is down.
+
+dbarr:          ld      (dbcol), a
+                ld      a, (fwdid)
+                cp      BG_GATE
+                jr      nz, dbok
+                call    gatebarr
+                jr      nc, dbclr
+dbok:           ld      a, (dbcol)
+                call    edge140
+                ld      (cbedge), a
+                ld      a, (fwdid)
+                call    cmp_barr
+                jr      z, dbclr
+                ld      (cccode), a
+                ld      a, (facing)
+                or      a
+                jr      z, dbleft
+                call    leftbar         ; facing right: up to its left edge
+                ld      hl, cdright
+                sub     (hl)
+                ret
+dbleft:         call    rightbar        ; facing left: back to its right edge
+                ld      c, a
+                ld      a, (cdleft)
+                sub     c
+                ret
+dbclr:          ld      a, 0xff
                 ret
 
 ; POP keeps fourteen step sequences so that a step always ends where it
@@ -1241,35 +1303,499 @@ movestore:      ld      (charx), hl
 ; barrier in: hanging, either kind, and the frames of a climb.  Exactly that
 ; list, and nothing of mine.
 
-check_barr:     ld      a, (charact)
-                cp      2               ; hanging
+; ---------------------------------------------------------------- CHECKBARR
+;
+; COLL.S.  A barrier is not something he is inside of but an edge he has just
+; crossed.  Every frame both edges of each barrier within reach -- on his own
+; row, the one below and the one above -- are set against both edges of his
+; picture, and a collision is a nybble that was clear last frame and is set
+; in this one.  Standing flush against a wall is therefore no collision at
+; all, which is what lets a careful step end right up against it.
+;
+; The comparisons are made in POP's own coordinates, 140 to the screen with
+; ScrnLeft on the left, so they are the 6502's byte for byte.
+
+SCRNLEFT        equ     58
+ANGLE140        equ     7
+THINNER         equ     3
+F_THIN          equ     0x20
+OOFVEL          equ     22
+
+check_barr:     ld      a, 0xff         ; no collision yet
+                ld      (collidel), a
+                ld      (collider), a
+                ld      a, (charact)
+                cp      7               ; turning: out of reach of walls
+                ret     z
+
+                call    cd_edges
+
+                ld      a, (blocky)
+                ld      (bythis), a
+                call    initcdbufs
+                ld      a, (bythis)
+                ld      (bylast), a
+
+                ld      a, (cdright)    ; the last block in range, and one on
+                call    blockxp
+                add     a, 2
+                cp      11
+                jr      c, cbend
+                ld      a, 11
+cbend:          ld      (endrange), a
+                ld      a, (cdleft)     ; and the first
+                call    blockxp
+                dec     a
+                ld      (begrange), a
+
+                ld      a, (bythis)     ; this row
+                ld      hl, cdthis
+                ld      de, snthis
+                call    getcdata
+                ld      a, (bythis)     ; the one below
+                inc     a
+                ld      hl, cdbelow
+                ld      de, snbelow
+                call    getcdata
+                ld      a, (bythis)     ; and the one above
+                dec     a
+                ld      hl, cdabove
+                ld      de, snabove
+                call    getcdata
+
+                ld      c, 9            ; a nybble gone from clear to set
+crloop:         ld      hl, snlast
+                ld      b, 0
+                add     hl, bc
+                push    hl
+                ld      de, snthis - snlast
+                add     hl, de
+                ld      a, (hl)
+                pop     hl
+                bit     7, a
+                jr      nz, cbno        ; nothing there this frame
+                cp      (hl)
+                jr      nz, cbno        ; or it is not the room it was
+                ld      de, cdlast - snlast
+                add     hl, de
+                ld      d, (hl)
+                ld      a, l
+                add     a, cdthis - cdlast
+                ld      l, a
+                jr      nc, cbl1
+                inc     h
+cbl1:           ld      e, (hl)
+                ld      a, d
+                and     0x0f
+                jr      nz, cbnol
+                ld      a, e
+                and     0x0f
+                jr      z, cbnol
+                ld      a, c            ; into the left edge of a barrier
+                ld      (collidel), a
+cbnol:          ld      a, d
+                and     0xf0
+                jr      nz, cbno
+                ld      a, e
+                and     0xf0
+                jr      z, cbno
+                ld      a, c            ; into the right edge of one
+                ld      (collider), a
+cbno:           dec     c
+                jp      p, crloop
+
+; COLLISIONS: act on what was found -- but not while he hangs, or climbs up
+; on to a ledge, where the wall is what he has hold of.
+
+                ld      a, (charact)
+                cp      2
                 ret     z
                 cp      6
                 ret     z
                 ld      a, (frame)
                 cp      135
-                jr      c, cbgo
+                jr      c, cl2
                 cp      149
-                ret     c               ; climbing
-cbgo:           xor     a
-                ld      (blocked), a
-                ld      b, 32           ; he cannot be deeper in than this
-cbtry:          ld      hl, (charx)     ; his own coordinate, not his foot:
-                call    tile_flags      ; the wall stops his body
-                call    cmp_barr
-                ret     z
-                ld      a, 1
-                ld      (blocked), a
-                ld      hl, (charx)
+                ret     c
+cl2:            ld      a, (collidel)
+                bit     7, a
+                jr      z, leftcoll
+                ld      a, (collider)
+                bit     7, a
+                ret     nz
+
+; RIGHTCOLL and LEFTCOLL: an edge only counts when he faces it.  A = how far
+; in he has gone, measured from the barrier to his own edge.
+
+rightcoll:      ld      (collx), a
                 ld      a, (facing)
                 or      a
-                jr      z, cbback
-                dec     hl              ; facing right: back is left
-                jr      cbset
-cbback:         inc     hl
-cbset:          ld      (charx), hl
-                djnz    cbtry
+                ret     nz
+                ld      a, (collx)
+                call    checkcoll1
+                ret     nc
+                call    rightbar
+                ld      hl, cdleft
+                sub     (hl)
+                ld      c, 0
+                jr      collide
+
+leftcoll:       ld      (collx), a
+                ld      a, (facing)
+                or      a
+                ret     z
+                ld      a, (collx)
+                call    checkcoll1
+                ret     nc
+                call    leftbar
+                ld      hl, cdright
+                sub     (hl)
+                ld      c, 0xff
+
+; COLLIDE.  He is put back out by exactly as far as he went in, and then it
+; is a bump: soft on the ground, hard out of a jump or a fall, and bumpfall
+; with nothing under him.  A bump is not under his control, which is what
+; stops him walking straight back into the wall.
+
+collide:        ld      e, a
+                ld      a, c
+                ld      (collface), a
+                ld      a, (frame)
+                cp      177             ; impaled: let it be
+                ret     z
+                ld      a, e
+                call    movex
+
+                call    ccread          ; in mid air or on the ground?
+                ld      b, a
+                ld      a, (collface)
+                or      a
+                ld      a, b
+                jr      z, clfacel
+                cp      BG_BLOCK        ; a solid block has no floor to stand
+                jr      nz, clspace     ; on: look at the one before it
+                ld      hl, tempbx
+                dec     (hl)
+                jr      clagain
+clfacel:        cp      BG_PANELWOF
+                jr      z, clnext
+                cp      BG_PANELWIF
+                jr      z, clnext
+                cp      BG_BLOCK
+                jr      nz, clspace
+clnext:         ld      hl, tempbx
+                inc     (hl)
+                ld      a, (tempscrn)   ; the null screen's block ten is his
+                or      a               ; own room's block nought
+                jr      nz, clagain
+                ld      a, (hl)
+                cp      10
+                jr      nz, clagain
+                ld      (hl), 0
+                ld      a, (roomnum)
+                ld      (tempscrn), a
+clagain:        call    ccread
+clspace:        call    cmp_space
+                jr      nz, groundbump
+
+airbump:        ld      a, -4           ; four back off the wall
+                call    addcharx
+                ld      a, (charact)
+                cp      4               ; falling already: that is all
+                ret     z
+                ld      a, SQ_BUMPFALL
+                jr      bumpseq
+
+groundbump:     ld      a, (blocky)
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, floory
+                add     hl, de
+                ld      a, (hl)
+                ld      b, a
+                ld      hl, chary
+                sub     (hl)
+                cp      15              ; well above the floor: that is air
+                jr      nc, airbump
+                ld      a, b
+                ld      (chary), a
+                ld      a, (yvel)
+                cp      OOFVEL
+                jr      c, gbok
+                ld      a, -5           ; coming down hard: checkfloor has him
+                jp      addcharx
+gbok:           xor     a
+                ld      (yvel), a
+                ld      a, (frame)      ; out of a standing jump, a running
+                cp      24              ; jump or a fall the bump is hard
+                jr      z, gbhard
+                cp      25
+                jr      z, gbhard
+                cp      40
+                jr      c, gbsoft
+                cp      43
+                jr      c, gbhard
+                cp      102
+                jr      c, gbsoft
+                cp      107
+                jr      c, gbhard
+gbsoft:         ld      a, SQ_BUMP
+                jr      bumpseq
+gbhard:         ld      a, SQ_HARDBUMP
+bumpseq:        call    jumpseq         ; and straight into its first frame,
+                jp      step_seq        ; as animchar does
+
+; CHECKCOLL for the block in slot A, as CHECKCOLL1 finds it: carry if it
+; stops him -- a flask never does, a gate only while it is low enough -- with
+; the block's left edge, as the room on screen has it, in cbedge.
+
+checkcoll1:     ld      (tempbx), a
+                ld      l, a
+                ld      h, 0
+                ld      de, snthis
+                add     hl, de
+                ld      a, (hl)
+                ld      (tempscrn), a
+                ld      a, (blocky)     ; the row, brought into 0..2
+                or      a
+                jp      p, ck2
+                add     a, 3
+                jr      ck1
+ck2:            cp      3
+                jr      c, ck1
+                sub     3
+ck1:            ld      (tempby), a
+                call    ccread
+                cp      BG_FLASK
+                jr      z, ccno
+                ld      c, a
+                call    cmp_barr
+                ld      (cccode), a
+                ld      a, c
+                cp      BG_GATE
+                jr      nz, ckyes
+                call    gatebarr        ; tilestate is the gate's own
+                jr      nc, ccno
+ckyes:          ld      a, (tempbx)
+                call    edge140
+                ld      c, a
+                ld      a, (tempscrn)   ; AdjustScrn: the rooms either side
+                ld      hl, links       ; are a screen's width away
+                cp      (hl)
+                jr      nz, ccnl
+                ld      a, c
+                sub     140
+                jr      ccedge
+ccnl:           inc     hl
+                cp      (hl)
+                ld      a, c
+                jr      nz, ccedge
+                add     a, 140
+ccedge:         ld      (cbedge), a
+                scf
                 ret
+ccno:           or      a
+                ret
+
+ccread:         ld      a, (tempby)     ; the block in tempscrn, tempbx, tempby
+                ld      c, a
+                ld      a, (tempbx)
+                ld      b, a
+                ld      a, (tempscrn)
+                jp      blk_in
+
+; GETCDATA: one row's blocks, begrange to endrange, into a CD buffer and an
+; SN one.  In: A = the row, HL = the CD buffer, DE = the SN buffer.  The
+; slot is the block's column in its own room, as RDBLOCK hands it back.
+
+getcdata:       ld      (cbrow), a
+                ld      (cbcd), hl
+                ld      (cbsn), de
+                ld      a, (begrange)
+                ld      (cbidx), a
+gcloop:         ld      a, (cbidx)
+                call    edge140
+                ld      (cbedge), a
+                ld      a, (cbrow)
+                ld      c, a
+                ld      a, (cbidx)
+                call    tile_at
+                call    cmp_barr
+                ld      c, 0            ; no barrier: neither edge is near him
+                jr      z, gcput
+                ld      (cccode), a
+                call    leftbar
+                ld      hl, cdright
+                cp      (hl)
+                jr      nc, gcr         ; its left edge is at or past his right
+                ld      c, 0x0f
+gcr:            call    rightbar
+                ld      hl, cdleft
+                cp      (hl)
+                jr      c, gcput        ; its right edge is at or short of his
+                jr      z, gcput        ; left
+                ld      a, c
+                or      0xf0
+                ld      c, a
+gcput:          ld      a, (tempbx)
+                ld      e, a
+                ld      d, 0
+                ld      hl, (cbcd)
+                add     hl, de
+                ld      (hl), c
+                ld      hl, (cbsn)
+                add     hl, de
+                ld      a, (tempscrn)
+                ld      (hl), a
+                ld      a, (cbidx)
+                inc     a
+                ld      (cbidx), a
+                ld      hl, endrange
+                cp      (hl)
+                jr      nz, gcloop
+                ret
+
+; GETLEFTBAR and GETRIGHTBAR, for the barrier code in cccode and the block
+; edge in cbedge.
+
+leftbar:        ld      a, (cccode)
+                ld      e, a
+                ld      d, 0
+                ld      hl, barl
+                add     hl, de
+                ld      a, (cbedge)
+                add     a, (hl)
+                ret
+
+rightbar:       ld      a, (cccode)
+                ld      e, a
+                ld      d, 0
+                ld      hl, barr
+                add     hl, de
+                ld      a, (cbedge)
+                add     a, 13
+                sub     (hl)
+                ret
+
+; A = a column.  Out: A = its left edge, 140 wide, with angle added.
+
+edge140:        ld      b, a
+                add     a, a
+                add     a, b
+                add     a, a
+                add     a, b
+                add     a, a            ; fourteen a block
+                add     a, SCRNLEFT + ANGLE140
+                ret
+
+; GETBLOCKXP for a 140 wide A: the column, signed.
+
+blockxp:        sub     SCRNLEFT        ; back to room pixels, 280 wide
+                ld      l, a
+                sbc     a, a
+                ld      h, a
+                add     hl, hl
+                jp      blockcol_of
+
+; INITCDBUFS: last frame's data is this frame's -- or, if he has changed row,
+; the row above's or the row below's, which is where his row was.
+
+initcdbufs:     ld      a, (bythis)
+                ld      hl, bylast
+                cp      (hl)
+                jr      z, icthis
+                add     a, 3
+                cp      (hl)
+                jr      z, icthis
+                sub     6
+                cp      (hl)
+                jr      z, icthis
+                ld      a, (bythis)
+                inc     a
+                cp      (hl)
+                jr      z, icabove
+                sub     3
+                cp      (hl)
+                jr      z, icabove
+                ld      hl, snbelow
+                jr      iccopy
+icabove:        ld      hl, snabove
+                jr      iccopy
+icthis:         ld      hl, snthis
+iccopy:         push    hl
+                ld      de, snlast
+                ld      bc, 10
+                ldir
+                pop     hl
+                ld      de, cdlast - snlast
+                add     hl, de
+                ld      de, cdlast
+                ld      bc, 10
+                ldir
+                ld      hl, snthis      ; and nothing yet this frame
+                ld      b, 30
+icff:           ld      (hl), 0xff
+                inc     hl
+                djnz    icff
+                ret
+
+; GETEDGES' collision edges: his picture's left and right, 140 wide, and
+; three pixels in from each on a frame that is marked thin.
+
+cd_edges:       ld      a, (nowbank)
+                push    af
+                call    char_edges      ; edgel -- and the art is left in
+                call    page_canvas
+                call    frame_entry
+                ld      a, (hl)         ; the width in Apple bytes
+                ld      c, a
+                add     a, a
+                add     a, a
+                add     a, a
+                sub     c               ; Mult7, in half pixels
+                inc     a
+                srl     a               ; imwidth
+                ld      c, a
+                ld      hl, (edgel)
+                sra     h
+                rr      l
+                ld      a, l
+                add     a, SCRNLEFT
+                ld      (cdleft), a
+                add     a, c
+                ld      (cdright), a
+                call    frame_check
+                and     F_THIN
+                jr      z, cdok
+                ld      a, (cdleft)
+                add     a, THINNER
+                ld      (cdleft), a
+                ld      a, (cdright)
+                sub     THINNER
+                ld      (cdright), a
+cdok:           pop     af
+                jp      pageset
+
+; ADDCHARX, with + the way he faces; and plain CharX += A.  Both take POP's
+; 140 wide A, and his coordinate is twice that.
+
+addcharx:       ld      b, a
+                ld      a, (facing)
+                or      a
+                ld      a, b
+                jr      nz, movex
+                neg
+movex:          ld      l, a
+                add     a, a
+                sbc     a, a
+                ld      h, a
+                add     hl, hl
+                ld      de, (charx)
+                add     hl, de
+                ld      (charx), hl
+                ret
+
 
 ; HL = a room x, which may be off either end.  Out: A = the tile's flags
 ; there, zero off the room.
@@ -1320,11 +1846,34 @@ cmp_barr:       ld      l, a
                 or      a
                 ret
 
+; GATEBARR? in COLL.S.  The bars have risen state/4, and six pixels of margin
+; go on top of that; against that stands imheight, the height of the picture
+; he is drawn as.  Carry if the gate stops him.
+
+GATEMARGIN      equ     6
+
+gatebarr:       ld      a, (nowbank)    ; the frame table is in the canvas
+                push    af              ; bank and this is called from both
+                call    page_canvas     ; sides of the paging
+                call    frame_entry
+                inc     hl
+                ld      a, (hl)
+                ld      c, a
+                pop     af
+                call    pageset
+                ld      a, (tilestate)
+                rrca
+                rrca
+                and     0x3f
+                add     a, GATEMARGIN
+                cp      c
+                ret
+
 ; In: A = a screen x, C = a block row.  Out: A = that tile's flags.  The row
 ; is free here, which tile_flags cannot afford -- it runs inside movetry.
 
 tile_in_row:    call    blockcol_of
-                ld      b, a            ; B = the column, C = the row, both
+tile_at:        ld      b, a            ; B = the column, C = the row, both
                 or      a               ; signed: a block off the screen is
                 jp      m, tirfar       ; not empty, it belongs to the room
                 cp      10              ; next door
@@ -1333,7 +1882,12 @@ tile_in_row:    call    blockcol_of
                 cp      3
                 jr      nc, tirfar
 
-                ld      l, a            ; the common case: this room, whose
+                ld      a, b            ; the common case: this room, whose
+                ld      (tempbx), a     ; thirty are already in hand
+                ld      a, (roomnum)
+                ld      (tempscrn), a
+                ld      a, c
+                ld      l, a
                 ld      h, 0            ; thirty are already in hand
                 add     hl, hl
                 ld      d, h
@@ -1348,6 +1902,12 @@ tile_in_row:    call    blockcol_of
                 add     hl, de
                 ld      a, (hl)
                 and     0x1f
+                ld      b, a            ; the state travels with it: a gate's
+                ld      de, 30          ; height is the whole of whether it
+                add     hl, de          ; bars him
+                ld      a, (hl)
+                ld      (tilestate), a
+                ld      a, b
                 ret
 
 ; HL = a room x.  Out: A = the block column, signed, -2 to 11.  The table
@@ -1380,11 +1940,11 @@ bcgot:          ld      a, b
 ; solid block, never as space -- otherwise the edge of the world is a step
 ; into thin air, and he falls through it for ever.
 
-tirfar:         ld      a, (nowbank)
+tirfar:         ld      a, (roomnum)
+blk_in:         ld      (tirroom), a    ; A = the room to read it in
+                ld      a, (nowbank)
                 push    af
                 call    page_bg
-                ld      a, (roomnum)
-                ld      (tirroom), a
                 ld      a, 6            ; POP's handler expects an index at
                 ld      (tirsteps), a   ; most one screen out.  If it is not,
 tirhand:        ld      hl, tirsteps    ; something has run away, and walking
@@ -1421,7 +1981,10 @@ tirh3:          cp      3
                 call    tirstep
                 jr      tirhand
 
-tirgot:         ld      a, (tirroom)
+tirgot:         ld      a, b            ; RDBLOCK's tempblockx and tempscrn
+                ld      (tempbx), a
+                ld      a, (tirroom)
+                ld      (tempscrn), a
                 or      a
                 jr      z, tirnull
                 ld      l, c            ; ten blocks to the row
@@ -1446,12 +2009,18 @@ tirgot:         ld      a, (tirroom)
                 ld      c, (hl)
                 ld      a, b
                 call    subplate
+                ld      b, a
+                ld      a, c
+                ld      (tilestate), a
+                ld      a, b
 tirdone:        ld      c, a
                 pop     af
                 call    pageset
                 ld      a, c
                 ret
-tirnull:        ld      a, BLK_BLOCK    ; nothing that way is a solid wall
+tirnull:        xor     a
+                ld      (tilestate), a
+                ld      a, BLK_BLOCK    ; nothing that way is a solid wall
                 jr      tirdone
 
 ; E = which way to step.  Zero if there is no room there.
@@ -1582,7 +2151,16 @@ flmask1:        ld      (flmbase), bc
                 ld      e, a
 flmul:          add     hl, de
                 djnz    flmul
-flgot:          ld      (flsrc), hl
+flgot:          ld      a, (nowbank)    ; the flames are in the background
+                push    af              ; bank and the room they go over is
+                call    page_bg         ; in the art bank, so the one frame
+                ld      de, flbuf       ; wanted is brought across first
+                ld      bc, FLAME_BYTES
+                ldir
+                pop     af
+                call    pageset
+                ld      hl, flbuf
+                ld      (flsrc), hl
 
                 ld      a, (flrect)     ; the camera says where that lands
                 ld      b, a
@@ -1982,7 +2560,10 @@ gbyhit:         ld      a, b
 ; coordinate but where his weight is -- the frame's own Fdx, less the footmark
 ; in the low bits of its Fcheck, applied the way he faces.
 
-base_x:         ld      a, (frame)
+base_x:         ld      a, (nowbank)    ; the frame tables are in the canvas
+                push    af              ; bank, and this is asked from both
+                call    page_canvas     ; sides of the paging
+                ld      a, (frame)
                 ld      l, a
                 ld      h, 0
                 ld      d, h
@@ -2010,6 +2591,23 @@ bxfwd:          ld      e, a            ; sign extend the offset and add
                 dec     d
 bxpos:          ld      hl, (charx)
                 add     hl, de
+                pop     af              ; and the bank it found
+                jp      pageset
+
+; A = the Fcheck byte of the frame he is on, from either side of the paging.
+
+frame_check:    ld      a, (nowbank)
+                push    af
+                call    page_canvas
+                ld      a, (frame)
+                ld      l, a
+                ld      h, 0
+                ld      de, fcheck
+                add     hl, de
+                ld      c, (hl)
+                pop     af
+                call    pageset
+                ld      a, c
                 ret
 
 ; Out: A = the flags of the tile he is standing on.
@@ -2240,6 +2838,13 @@ frame_entry:    ld      a, (frame)
 ; ---------------------------------------------------------------- draw
 
 draw_prince:    call    page_canvas     ; the frame table lives there now
+                ld      a, (frame)      ; and Fdy with it, wanted after the
+                ld      l, a            ; room has been paged back in
+                ld      h, 0
+                ld      de, fdy
+                add     hl, de
+                ld      a, (hl)
+                ld      (curfdy), a
                 call    frame_entry
                 ld      a, (hl)
                 ld      (curw), a
@@ -2305,13 +2910,10 @@ shoff:          ld      hl, (charx)
 ; SETUPCHAR: the picture sits at CharY + Fdy, not at CharY.  Every frame of a
 ; sequence has its own, and that is what carries him up and down within it.
 
-                ld      a, (frame)
-                ld      l, a
-                ld      h, 0
-                ld      de, fdy
-                add     hl, de
+                ld      a, (curfdy)     ; read while the canvas bank was in
+                ld      b, a
                 ld      a, (chary)
-                add     a, (hl)
+                add     a, b
                 ld      (fchary), a
                 ld      b, a            ; top row = that, less the height
                 ld      a, (curh)
@@ -3199,7 +3801,6 @@ clrbtn:         db      0
 atemp:          db      0
 fwdkind:        db      0
 blockid:        db      0
-blocked:        db      0
 blocky:         db      0
 charcu:         db      0               ; FCharCU, the row his picture is cut at
 fchary:         db      0
@@ -3238,6 +3839,42 @@ oldh:           db      0
 rawcol:         db      0               ; where his picture wanted to go,
 spskip:         db      0               ; and what the left edge cut off
 frstart:        db      0               ; the interrupt this frame began on
+tilestate:      db      0               ; the state of the tile last read
+curfdy:         db      0               ; SETUPCHAR's Fdy for this frame
+flbuf:          ds      FLAME_BYTES     ; one frame of a torch's flame
+collidel:       db      0               ; CHECKBARR and its helpers
+collider:       db      0
+collx:          db      0
+collface:       db      0
+bythis:         db      0
+bylast:         db      0
+begrange:       db      0
+endrange:       db      0
+cdleft:         db      0               ; CDLeftEj and CDRightEj, 140 wide
+cdright:        db      0
+cbrow:          db      0
+cbidx:          db      0
+cbedge:         db      0               ; blockedge
+cccode:         db      0               ; the barrier code in hand
+cbcd:           dw      0
+cbsn:           dw      0
+tempbx:         db      0               ; RDBLOCK's tempblockx, tempblocky
+tempby:         db      0               ; and tempscrn
+tempscrn:       db      0
+dbcol:          db      0
+fwdbx:          db      0               ; CharBlockX, the block in front, and
+fwdinx:         db      0               ; what is in it
+fwdid:          db      0
+barl:           db      0, 12, 2, 0, 0  ; BarL and BarR, 140 wide
+barr:           db      0, 0, 9, 11, 0
+snlast:         db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+snthis:         db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+snabove:        db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+snbelow:        db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+cdlast:         ds      10              ; each ten on from the one before
+cdthis:         ds      10
+cdabove:        ds      10
+cdbelow:        ds      10
 
 cam:            db      0               ; the view's left edge, in bytes
 fullshow:       db      0
@@ -3285,14 +3922,14 @@ blocktop:       incbin  "blocktop.bin"
 floorband:      incbin  "floorband.bin"
 torches:        ds      1 + 6 * 7
 flametab:       incbin  "flametab.bin"
-flames:         incbin  "flames.bin"
 flamemask:      incbin  "flamemask.bin"
 foreband:       ds      192
-                ds      (($ + 255) / 256 * 256) - $
-rowaddr:        incbin  "rowaddr.bin"
-fcheck:         incbin  "fcheck.bin"
-fdx:            incbin  "fdx.bin"
-fdy:            incbin  "fdy.bin"
+rowaddr:        incbin  "rowaddr.bin"   ; these two are reached by a full
+                                        ; sixteen bit add, so they need no
+                                        ; page of their own -- the padding
+                                        ; that used to go here was up to 255
+                                        ; bytes thrown away.  Fcheck, Fdx and
+                                        ; Fdy are in the canvas bank now
 fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
