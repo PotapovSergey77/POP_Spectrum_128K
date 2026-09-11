@@ -2088,6 +2088,27 @@ ffnext:         inc     a
                 xor     a
                 ret
 
+; A = the room byte a flame starts at.  Out: A = how many of its three bytes
+; the view shows.  A torch in column eight has its flame at room bytes 32 to
+; 34, which with the view at the left of the room is past the end of a
+; screen row -- and the Spectrum's next byte along is the start of a row
+; eight lines further down, so the flame came out again at the left edge.
+
+flvis:          ld      b, a
+                ld      a, (cam)
+                neg
+                add     a, b            ; the screen column
+                cp      32
+                jr      nc, flvnone
+                neg
+                add     a, 32           ; what is left of the row
+                cp      3
+                ret     c
+                ld      a, 3
+                ret
+flvnone:        xor     a
+                ret
+
 draw_flames:    ld      a, (torches)
                 or      a
                 ret     z
@@ -2162,6 +2183,11 @@ flgot:          ld      a, (nowbank)    ; the flames are in the background
                 ld      hl, flbuf
                 ld      (flsrc), hl
 
+                ld      a, (flrect)     ; how much of it is in view
+                call    flvis
+                or      a
+                ret     z
+                ld      (flvw), a
                 ld      a, (flrect)     ; the camera says where that lands
                 ld      b, a
                 ld      a, (cam)
@@ -2189,7 +2215,7 @@ flrow:          push    bc
                 ld      (flroom), hl
                 ld      hl, (flmbase)   ; the mask starts again each row
                 ld      (flmask), hl
-                ld      a, (flrect + 2)
+                ld      a, (flvw)
                 ld      b, a
 flbyte:         push    bc
                 ld      hl, (flsrc)     ; the flame's own pixels
@@ -2213,11 +2239,21 @@ flbyte:         push    bc
                 ld      (flwork), hl
                 pop     bc
                 djnz    flbyte
+                ld      a, (flrect + 2) ; past what the view cut off
+                ld      hl, flvw
+                sub     (hl)
+                ld      e, a
+                ld      d, 0
+                ld      hl, (flsrc)
+                add     hl, de
+                ld      (flsrc), hl
                 ld      hl, rowy
                 inc     (hl)
                 pop     bc
                 djnz    flrow
                 ret
+
+flvw:           db      0               ; the flame's bytes that are in view
 
 ; Colour, which the Spectrum keeps in cells of eight pixels by eight.  The
 ; map is the room's width and the camera slides over it in whole cells, so
@@ -2237,6 +2273,11 @@ set_attrs:      ld      hl, SCREEN + 6144
                 ld      (flrec), hl
 sanext:         ld      hl, (flrec)
                 ld      a, (hl)         ; its column, less the camera
+                push    hl
+                call    flvis           ; and how much of it is in view
+                ld      (sawide), a
+                pop     hl
+                ld      a, (hl)
                 inc     hl
                 ld      b, a
                 ld      a, (cam)
@@ -2250,9 +2291,7 @@ sanext:         ld      hl, (flrec)
                 srl     a
                 srl     a
                 ld      (sarow), a
-                ld      a, (hl)         ; how many cells across
-                inc     hl
-                ld      (sawide), a
+                inc     hl              ; its width: flvis has it
                 ld      a, (hl)         ; and down: the last row it reaches
                 add     a, b
                 dec     a
@@ -2269,6 +2308,9 @@ sanext:         ld      hl, (flrec)
                 add     hl, de
                 ld      (flrec), hl
 
+                ld      a, (sawide)     ; out of view altogether
+                or      a
+                jr      z, sadone
                 ld      a, (satall)
                 ld      b, a
                 ld      a, (sarow)
@@ -2297,7 +2339,7 @@ sacell:         ld      (hl), INK_FLAME
                 pop     bc
                 djnz    sarowloop
 
-                ld      hl, flleft
+sadone:         ld      hl, flleft
                 dec     (hl)
                 jr      nz, sanext
                 ret
@@ -2436,6 +2478,9 @@ sfnext:         ld      hl, (flrec)
                 ld      de, 3
                 add     hl, de
                 ld      (flrec), hl
+                ld      a, (shcol)      ; only what is in view: showgo does
+                call    flvis           ; nothing with a width of none
+                ld      (shw), a
                 ld      a, (shcol)
                 ld      b, a
                 ld      a, (cam)

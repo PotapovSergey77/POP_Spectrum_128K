@@ -920,6 +920,8 @@ dfgo:           push    bc              ; C is the opacity and bgentry uses it
 compose:        xor     a               ; no front pieces noted yet
                 ld      (nfront), a
                 ld      (recfront), a
+                inc     a
+                ld      (frontok), a
                 call    page_canvas     ; a clean canvas first
                 ld      hl, CANVAS
                 ld      de, CANVAS + 1
@@ -1525,6 +1527,9 @@ MAXFRONT        equ     28
 frontrec:       ld      a, (recfront)
                 or      a
                 ret     z
+                ld      a, (frontok)    ; the list is for build_fore, made
+                or      a               ; once as the room is entered: a
+                ret     z               ; redraw would only pile up copies
                 ld      a, (nfront)
                 cp      MAXFRONT
                 ret     nc
@@ -1769,6 +1774,7 @@ frx1:           ld      (fx0), de
                 ret
 
 recfront:       db      0
+frontok:        db      0               ; a room is being built, not redrawn
 nfront:         db      0
 fleft:          db      0
 fptr:           dw      0
@@ -1777,7 +1783,10 @@ frow:           db      0
 frows:          db      0
 fx0:            dw      0
 fpx:            db      0
-frontlist:      ds      MAXFRONT * 4
+frontlist:      ds      MAXFRONT * 5    ; five bytes an entry, as frontrec
+                                        ; writes and frontrect reads them --
+                                        ; at four, the last six ran on into
+                                        ; halfpiece and the code after it
 
 ; ---------------------------------------------------------------- the floor
 ;
@@ -2430,7 +2439,9 @@ links:          ds      4
 ;
 ; In: (blockrow), (blockcol).
 
-redblock:       ld      a, (blockrow)
+redblock:       xor     a               ; the room is built: note no more
+                ld      (frontok), a    ; front pieces
+                ld      a, (blockrow)
                 inc     a
                 ld      l, a
                 ld      h, 0
