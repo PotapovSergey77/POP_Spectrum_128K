@@ -26,6 +26,12 @@ print('код %04X..%04X, рабочий буфер %04X..%04X, до него с
          sym['work'] - sym['codeend']))
 print('пуск %04X..%04X, в рабочем буфере' % (sym['start'], sym['initend']))
 assert sym['initend'] <= 0xC000, 'пуск не влез'
+rb = sym['roomend'] - sym['roomblk']
+room = sym['RB7LEN'] + sym['RB1LEN']
+print('постройка комнаты %04X..%04X, %d байт, в банках места %d'
+      % (sym['roomblk'], sym['roomend'], rb, room))
+assert rb <= room, 'код постройки комнаты не влез в банки'
+assert sym['roomblk'] + room <= 0xC000, 'код постройки комнаты вылез из буфера'
 assert sym['work'] % 0x800 == 0, 'рабочий буфер не на границе 2K'
 assert work <= 0xC000, 'рабочий буфер налез на окно банков'
 PY

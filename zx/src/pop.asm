@@ -560,6 +560,25 @@ vrbounce:       push    hl
                 call    copy32
                 jp      page_art
 
+; The room's code back where it runs, from the two banks it is kept in: see
+; roomblk.  Only ever with the screen black and the working copy unwritten.
+
+roomrest:       ld      a, BANK_CANVAS
+                call    pageset
+                ld      hl, RBAT7
+                ld      de, roomblk
+                ld      bc, RB7LEN
+                ldir
+                ld      a, BANK_CVS
+                call    pageset
+                ld      hl, RBAT1
+                ld      bc, RB1LEN
+                ldir
+                jp      page_art
+
+roombuild:      call    roomrest
+                jp      newroom
+
 ; Which screen the ULA shows: bank 5, the ordinary one at 0x4000, or bank 7,
 ; the 128's second.  A new view is made in the one not shown and shown with
 ; a single OUT, so a scroll is never seen being drawn.  What is kept is what
@@ -2540,116 +2559,6 @@ flcells:        dw      FLCELLS0, FLCELLS1, FLCELLS2  ; shift three
 ; byte boundary on an even column and seven on an odd one, which is why two
 ; shifts of the flame are enough for a whole level.
 
-maketorches:    xor     a
-                ld      (torches), a
-                ld      hl, torches + 1
-                ld      (flrec), hl
-                xor     a
-                ld      (mtrow), a
-mtr:            xor     a
-                ld      (mtcol), a
-mtc:            ld      a, (mtrow)
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de          ; ten blocks to the row
-                ld      a, (mtcol)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                ld      de, roomids
-                add     hl, de
-                ld      a, (hl)
-                and     0x1f
-                cp      BG_TORCH
-                jp      nz, mtnext
-                ld      a, (mtcol)
-                cp      9               ; the last column has no flame
-                jp      nc, mtnext
-
-                ld      l, a            ; room pixel 28*col + 35, which
-                ld      h, 0            ; does not fit in eight bits
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl          ; four
-                ld      b, h
-                ld      c, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl          ; thirty two
-                or      a
-                sbc     hl, bc          ; less four is twenty eight
-                ld      de, 35
-                add     hl, de
-                ld      a, l
-                and     7               ; three or seven
-                ld      (mtal), a
-                srl     h               ; and which byte it starts in
-                rr      l
-                srl     h
-                rr      l
-                srl     h
-                rr      l
-                ld      a, l
-                ld      hl, (flrec)
-                ld      (hl), a
-                inc     hl
-                ld      a, (mtrow)      ; its block row gives the height
-                inc     a
-                ld      e, a
-                ld      d, 0
-                push    hl
-                ld      hl, blockbot
-                add     hl, de
-                ld      a, (hl)
-                pop     hl
-                sub     3               ; Ay
-                sub     43              ; the flame's bottom row
-                sub     15              ; and its top
-                ld      (hl), a
-                inc     hl
-                ld      (hl), 3         ; three bytes across
-                inc     hl
-                ld      (hl), 16        ; sixteen down
-                inc     hl
-                ld      (hl), 48        ; the size of one frame
-                inc     hl
-                ld      de, 0           ; which shift of the nine to use
-                ld      a, (mtal)
-                cp      3
-                jr      z, mtshift
-                ld      de, 9 * 48
-mtshift:        ld      (hl), e
-                inc     hl
-                ld      (hl), d
-                inc     hl
-                ld      (flrec), hl
-                ld      hl, torches
-                inc     (hl)
-
-mtnext:         ld      hl, mtcol
-                inc     (hl)
-                ld      a, (hl)
-                cp      10
-                jp      c, mtc
-                ld      hl, mtrow
-                inc     (hl)
-                ld      a, (hl)
-                cp      3
-                jp      c, mtr
-                ret
-
-mtrow:          db      0
-mtcol:          db      0
-mtal:           db      0
-
-; And on to the screen, wherever the view has put them.
-
 show_flames:    ld      a, (torches)
                 or      a
                 ret     z
@@ -4333,6 +4242,16 @@ start:          di
                 ld      de, sprites + SPARE_LEN - 1     ; up past it they go,
                 ld      bc, SPARE_LEN                   ; last byte first, as
                 lddr                                    ; the two overlap
+
+                ld      hl, roomblk     ; and the code that builds a room put
+                ld      de, RBAT7       ; by, for the rooms after this one:
+                ld      bc, RB7LEN      ; the end of this bank and of the
+                ldir                    ; canvas's
+                ld      a, BANK_CVS
+                call    pageset
+                ld      de, RBAT1
+                ld      bc, RB1LEN
+                ldir
                 call    page_art
                 call    newroom         ; and the room is composed, not loaded
                 call    readlinks
@@ -4406,6 +4325,25 @@ badload:        ld      a, 2
                 jr      badload
 
 initend:
+
+; ---------------------------------------------------------------- a room
+;
+; The code only the building of a room reaches -- composing it, repacking
+; it, the masks, the torches, the links -- is wanted only while a room is
+; being built, which happens behind the black screen with the working copy
+; not yet written.  So it is assembled where the working copy goes, comes in
+; with the program, is put by in two banks at startup, and roomrest puts it
+; back each time a room is entered; the repaint after goes over it.  Twelve
+; hundred bytes of the fixed half of the map are the game's again.
+
+roomblk:
+                include "roomblk.asm"
+roomend:
+
+RBAT7           equ     HALFCAN + CANVAS_W * 45 ; past the floorpiece masks
+RB7LEN          equ     0x10000 - RBAT7
+RBAT1           equ     CANVAS + CANVAS_W * 192 ; past the canvas
+RB1LEN          equ     0x10000 - RBAT1
 
 ; The tape carries one block, so both bank images ride along inside it.
 ;

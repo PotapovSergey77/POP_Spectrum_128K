@@ -68,7 +68,7 @@ def compose(cpu, sym, n):
     cpu.sp = (cpu.sp - 2) & 0xffff
     cpu.mem[cpu.sp] = SENTINEL & 0xff
     cpu.mem[cpu.sp + 1] = SENTINEL >> 8
-    cpu.pc = sym['newroom']
+    cpu.pc = sym['roombuild']
     steps = 0
     while cpu.pc != SENTINEL and steps < 8000000:
         cpu.step()

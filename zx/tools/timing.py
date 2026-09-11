@@ -44,6 +44,7 @@ def build(tap, sym):
     cpu.mem[sym['roomnum']] = 1
     print('one room build:')
     total = 0
+    call(cpu, sym['roomrest'])      # the room code, back from its banks
     for name in PHASES:
         c = call(cpu, sym[name])
         total += c
