@@ -2460,7 +2460,8 @@ nrright:        ld      a, (links + 1)
 ; working, and the new room arrives whole when it is ready.
 
 nrgo:           xor     a               ; nothing of the last room's still
-                ld      (rqn), a        ; to be drawn
+                ld      (rqn), a        ; to be drawn, nor to be shown
+                ld      (rqsn), a
                 ld      hl, SCREEN
                 ld      de, SCREEN + 1
                 ld      bc, 6143
@@ -2496,9 +2497,42 @@ links:          ds      4
 ; apart when a block is too big for both to fit in one.
 
 redblock:       call    rb_draw
-                jp      rb_pack
+                call    rb_pack
+                call    redshow         ; and on to the screen
+                xor     a
+                ld      (redwide), a
+                ret
 
-rb_draw:        xor     a               ; the room is built: note no more
+; rb_draw is two steps itself, split between the block's own B section and
+; the moving one: a gate's bars and the floor restorebot lays back under them
+; are some 46000 T on their own, and the whole of it did not fit in a period.
+; Each step sets up again, since a frame may go by between them.
+
+rb_draw:        call    rb_draw1
+                jp      rb_draw2
+
+rb_draw1:       call    rb_setup
+                call    rbwipe
+                call    setblock
+                call    draw_c
+                call    draw_mc
+                call    draw_b
+                jr      rbband0
+
+rb_draw2:       call    rb_setup
+                call    setblock
+                call    draw_mb
+                call    draw_d
+                call    draw_md
+                call    draw_a
+                call    draw_front
+rbband0:        xor     a               ; the next whole room wants them all
+                ld      (bandtop), a
+                ld      a, 191
+                ld      (bandbot), a
+                ret
+
+rb_setup:       xor     a               ; the room is built: note no more
                 ld      (frontok), a    ; front pieces
                 ld      a, (blockrow)
                 inc     a
@@ -2525,7 +2559,7 @@ rb_draw:        xor     a               ; the room is built: note no more
                 inc     hl
                 ld      a, (hl)
                 ld      (spreced), a
-                jr      rbwipe
+                jr      rbxco
 rbleft:         dec     a
                 ld      c, a
                 ld      a, (blockrow)
@@ -2548,11 +2582,13 @@ rbleft:         dec     a
                 inc     a               ; work
                 ld      (bandtop), a
 
-rbwipe:         ld      a, (blockcol)   ; four bytes to a block
+rbxco:          ld      a, (blockcol)   ; four bytes to a block
                 add     a, a
                 add     a, a
                 ld      (xco), a
-                call    page_canvas
+                ret
+
+rbwipe:         call    page_canvas
                 ld      a, (dy)
                 ld      (rbrow), a
                 ld      a, (redh)
@@ -2578,22 +2614,15 @@ rbwipe2:        ld      hl, rbrow
                 pop     bc
                 djnz    rbwipe1
 
-                call    setblock        ; and lay it down again
-                call    draw_c
-                call    draw_mc
-                call    draw_b
-                call    draw_mb
-                call    draw_d
-                call    draw_md
-                call    draw_a
-                call    draw_front
-                xor     a               ; the next whole room wants them all
-                ld      (bandtop), a
-                ld      a, 191
-                ld      (bandbot), a
                 ret
 
-rb_pack:        ld      a, (blockrow)   ; the floor line again: a frame may
+rb_pack:        ld      a, (blockcol)   ; a second group only if the piece
+                and     1               ; spills out of the block's own: from
+                ld      b, a            ; an even column it runs on into the
+                ld      a, (redwide)    ; other half of the same group, and
+                and     b               ; packing the next as well was 42000
+                ld      (rbwide), a     ; T for nothing
+                ld      a, (blockrow)   ; the floor line again: a frame may
                 inc     a               ; have gone by since rb_draw
                 ld      l, a
                 ld      h, 0
@@ -2662,7 +2691,7 @@ rbbatch:        ld      a, (rbleftn)
                 or      a
                 jp      z, rbdone
                 ld      b, 48
-                ld      a, (redwide)
+                ld      a, (rbwide)
                 or      a
                 jr      z, rbb1
                 ld      b, 24
@@ -2691,7 +2720,7 @@ rbcopy:         push    bc
                 ldi
                 ldi
                 ld      bc, CANVAS_W - 8
-                ld      a, (redwide)
+                ld      a, (rbwide)
                 or      a
                 jr      z, rbc1
                 ldi
@@ -2716,7 +2745,7 @@ rbc1:           add     hl, bc
 rbconv:         push    bc
                 push    de
                 call    cv8to7
-                ld      a, (redwide)    ; a piece that reaches past its own
+                ld      a, (rbwide)    ; a piece that reaches past its own
                 or      a               ; block wants the next group too
                 call    nz, cv8to7
                 pop     de
@@ -2729,17 +2758,14 @@ rbconv:         push    bc
                 ld      (rbroomp), de
                 jp      rbbatch
 
-rbdone:         call    page_art        ; redshow reads the room
-                call    redshow         ; and on to the screen
-                xor     a
-                ld      (redwide), a
-                ret
+rbdone:         jp      page_art        ; redshow reads the room
 
 redwide:        db      0
 
 rbrow:          db      0
 rbleftn:        db      0
 rbbn:           db      0               ; the rows in this batch
+rbwide:         db      0               ; two groups to pack, not one
 rbcanp:         dw      0               ; where the next batch starts in the
 rbroomp:        dw      0               ; canvas and in the room
 rbgroup:        db      0
@@ -3589,14 +3615,21 @@ redplate:       call    onscreen
 ; a band taller than RQSPLIT goes in two halves, on two frames.
 ;
 ; An entry: row, column, band, flags -- bit 0 wide, bit 1 a floorpiece mask
-; rather than the picture, bit 6 asked for again while half done, bit 7 half
-; done.  Costs are in thousands of T, from what the halves were measured at.
+; rather than the picture, bit 5 its second step drawn, bit 6 asked for
+; again while under way, bit 7 under way (its first step drawn).
+;
+; How much a frame has room for is not guessed: the queue is worked at the
+; end of the frame, when his own work is all done, and a step is begun only
+; while the ROM's frame count says the frame is still in the first two of
+; its three periods.  No step costs as much as a period -- the halves of a
+; 63 row block are about 32000 and 47000 T, a floor's two masks 36000 -- so
+; one begun in time is always done before the third period ends.  A frame
+; that was heavy on its own, a run or a scroll, leaves the queue for the
+; next, and on the real machine the clock counts what contended memory
+; costs as well.
 
 RQMAX           equ     8
-RQBUDGET        equ     64              ; a frame's room, over his own work
 RQSPLIT         equ     24
-RQCMASK         equ     36              ; a block's two floorpiece masks, as
-                                        ; measured: 31000 to 36000 T
 
 rq_block:       xor     a               ; the picture of the block in hand
                 jr      rq_add
@@ -3677,14 +3710,16 @@ rqput:          ld      l, a
                 ld      (hl), c
                 ret
 
-; Once a frame, after the things in the room have moved and before he is
-; drawn: as much of the queue as there is room for, the first step always.
+; Once a frame, at its end: as much of the queue as the clock allows.
 
-rq_run:         xor     a
-                ld      (rqspent), a
-rqloop:         ld      a, (rqn)
+rq_run:         ld      a, (rqn)
                 or      a
                 ret     z
+                ld      a, (FRAMES)     ; into the third period already: the
+                ld      hl, frstart     ; next frame begins before another
+                sub     (hl)            ; step could end
+                cp      2
+                ret     nc
                 ld      hl, rqq         ; the head, in hand
                 ld      a, (hl)
                 ld      (blockrow), a
@@ -3699,47 +3734,42 @@ rqloop:         ld      a, (rqn)
                 ld      (rqflags), a
                 and     1
                 ld      (redwide), a
-                call    rq_cost
-                ld      b, a
-                ld      a, (rqspent)
-                or      a
-                jr      z, rqgo
-                add     a, b
-                ret     c
-                cp      RQBUDGET + 1
-                ret     nc              ; no room left this frame
-rqgo:           ld      a, (rqspent)
-                add     a, b
-                jr      nc, rqsp
-                ld      a, 255
-rqsp:           ld      (rqspent), a
                 ld      a, (rqflags)
                 bit     1, a
                 jr      nz, rqmaskgo
-                bit     7, a
+                bit     5, a
                 jr      nz, rqpack
+                bit     7, a
+                jr      nz, rqdraw2
                 ld      a, (redh)
                 cp      RQSPLIT + 1
                 jr      c, rqwhole
-                call    rb_draw         ; the first half, and it waits
+                call    rb_draw1        ; the first step, and it waits
                 ld      hl, rqq + 3
                 set     7, (hl)
-                jp      rqloop
-rqwhole:        call    redblock
+                jr      rq_run
+rqwhole:        call    rb_draw
+                call    rb_pack
+                call    rq_showadd
                 jr      rqdone
-rqpack:         call    rb_pack
+rqdraw2:        call    rb_draw2        ; the second
+                ld      hl, rqq + 3
+                set     5, (hl)
+                jr      rq_run
+rqpack:         call    rb_pack         ; and into the room
+                call    rq_showadd
                 ld      hl, rqq + 3
                 bit     6, (hl)         ; moved again meanwhile: from the top
                 jr      z, rqdone
                 ld      a, (hl)
-                and     0x3f
+                and     3               ; width and kind are all it keeps
                 ld      (hl), a
-                jp      rqloop
+                jr      rq_run
 rqmaskgo:       call    maskblock
 rqdone:         ld      a, (rqn)        ; off the head
                 dec     a
                 ld      (rqn), a
-                jp      z, rqloop
+                jr      z, rq_run
                 add     a, a
                 add     a, a
                 ld      c, a
@@ -3747,38 +3777,87 @@ rqdone:         ld      a, (rqn)        ; off the head
                 ld      hl, rqq + 4
                 ld      de, rqq
                 ldir
-                jp      rqloop
+                jp      rq_run
 
-; A = what the head's next step costs, in thousands of T.  Whole: four and a
-; row and a half a row; the first half two and half a row, the second two
-; and a row.
+; A block that has gone back into the room still has to reach the working
+; copy, and at the end of a frame he has just been drawn into it: the room
+; would go down over him.  So it waits for the next frame, where rq_shows
+; does it after he has been rubbed out and before he is drawn again.
 
-rq_cost:        ld      a, (rqflags)
-                bit     1, a
-                jr      z, rqcb
-                ld      a, RQCMASK
+rq_showadd:     ld      a, (rqsn)
+                cp      RQMAX
+                jr      c, rqsa1
+                ld      a, 1            ; more than that: the whole screen
+                ld      (fullshow), a   ; from the room, next frame
+                xor     a
+                ld      (redwide), a
                 ret
-rqcb:           ld      c, a
+rqsa1:          ld      l, a
+                inc     a
+                ld      (rqsn), a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                ld      de, rqs
+                add     hl, de
+                ld      a, (blockrow)
+                ld      (hl), a
+                inc     hl
+                ld      a, (blockcol)
+                ld      (hl), a
+                inc     hl
                 ld      a, (redh)
+                ld      (hl), a
+                inc     hl
+                ld      a, (redwide)
+                ld      (hl), a
+                xor     a
+                ld      (redwide), a
+                ret
+
+rq_shows:       ld      a, (rqsn)
+                or      a
+                ret     z
                 ld      b, a
-                bit     7, c
-                jr      nz, rqc2
-                cp      RQSPLIT + 1
-                jr      c, rqcw
-                srl     a
-                add     a, 2
-                ret
-rqcw:           srl     a
-                add     a, b
-                add     a, 4
-                ret
-rqc2:           add     a, 2
+                ld      hl, rqs
+rqsh1:          push    bc
+                ld      a, (hl)
+                ld      (blockrow), a
+                inc     hl
+                ld      a, (hl)
+                ld      (blockcol), a
+                inc     hl
+                ld      a, (hl)
+                ld      (redh), a
+                inc     hl
+                ld      a, (hl)
+                ld      (redwide), a
+                inc     hl
+                push    hl
+                ld      a, (blockrow)   ; its floor line
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blockbot
+                add     hl, de
+                ld      a, (hl)
+                ld      (dy), a
+                call    page_art
+                call    redshow
+                xor     a
+                ld      (redwide), a
+                pop     hl
+                pop     bc
+                djnz    rqsh1
+                xor     a
+                ld      (rqsn), a
                 ret
 
 rqn:            db      0               ; entries waiting
 rqflags:        db      0
-rqspent:        db      0
 rqq:            ds      4 * RQMAX
+rqsn:           db      0               ; blocks waiting to be shown
+rqs:            ds      4 * RQMAX       ; row, column, band, wide
 
 ; The exit's stairs and door are all in the block to its right.
 

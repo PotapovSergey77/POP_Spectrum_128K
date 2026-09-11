@@ -6,9 +6,10 @@ interrupts enabled counts a frame and falls through, which is nearly all the
 program uses it for, and IN reads come from a key map the harness sets.
 
 The one thing the ROM does that the program leans on is the three byte frame
-count at 23672, which the main loop reads to pace itself.  A halt bumps it,
-so the loop sees time passing; interrupts DURING work are not modelled, so
-what is counted here is halts and the pace measured is the old one.
+count at 23672, which the main loop reads to pace itself and the redraw
+queue reads to know how much of a frame is left.  It moves on at every
+interrupt, as the machine's does -- at each FRAME_TSTATES of the clock, in
+the middle of work or at a halt alike -- or neither would see the truth.
 
 Undocumented flags and instructions are left out; DAA, DD/FD and the block
 compare/IO groups are not implemented, and hitting one raises rather than
@@ -42,6 +43,7 @@ class Z80:
         self.im = 0
         self.halted = False
         self.frames = 0
+        self.next_tick = FRAME_TSTATES      # when the interrupt next comes
         self.cycles = 0
         self.ports = {}          # port -> value returned by IN
         self.default_in = 0xFF
@@ -194,6 +196,13 @@ class Z80:
     # -- execution ------------------------------------------------------
 
     def step(self):
+        self._step()
+        while self.cycles >= self.next_tick:        # the interrupt: the ROM
+            if self.iff1:                           # counts a frame
+                self.tick_frames()
+            self.next_tick += FRAME_TSTATES
+
+    def _step(self):
         op = self.fetch()
         self.cycles += 4
 
@@ -207,7 +216,6 @@ class Z80:
                 # the question the pace of the game turns on.
                 self.cycles += FRAME_TSTATES - self.cycles % FRAME_TSTATES
                 self.frames += 1
-                self.tick_frames()
             else:
                 self.halted = True
             return

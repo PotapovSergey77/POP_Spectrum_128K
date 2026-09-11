@@ -181,6 +181,7 @@ mainrun:        ld      a, (FRAMES)
 
                 call    camera
                 call    erase_prince
+                call    rq_shows        ; blocks redrawn last frame, to show
                 call    page_canvas     ; the sequences live there, and
                 call    input_step      ; everything down to here starts one
                 call    step_seq
@@ -192,11 +193,11 @@ mainrun:        ld      a, (FRAMES)
                 call    checkpress
                 call    shakeloose
                 call    animtrans
-                call    rq_run          ; as much of the redrawing as fits
                 call    draw_prince
                 call    page_art
                 call    hide_floor
                 call    hide_behind
+                call    rq_run          ; and the redrawing, as time allows
                 jr      main
 
 ; ---------------------------------------------------------------- paging
