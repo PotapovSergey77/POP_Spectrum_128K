@@ -54,6 +54,12 @@ stubs:          ld      a, BANK_ART
 ; the ROM's own copy of the port, and it writes that copy back at its leisure,
 ; so ours has to go through it.
 
+; Once start has run the stubs are never called again, and the map of the
+; rows a view being made still wants -- a bit a row, 24 bytes -- lives over
+; the top of the six of them.
+
+vwmap           equ     stubs
+
 dopage:         and     7
                 ld      b, a
                 ld      hl, BANKM
@@ -103,52 +109,10 @@ X_MIN           equ     -40
 X_MAX           equ     320
 
 ; ---------------------------------------------------------------- entry
+;
+; start itself runs from where the working copy goes: see the end.
 
-start:          di
-                ld      sp, stack
-                im      1
-
-                xor     a
-                out     (254), a
-
-                call    check_banks     ; before anything is written
-
-                ld      a, BANK_CANVAS  ; the frame table and the sequences
-                call    pageset         ; came in at the window, where the
-                ld      hl, 0xC000 + SPARE_LEN - 1      ; second screen goes:
-                ld      de, sprites + SPARE_LEN - 1     ; up past it they go,
-                ld      bc, SPARE_LEN                   ; last byte first, as
-                lddr                                    ; the two overlap
-                call    page_art
-                call    newroom         ; and the room is composed, not loaded
-                call    readlinks
-
-                call    set_attrs
-
-                xor     a               ; the view starts at the room's left
-                ld      (cam), a
-                call    repaint
-
-
-                ld      hl, START_X
-                ld      (charx), hl
-                ld      a, START_Y
-                ld      (chary), a
-                ld      a, START_ROW
-                ld      (blocky), a
-                call    camhome         ; and the view where he is, not adrift
-                xor     a
-                ld      (yvel), a
-                ld      (facing), a
-                ld      (oldw), a       ; nothing to erase on the first pass
-                call    page_canvas     ; paging has A, so it goes first
-                ld      a, SQ_STAND
-                call    jumpseq
-                call    page_art
-
-                call    page_canvas
-                call    step_seq
-                call    page_art
+start2:         call    repaint
                 call    draw_prince
                 call    page_art
                 call    hide_floor
@@ -166,7 +130,12 @@ start:          di
 ; A frame's worth of lag, and nothing torn: the beam never catches the blit
 ; halfway through him.
 
-main:           halt                    ; the blit wants the beam still in the
+main:           ld      hl, nohalt      ; the view being made ran right up to
+                ld      a, (hl)         ; the interrupt: the frame is due, and
+                ld      (hl), 0         ; the beam still in the border
+                or      a
+                jr      nz, mainrun
+                halt                    ; the blit wants the beam still in the
 mainwait:       ld      a, (FRAMES)     ; border above the room, so a frame
                 ld      hl, frstart     ; always begins on an interrupt -- but
                 sub     (hl)            ; on the FIRST one that leaves the slot
@@ -201,6 +170,7 @@ mainrun:        ld      a, (FRAMES)
                 call    hide_floor
                 call    hide_behind
                 call    rq_run          ; and the redrawing, as time allows
+                call    vw_fill         ; and the view ahead, to the very end
                 jr      main
 
 ; ---------------------------------------------------------------- paging
@@ -313,148 +283,256 @@ nextrow:        ld      de, ROOM_BYTES - 32
                 ret
 
 ; Nothing in POP moves a camera: the Apple's room is all on screen at once.
-; Ours is 24 pixels short of it, so the view slides a byte at a time and only
-; when he leaves the middle of it.  The dead zone is wide, or a single pace
-; would set it stepping back and forth.
+; Ours is 24 pixels short of it, so the view slides, a byte at a time.  The
+; screen is taken in thirds and the whole slide is done while he crosses the
+; first two of them the way he faces, and by the middle: facing right, a
+; step as he passes 16, 64 and 112 pixels from the left edge of the screen;
+; facing left, the same from the right.  They are that far apart so that
+; the next view can be made between them even running -- some seven frames
+; on the real machine.  The view only ever steps the way he faces, so a
+; pace to and fro across a step does not set it swinging; when he turns,
+; it goes back by the same rule.
 ;
-; A step does not repaint the working copy: the screen is redrawn from the
-; room itself, and the only parts of the working copy anything reads are the
-; two rectangles the erases put the room back under anyway.
+; A step never repaints the screen shown.  The next view the way he faces is
+; made ahead, in the screen not shown, with whatever time frames have left
+; over; when he reaches the step it is ready, camera takes it, he is drawn
+; for it, and show_rect turns the screens round at the top of the frame
+; after.
 
-camera:         ld      a, (vwstep)     ; the view asked for is made: take it
-                cp      VWDONE          ; now, and show_rect shows it at the
-                jr      nz, camlook     ; top of the next frame, drawn for it
-                ld      a, (vwcam)      ; by then
+camera:         call    camsched        ; C = where the rule puts the view
+                ld      c, a
+                ld      b, 0            ; B = 1: the step ahead is due now
+                ld      a, (facing)
+                or      a
+                ld      a, (cam)
+                jr      z, camfl
+                cp      CAM_MAX         ; facing right: a step right, if the
+                ret     z               ; room has one, due once the rule is
+                inc     a               ; there
+                cp      c
+                jr      z, camdue
+                jr      nc, camwant
+camdue:         inc     b
+                jr      camwant
+camfl:          or      a               ; facing left: a step left
+                ret     z
+                dec     a
+                cp      c
+                jr      c, camwant
+                inc     b
+camwant:        ld      hl, vwcam       ; the view being made?
+                cp      (hl)
+                jr      z, camready
+                ld      (hl), a         ; no: that one, all of it
+                jr      vw_all
+camready:       dec     b               ; wanted now, and ready?
+                ret     nz
+                call    vwany
+                ret     nz
+                ld      a, (vwcam)
                 ld      (cam), a
-                xor     a
-                ld      (vwstep), a
-                inc     a
+                ld      a, 1
                 ld      (flipnow), a
                 ret
-camlook:        or      a               ; being made: nothing to decide
-                ret     nz
-                ld      a, (cam)
-                add     a, a
-                add     a, a
-                add     a, a
-                ld      e, a            ; the view's left edge
-                ld      d, 0
-                ld      hl, (charx)
-                or      a
-                sbc     hl, de          ; where he stands on screen
-                bit     7, h
-                jr      nz, camleft     ; off the left of it
-                ld      a, h
-                or      a
-                jr      nz, camright    ; and off the right
-                ld      a, l
-                cp      160
-                jr      nc, camright
-                cp      96
-                ret     nc
 
-; The whole of the way, not a step: a view takes some frames to make, and a
-; step at a time would leave him running off the edge of the old one while
-; the next was made.  The view is only three bytes wider than the screen.
+; On the way into a room, straight to where the rule puts it.
 
-camleft:        xor     a
-                jr      cammove
-camright:       ld      a, CAM_MAX
-cammove:        ld      hl, cam
-                cp      (hl)
-                ret     z
-                ld      (vwcam), a      ; and that view made, behind
-                ld      a, 1
-                ld      (vwstep), a
-                ret
-
-; And on the way into a room, straight to the value it would settle at: he
-; arrives at the far side of it, and a view that started over would be seen
-; scrolling across to find him.
-
-camhome:        call    camtarget
+camhome:        call    camsched
                 ld      (cam), a
                 ret
 
-; A = where the view comes to rest round him: the first step that brings him
-; under 160.
+; A = the camera the rule gives: how many of the three steps, the way he
+; faces, he has passed.  In the room's pixels, where each step lands for the
+; view it starts from -- 16, 72 and 128 facing right; facing left 264, 208
+; and 152, passed going down, and the first of those is past the byte.
 
-camtarget:      ld      hl, (charx)
-                ld      de, 152
+camsched:       ld      hl, camthr + 3
+                ld      a, (facing)
                 or      a
-                sbc     hl, de
-                bit     7, h
-                jr      nz, chzero
-                ld      a, h
-                or      a
-                jr      nz, chmax
-                ld      a, l
-                srl     a
-                srl     a
-                srl     a               ; eight pixels to the step
-                cp      CAM_MAX
+                jr      nz, cs1
+                ld      hl, camthr
+cs1:            ld      de, (charx)
+                xor     a
+                bit     7, d
+                ret     nz              ; left of the room: none
+                inc     d
+                dec     d
+                ld      b, 3
+                jr      z, cs2
+                ld      a, b            ; right of 255: all three
+                ret
+cs2:            ld      c, a
+                ld      a, e
+                cp      (hl)
+                ld      a, c
                 ret     c
-chmax:          ld      a, CAM_MAX
+                inc     a
+                inc     hl
+                djnz    cs2
                 ret
-chzero:         xor     a
-                ret
+
+camthr:         db      153, 209, 255   ; facing left: from these on, 1 2 3
+                db      16, 72, 128     ; facing right
 
 ; ---------------------------------------------------------------- a new view
 ;
-; A step of making the view the camera is going to: the colours first, then
-; the room's rows VWROWS at a time, into the screen not shown.  The steps go
-; at the end of a frame as the redraw queue's do, and the queue waits for
-; them -- the room must not change under a copy of it.  When the last is
-; done camera takes the view, and show_rect turns the screens round at the
-; top of the frame after, with him drawn into it by then.
+; Every row of it wanted afresh, and its colours.
 
-VWROWS          equ     16
-VWDONE          equ     2 + 192 / VWROWS
+vw_all:         ld      hl, vwmap
+                ld      b, 24
+va1:            ld      (hl), 0xff
+                inc     hl
+                djnz    va1
+                ld      a, b
+                dec     a
+                ld      (vwatt), a
+                ret
 
-vw_step:        ld      a, (cam)        ; worked out for the view it will be
+; Z: nothing of the view left to do.
+
+vwany:          ld      hl, vwmap
+                ld      b, 24
+                ld      a, (vwatt)
+va2:            or      (hl)
+                inc     hl
+                djnz    va2
+                or      a
+                ret
+
+; Rows the room has just changed in: the view being made wants them again.
+; In: A = the first, B = how many.
+
+vw_mark:        ld      c, a
+vm1:            ld      a, c
+                cp      192
+                jr      nc, vm2
+                call    vwbit
+                or      (hl)
+                ld      (hl), a
+vm2:            inc     c
+                djnz    vm1
+                ret
+
+; A = a row.  Out: HL = its byte of vwmap, A = its bit.
+
+vwbit:          ld      e, a
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                ld      hl, vwmap
+                add     a, l
+                ld      l, a
+                jr      nc, vb1
+                inc     h
+vb1:            ld      a, e
+                and     7
+                ld      e, a
+                ld      a, 0x80
+                ret     z
+vb2:            rrca
+                dec     e
+                jr      nz, vb2
+                ret
+
+; What is left of a frame after the queue: the view ahead, a row at a time,
+; right up to the interrupt that starts the next frame.  A row is short
+; enough that the frame can begin the moment it is done, with the beam still
+; in the border, instead of waiting at the halt for the interrupt after.  A
+; frame that had overrun already keeps the halt, as ever.
+
+vw_fill:        ld      a, (vwcam)
+                inc     a
+                ret     z               ; no view in hand
+                call    vwtime
+                ret     nc
+vwf1:           ld      a, (vwatt)
+                or      a
+                jr      nz, vwfatt
+                call    vwany
+                ret     z               ; ready, and waiting for him
+                call    vw_row
+                jr      vwf2
+vwfatt:         call    vw_attrs
+vwf2:           call    vwtime
+                jr      c, vwf1
+                ld      a, 1            ; the frame is due: it starts now
+                ld      (nohalt), a
+                ret
+
+; Carry: the next frame is not due yet.
+
+vwtime:         ld      a, (FRAMES)
+                ld      hl, frstart
+                sub     (hl)
+                cp      FRAME_WAIT
+                ret
+
+; The colours, in the screen not shown.  set_attrs works them out for the
+; camera, so for as long as that takes it is the view's.
+
+vw_attrs:       xor     a
+                ld      (vwatt), a
+                ld      a, (cam)
                 push    af
                 ld      a, (vwcam)
                 ld      (cam), a
-                ld      a, (vwstep)
-                dec     a
-                jr      nz, vwrows
-                ld      a, (scrsel + 1) ; the colours, in the screen not shown
+                ld      a, (scrsel + 1)
                 or      a
                 ld      hl, SCREEN + 6144
-                jr      nz, vwattr
+                jr      nz, vwa1
                 ld      a, BANK_CANVAS
                 call    pageset
                 ld      hl, 0xC000 + 6144
-vwattr:         call    set_attrs_at
-                jr      vwnext
-vwrows:         dec     a               ; sixteen rows a step
-                add     a, a
-                add     a, a
-                add     a, a
-                add     a, a
-                ld      (rowy), a
+vwa1:           call    set_attrs_at
+                pop     af
+                ld      (cam), a
+                jp      page_art
+
+; The next row the view still wants: the room's, from where the view will
+; stand, into the screen not shown -- through a buffer down here when that
+; is bank 7, which wants the window the room is in.
+
+vw_row:         ld      a, (vwrow)
+vr1:            cp      192
+                jr      c, vr2
+                xor     a
+vr2:            ld      (vwrow), a
+                call    vwbit
+                ld      d, a
+                and     (hl)
+                jr      nz, vr3
+                ld      a, (vwrow)
+                inc     a
+                jr      vr1
+vr3:            ld      a, d            ; off the map
+                cpl
+                and     (hl)
+                ld      (hl), a
                 call    page_art
-                ld      a, (rowy)
-                call    roomwin
-                ld      (roomp), hl
-                ld      b, VWROWS
-vwrow:          push    bc
+                ld      a, (vwrow)
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (vwcam)
+                add     a, l
+                ld      l, a
+                jr      nc, vr4
+                inc     h
+vr4:            ld      (roomp), hl
                 ld      e, 0
-                ld      a, (rowy)
-                call    scraddr         ; the row on the screen
+                ld      a, (vwrow)
+                call    scraddr         ; its line on the screen
                 ld      a, (scrsel + 1)
                 or      a
-                jr      z, vwbounce
+                jr      z, vrbounce
                 ex      de, hl          ; bank 7 shown: into bank 5, straight
                 ld      hl, (roomp)
+                jp      copy32
+vrbounce:       push    hl
+                ld      hl, (roomp)
+                ld      de, imgbuf
                 call    copy32
-                call    nextrow
-                jr      vwrnext
-vwbounce:       push    hl              ; bank 5 shown: the room and bank 7
-                ld      hl, (roomp)     ; both want the window, so the row
-                ld      de, imgbuf      ; goes through a buffer down here
-                call    copy32
-                call    nextrow
                 ld      a, BANK_CANVAS
                 call    pageset
                 pop     de
@@ -463,62 +541,7 @@ vwbounce:       push    hl              ; bank 5 shown: the room and bank 7
                 ld      d, a
                 ld      hl, imgbuf
                 call    copy32
-                call    page_art
-vwrnext:        pop     bc
-                djnz    vwrow
-vwnext:         pop     af
-                ld      (cam), a
-                ld      hl, vwstep
-                inc     (hl)
                 jp      page_art
-
-; Every bank is signed at its end, and a red border says one did not arrive:
-; a black screen leaves nothing to go on.
-
-check_banks:    ld      a, BANK_ART
-                call    pageset
-                ld      hl, (SIG_ART_AT)
-                ld      de, SIG_ART
-                or      a
-                sbc     hl, de
-                jp      nz, badload
-                ld      hl, sigtab
-                ld      b, 3
-cbloop:         push    bc
-                ld      a, (hl)
-                inc     hl
-                call    pageset
-                ld      e, (hl)
-                inc     hl
-                ld      d, (hl)
-                inc     hl
-                push    hl
-                ex      de, hl
-                ld      e, (hl)
-                inc     hl
-                ld      d, (hl)
-                ld      hl, SIG_SPR
-                or      a
-                sbc     hl, de
-                pop     hl
-                pop     bc
-                jp      nz, badload
-                djnz    cbloop
-                ld      a, BANK_ART
-                jp      pageset
-
-sigtab:         db      BANK_SPR1
-                dw      SIG_SPR1_AT
-                db      BANK_SPR2
-                dw      SIG_SPR2_AT
-                db      BANK_SPR3
-                dw      SIG_SPR3_AT
-
-; A bank that did not arrive: red border, and nothing else is going to work.
-
-badload:        ld      a, 2
-                out     (254), a
-                jr      badload
 
 ; Which screen the ULA shows: bank 5, the ordinary one at 0x4000, or bank 7,
 ; the 128's second.  A new view is made in the one not shown and shown with
@@ -3767,9 +3790,13 @@ mastercol:      ld      b, a
 
 show_rect:      ld      hl, flipnow     ; the view made behind is ready:
                 ld      a, (hl)         ; turned round now, while the beam is
-                ld      (hl), 0         ; still in the border
-                or      a
-                call    nz, flip
+                ld      (hl), 0         ; still in the border -- and the
+                or      a               ; screen that goes behind is no view
+                jr      z, shnoflip     ; at all any more
+                call    flip
+                ld      a, 0xff
+                ld      (vwcam), a
+shnoflip:
                 ld      a, (fullshow)
                 or      a
                 jr      z, showmine
@@ -3802,9 +3829,10 @@ fsrow:          push    bc
                 pop     bc
                 djnz    fsrow
                 call    set_attrs       ; the colour slides with the view
-                xor     a               ; painted into bank 5, so bank 5 is
-                ld      (vwstep), a     ; the one to show -- and a view being
-                call    setvis          ; made anywhere is made over
+                ld      a, 0xff         ; painted into bank 5, so bank 5 is
+                ld      (vwcam), a      ; the one to show -- and a view being
+                xor     a               ; made anywhere is made over
+                call    setvis
                 jp      show_flames
 
 ; The rectangles go to whichever screen is shown, bank 7 paged in case it is.
@@ -4204,9 +4232,11 @@ cdbelow:        ds      10
 
 cam:            db      0               ; the view's left edge, in bytes
 fullshow:       db      0
-vwstep:         db      0               ; the next step of a view, VWDONE made
-vwcam:          db      0               ; and the camera it is made for
+vwcam:          db      0xff            ; the view being made, or none
+vwatt:          db      0               ; its colours still to do
+vwrow:          db      0               ; where to look for its next row
 flipnow:        db      0               ; show it at the top of the next frame
+nohalt:         db      0               ; the fill ran up to the interrupt
 atbase:         dw      0               ; the colours set_attrs writes
 masterc:        db      0
 coverm:         dw      0
@@ -4262,6 +4292,101 @@ shifthi:        incbin  "shifthi.bin"
 shiftlo:        incbin  "shiftlo.bin"
 revtab:         incbin  "revtab.bin"
 codeend:
+
+; ---------------------------------------------------------------- start
+;
+; What runs once, before the working copy is first written, sits where the
+; working copy goes: it comes in with the program and the first repaint goes
+; over it, so the fixed half of the map keeps its room for the game.
+
+start:          di
+                ld      sp, stack
+                im      1
+
+                xor     a
+                out     (254), a
+
+                call    check_banks     ; before anything is written
+
+                ld      a, BANK_CANVAS  ; the frame table and the sequences
+                call    pageset         ; came in at the window, where the
+                ld      hl, 0xC000 + SPARE_LEN - 1      ; second screen goes:
+                ld      de, sprites + SPARE_LEN - 1     ; up past it they go,
+                ld      bc, SPARE_LEN                   ; last byte first, as
+                lddr                                    ; the two overlap
+                call    page_art
+                call    newroom         ; and the room is composed, not loaded
+                call    readlinks
+                call    set_attrs
+
+                ld      hl, START_X
+                ld      (charx), hl
+                ld      a, START_Y
+                ld      (chary), a
+                ld      a, START_ROW
+                ld      (blocky), a
+                xor     a
+                ld      (yvel), a
+                ld      (facing), a
+                ld      (oldw), a       ; nothing to erase on the first pass
+                call    camhome         ; and the view where he is, not adrift
+                call    page_canvas
+                ld      a, SQ_STAND
+                call    jumpseq
+                call    page_canvas
+                call    step_seq
+                call    page_art
+                jp      start2
+
+; Every bank is signed at its end, and a red border says one did not arrive:
+; a black screen leaves nothing to go on.
+
+check_banks:    ld      a, BANK_ART
+                call    pageset
+                ld      hl, (SIG_ART_AT)
+                ld      de, SIG_ART
+                or      a
+                sbc     hl, de
+                jp      nz, badload
+                ld      hl, sigtab
+                ld      b, 3
+cbloop:         push    bc
+                ld      a, (hl)
+                inc     hl
+                call    pageset
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                push    hl
+                ex      de, hl
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                ld      hl, SIG_SPR
+                or      a
+                sbc     hl, de
+                pop     hl
+                pop     bc
+                jp      nz, badload
+                djnz    cbloop
+                ld      a, BANK_ART
+                jp      pageset
+
+sigtab:         db      BANK_SPR1
+                dw      SIG_SPR1_AT
+                db      BANK_SPR2
+                dw      SIG_SPR2_AT
+                db      BANK_SPR3
+                dw      SIG_SPR3_AT
+
+; A bank that did not arrive: red border, and nothing else is going to work.
+
+badload:        ld      a, 2
+                out     (254), a
+                jr      badload
+
+initend:
 
 ; The tape carries one block, so both bank images ride along inside it.
 ;

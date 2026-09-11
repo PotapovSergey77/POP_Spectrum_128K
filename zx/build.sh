@@ -22,8 +22,10 @@ for line in open('build/pop.sym'):
 json.dump(sym, open('build/sym.json', 'w'))
 work = sym['work'] + 6144
 print('код %04X..%04X, рабочий буфер %04X..%04X, до него свободно %d байт'
-      % (sym['start'], sym['codeend'], sym['work'], work,
+      % (sym['stubs'], sym['codeend'], sym['work'], work,
          sym['work'] - sym['codeend']))
+print('пуск %04X..%04X, в рабочем буфере' % (sym['start'], sym['initend']))
+assert sym['initend'] <= 0xC000, 'пуск не влез'
 assert sym['work'] % 0x800 == 0, 'рабочий буфер не на границе 2K'
 assert work <= 0xC000, 'рабочий буфер налез на окно банков'
 PY

@@ -2492,8 +2492,9 @@ nrright:        ld      a, (links + 1)
 nrgo:           xor     a               ; nothing of the last room's still
                 ld      (rqn), a        ; to be drawn, nor to be shown, nor
                 ld      (rqsn), a       ; a view of it made
-                ld      (vwstep), a
                 ld      (flipnow), a
+                dec     a
+                ld      (vwcam), a
                 ld      hl, SCREEN
                 ld      de, SCREEN + 1
                 ld      bc, 6143
@@ -2567,6 +2568,12 @@ rb_step:        push    af
                 call    draw_front
                 call    rbband0
                 call    rb_pack
+                ld      a, (rbh)        ; and a view being made wants those
+                ld      b, a            ; rows of the room again
+                ld      a, (rbbot)
+                sub     b
+                inc     a
+                call    vw_mark
                 pop     af
                 ret
 
@@ -3751,10 +3758,8 @@ rqnext:         inc     hl
 rqnew:          ld      a, (rqn)
                 cp      RQMAX
                 jr      c, rqput
-                xor     a               ; full, which a frame never fills: do
-                ld      (vwstep), a     ; it now, the old way -- and a view
-                ld      a, c            ; being made of the room is made over
-                and     1
+                ld      a, c            ; full, which a frame never fills: do
+                and     1               ; it now, the old way
                 ld      (redwide), a
                 bit     1, c
                 jp      nz, maskblock
@@ -3783,16 +3788,7 @@ rqput:          ld      l, a
 
 rq_run:         xor     a
                 ld      (rqdid), a
-rqloop:         ld      a, (vwstep)     ; a view being made comes first, and
-                or      a               ; nothing goes into the room until it
-                jr      z, rqqueue      ; is on the screen: the room is what
-                cp      VWDONE          ; it is copied from
-                ret     z
-                call    rqtime
-                ret     nc
-                call    vw_step
-                jr      rqloop
-rqqueue:        ld      a, (rqn)
+rqloop:         ld      a, (rqn)
                 or      a
                 ret     z
                 call    rqtime

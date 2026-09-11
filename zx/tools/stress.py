@@ -5,9 +5,11 @@ The game runs a frame in three interrupt periods, 212724 T, and the rule is
 that nothing happening around him -- a plate, a loose floor giving way, a
 gate or the exit door rising, the view scrolling -- may push a frame past
 that.  Each scenario here starts a tape in the room it is about, plays it,
-and counts the frames whose work went over; then it lets things settle and
-sets the room against a fresh build of it, since the redraw queue puts off
-drawing and must not lose any.
+and counts the frames that were late -- the ones the next frame began more
+than three periods after, by the ROM's own count; the view made ahead
+fills what a frame leaves over, so a frame's work alone no longer says --
+then it lets things settle and sets the room against a fresh build of it,
+since the redraw queue puts off drawing and must not lose any.
 
     stress.py            build the tapes it needs, report, and put the game
                          tape back in build/
@@ -28,6 +30,7 @@ ZX = os.path.join(HERE, '..')
 FRAME = 70908
 SLOT = 3 * FRAME
 SENTINEL = 0x0038
+FRAMES = 23672
 
 # name, room, row, column, keys held on game frame n, frames, frames to settle
 SCENES = [
@@ -76,7 +79,9 @@ def play(tape, script, frames, settle):
     cpu = runtap.boot(tape)
     runtap.game_frame(cpu, sym['main'], [])
     lo, hi = sym['main'], sym['mainrun']
+    fill = sym.get('vw_fill', -1)
     works = []
+    began = None
     for n in range(1, frames + settle):
         runtap.release(cpu)
         for k in (script(n) if n < frames else []):
@@ -84,16 +89,25 @@ def play(tape, script, frames, settle):
             cpu.ports[row] &= ~(1 << bit) & 0xff
         work = 0
         first = True
+        filling = False
+        periods = None
         while True:
             p, t = cpu.pc, cpu.cycles
+            if p == sym['mainrun']:             # this frame begins: the last
+                now = cpu.mem[FRAMES]           # took this many periods
+                if began is not None:
+                    periods = (now - began) & 0xff
+                began = now
+            if p == fill:
+                filling = True
             cpu.step()
-            if not (lo <= p < hi):
+            if not (lo <= p < hi) and not filling:
                 work += cpu.cycles - t
             if cpu.pc == sym['main'] and not first:
                 break
             first = False
         if n < frames:
-            works.append((n, work))
+            works.append((n, work, periods))
     live = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
     call(cpu, sym['newroom'])
     fresh = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
@@ -107,13 +121,15 @@ def main(argv):
         for name, room, row, col, script, frames, settle in SCENES:
             tape = tape_for(name, room, row, col)
             works, stale = play(tape, script, frames, settle)
-            over = [(n, w) for n, w in works if w > SLOT]
+            # frame n's periods are the ones frame n - 1 took; frame 1 is
+            # the one that painted the room and is left out, as ever
+            over = [(n - 1, p) for n, w, p in works if n > 2 and p and p > 3]
             worst = max(works, key=lambda x: x[1])
-            print('%-26s %2d of %2d frames over, worst %6d T (%.2f of the '
+            print('%-26s %2d of %2d frames late, heaviest %6d T (%.2f of the '
                   'slot)%s' % (name, len(over), len(works), worst[1],
                                worst[1] / float(SLOT),
-                               ': ' + ' '.join('%d:%dk' % (n, w // 1000)
-                                               for n, w in over[:8])
+                               ': ' + ' '.join('%d:%d periods' % o
+                                               for o in over[:8])
                                if over else ''))
             if stale:
                 print('%-26s the room, settled, is %d bytes off a fresh '
@@ -121,7 +137,7 @@ def main(argv):
             bad += len(over)
     finally:
         build()
-    print('%d frames over the three periods' % bad)
+    print('%d frames late' % bad)
     return 1 if bad else 0
 
 
