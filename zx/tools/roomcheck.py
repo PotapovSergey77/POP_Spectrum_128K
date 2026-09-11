@@ -42,6 +42,26 @@ def host(level, n):
     return bytes(out)
 
 
+def host_masks(level, n):
+    """The two floorpiece masks as renderroom makes them, band by band, packed
+    the way the game holds them: fifteen rows to a block row, 35 bytes each."""
+    floor, half = renderroom.floor_covers(level, n)
+    out = []
+    for px in (floor, half):
+        m = bytearray()
+        for r in range(3):
+            dy = renderroom.BLOCKBOT[r + 1]
+            for y in range(dy - 14, dy + 1):
+                line = bytearray(35)
+                if 0 <= y < 192:
+                    for x in range(280):
+                        if px[y][x]:
+                            line[x >> 3] |= 0x80 >> (x & 7)
+                m += line
+        out.append(bytes(m))
+    return out
+
+
 def compose(cpu, sym, n):
     """Have the game build room n, and hand back what it made."""
     cpu.mem[sym['roomnum']] = n
@@ -66,7 +86,7 @@ def main(argv):
     cpu = runtap.boot(argv[1])
     runtap.game_frame(cpu, sym['main'], [])
 
-    bad = 0
+    bad = badm = 0
     for n in range(1, 25):
         made = compose(cpu, sym, n)
         want = host(level, n)
@@ -76,8 +96,19 @@ def main(argv):
             rows = sorted({i // 35 for i in range(6720) if made[i] != want[i]})
             print('room %2d: %d of 6720 bytes differ, rows %d..%d'
                   % (n, d, rows[0], rows[-1]))
+        # And the two floorpiece masks newroom made on the way: a mask built
+        # wrong is the same in a fresh build as in a patched one, so only a
+        # reference from outside the game can see it.
+        for name, want_m in zip(('floormask', 'halfmask'), host_masks(level, n)):
+            got = bytes(cpu.mem[sym[name]:sym[name] + len(want_m)])
+            dm = [i for i in range(len(want_m)) if got[i] != want_m[i]]
+            if dm:
+                badm += 1
+                print('room %2d: %s %d bytes differ, mask rows %d..%d'
+                      % (n, name, len(dm), dm[0] // 35, dm[-1] // 35))
     print('%d of 24 rooms differ' % bad)
-    return 1 if bad else 0
+    print('%d floorpiece masks differ from renderroom' % badm)
+    return 1 if bad or badm else 0
 
 
 if __name__ == '__main__':

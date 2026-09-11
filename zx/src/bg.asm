@@ -123,15 +123,53 @@ bgd1:           and     0x7f
                 push    hl
                 call    frontrec        ; a front piece is worth remembering
                 pop     hl
-                ld      a, (imgh)       ; which has had A
+; Which of its rows land in the band.  The first stored row goes down on
+; YCO and the rest climb, so row k is on line YCO - k: the rows below the
+; band -- or below the screen -- are k < YCO - bottom, those above it
+; k > YCO - top.  Only the rows between are brought across and walked; the
+; rest used to be copied, and every one of them tested, for nothing.
+
+                push    hl              ; the piece's bytes
+                ld      a, (bandbot)
+                cp      192
+                jr      c, bgdhi
+                ld      a, 191
+bgdhi:          ld      b, a
+                ld      a, (yco)
+                sub     b
+                jr      nc, bgdk0
+                xor     a
+bgdk0:          ld      c, a            ; C = the first row that lands, k0
+                ld      a, (bandtop)
                 ld      b, a
+                ld      a, (yco)
+                sub     b               ; YCO - top: the last one, k1
+                jp      c, bgdnone      ; it all sits above the band
+                ld      b, a
+                ld      a, (imgh)
+                dec     a
+                cp      b
+                jr      nc, bgdk1
+                ld      b, a            ; or the piece's own last row
+bgdk1:          ld      a, b
+                sub     c
+                jp      c, bgdnone      ; it all sits below the band
+                inc     a
+                ld      (bgn), a        ; how many rows land
+                ld      a, (yco)
+                sub     c
+                ld      (bgrow), a      ; and the line the first goes on
+                ld      a, (imgw)       ; past the rows that do not
+                ld      e, a
+                ld      a, c
+                call    mul8
+                pop     de
+                add     hl, de
                 push    hl
-                ld      h, 0            ; how many bytes that is
-                ld      l, 0
-                ld      d, 0
-                ld      e, c
-bgdsize:        add     hl, de
-                djnz    bgdsize
+                ld      a, (imgw)       ; and the ones that do, across
+                ld      e, a
+                ld      a, (bgn)
+                call    mul8
                 ld      b, h
                 ld      c, l
                 pop     hl
@@ -158,27 +196,17 @@ bgdop:          add     a, a
                 ld      d, (hl)
                 ld      (bginner + 1), de
 
-; FASTLAY: the first stored row lands on YCO and the rest climb.
+; FASTLAY: the first stored row lands on YCO and the rest climb -- from the
+; first of them that lands, now.
 
-                ld      a, (yco)
-                ld      (bgrow), a
+                ld      a, (bgrow)
                 call    canvasrow       ; the rows are walked one at a time, so
                 ld      (bgcanp), hl    ; the address steps by forty instead of
                 ld      hl, imgbuf      ; being multiplied out for each of them
                 ld      (bgsrc), hl
-                ld      a, (imgh)
+                ld      a, (bgn)
                 ld      b, a
 bgrowloop:      push    bc
-                ld      a, (bgrow)
-                cp      192
-                jp      nc, bgrowskip
-                ld      hl, bandbot     ; a single block redraw only wants the
-                cp      (hl)            ; rows that can have changed; a whole
-                jr      z, bgband1      ; room asks for all of them
-                jp      nc, bgrowskip
-bgband1:        ld      hl, bandtop
-                cp      (hl)
-                jp      c, bgrowskip
                 ld      a, (bgmask)     ; into a mask, or into the picture
                 or      a
                 jp      nz, bgmaskrow
@@ -293,7 +321,28 @@ bgrowdown:      ld      hl, (bgcanp)    ; a row up is forty bytes back
                 jp      nz, bgrowloop
                 ret
 
+; Out here, not in the loops' way: bgmsta, the last of them, runs on into
+; bgrowskip, and with this in between a mask's first row was its only one.
+
+bgdnone:        pop     hl              ; none of it lands -- and the canvas
+                jp      page_canvas     ; is left in, as the full way leaves
+                                        ; it: the callers draw on after
+
+
 bgcanp:         dw      0               ; the canvas row the draw is on
+bgn:            db      0               ; how many of the piece's rows land
+
+; HL = A * E, both unsigned bytes.
+
+mul8:           ld      hl, 0
+                ld      d, h
+                ld      b, 8
+mul8l:          add     hl, hl
+                rla
+                jr      nc, mul8n
+                add     hl, de
+mul8n:          djnz    mul8l
+                ret
 
 bgpict:         dw      bgpand, bgpora, bgpsta, bgpxor
 bgmasks:        dw      bgmand, bgpora, bgmsta, bgmsta
