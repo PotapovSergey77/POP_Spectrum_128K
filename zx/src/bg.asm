@@ -2007,7 +2007,19 @@ rbleft:         dec     a
                 ld      a, (hl)
                 ld      (spreced), a
 
-rbxco:          ld      a, (blockcol)   ; four bytes to a block
+rbxco:          ld      a, (rbfrz)      ; the queue's pass: take the state
+                or      a               ; of the piece to the left -- a gate,
+                jr      z, rbx1         ; the exit -- or keep what was taken
+                dec     a
+                ld      a, (spreced)
+                jr      nz, rbxkeep
+                ld      (rqfrzv), a
+                jr      rbx0
+rbxkeep:        ld      a, (rqfrzv)
+                ld      (spreced), a
+rbx0:           xor     a
+                ld      (rbfrz), a
+rbx1:           ld      a, (blockcol)   ; four bytes to a block
                 add     a, a
                 add     a, a
                 ld      (xco), a
@@ -2818,8 +2830,23 @@ aogate:         ld      a, (trobst)
                 call    gatedrawn
                 ld      hl, agwas
                 cp      (hl)
-                jr      nz, aodone
-                xor     a               ; the bars are where they were
+                jr      z, agsame
+                jr      c, aglow        ; the lower of the two: the foot that
+                ld      a, (hl)         ; is further down, ay - (v + 1)
+aglow:          cp      12              ; near the floor it puts the floor back
+                jr      c, aostart0     ; under itself: from the bottom band
+                add     a, 4            ; else nothing below its foot changes,
+aostart:        rrca                    ; and the pass starts at the band the
+                rrca                    ; foot is in: dy - foot is v + 4
+                rrca
+                rrca
+                and     3
+                ld      (rqstart), a
+                jr      aodone
+aostart0:       xor     a
+                ld      (rqstart), a
+                jr      aodone
+agsame:         xor     a               ; the bars are where they were
                 ld      (redwant), a
                 jr      aodone
 
@@ -2834,8 +2861,15 @@ gdr1:           rrca
 agwas:          db      0
 aoplate:        call    animplate
                 jr      aodone
-aoexit:         call    animexit
-                jr      aodone
+aoexit:         ld      a, (trobst)     ; the door's height before, the
+                rrca                    ; lower: nothing below its foot
+                rrca                    ; changes
+                and     0x3f
+                push    af
+                call    animexit
+                pop     af
+                add     a, 17
+                jr      aostart
 aofloor:        call    animfloor
 
 aodone:         call    trobsave
@@ -2844,10 +2878,16 @@ aodone:         call    trobsave
                 ret     z               ; not, and a redraw is not cheap
                 ld      a, (aoid)
                 cp      BG_GATE
-                jp      z, redgate
-                cp      BG_EXIT
-                jp      z, redright
-                cp      BG_PRESSPLATE   ; a plate coming back up goes first too
+                jr      nz, aonotg
+                call    redgate
+                jr      aonostart
+aonotg:         cp      BG_EXIT
+                jr      nz, aonotx
+                call    redright
+aonostart:      xor     a
+                ld      (rqstart), a
+                ret
+aonotx:         cp      BG_PRESSPLATE   ; a plate coming back up goes first too
                 jr      z, aoprio
                 cp      BG_UPRESSPLATE
                 jr      nz, aoplain
@@ -3074,7 +3114,18 @@ rq_add:         ld      c, a
                 or      a
                 jr      z, rqa1
                 set     7, c
-rqa1:
+rqa1:           ld      a, (rqstart)    ; and the band it starts at: the step
+                and     3               ; it is on, and bits 4 and 5 to come
+                jr      z, rqa2         ; back to
+                rlca
+                rlca
+                ld      b, a
+                rlca
+                rlca
+                or      b
+                or      c
+                ld      c, a
+rqa2:
                 xor     a
                 ld      (redwide), a
                 ld      a, (rqn)
@@ -3097,14 +3148,54 @@ rqfind:         ld      a, (blockrow)   ; the same block already waiting?
                 xor     c
                 and     2
                 jr      nz, rqback
-                ld      a, c            ; keep any width, and going first
+                ld      a, (hl)         ; the start it has and the new one:
+                rrca                    ; it starts at the lower
+                rrca
+                rrca
+                rrca
+                and     3
+                ld      d, a
+                ld      a, c
+                rrca
+                rrca
+                rrca
+                rrca
+                and     3
+                cp      d
+                jr      nc, rqs0
+                ld      d, a
+rqs0:           ld      a, (hl)         ; under way: its step is past its start
+                rrca
+                rrca
+                xor     (hl)
+                and     0x0c
+                jr      nz, rqsway
+                ld      a, d            ; not yet: the start is its step too
+                rlca
+                rlca
+                ld      e, a
+                rlca
+                rlca
+                or      e
+                ld      e, a
+                ld      a, (hl)
+                and     0xc3
+                or      e
+                jr      rqsw1
+rqsway:         ld      a, d            ; under way: once more after it, from
+                rlca                    ; that start
+                rlca
+                rlca
+                rlca
+                ld      e, a
+                ld      a, (hl)
+                and     0xcf
+                or      e
+                or      0x40
+rqsw1:          ld      b, a
+                ld      a, c            ; and any width, and going first
                 and     0x81
-                or      (hl)
-                ld      b, a
-                and     0x0c            ; under way: once more after it
-                ld      a, b
-                jr      z, rqset
-                set     6, a
+                or      b
 rqset:          ld      (hl), a
                 dec     hl              ; and the taller band
                 ld      a, (redh)
@@ -3245,11 +3336,66 @@ rqgo:           call    rqtime
                 bit     1, a
                 ld      a, c
                 jr      nz, rqmaskgo
+
+; A pass is its bands, a frame or more apart, and a gate or the exit door
+; moves meanwhile: the bars came out a pixel out between one band and the
+; next.  So the height of what moves is taken at the pass's first band and
+; kept for the rest -- a pass shows one whole position, the latest when it
+; began -- unless another block's pass came in between.
+
+                ld      b, 1            ; take it
+                ld      a, (rqflags)
+                rrca
+                rrca
+                ld      hl, rqflags
+                xor     (hl)
+                and     0x0c            ; the step is past the start: keep what
+                jr      z, rqfrz1       ; was taken, if it was this block's
+                ld      a, (blockrow)
+                ld      hl, rqfrzr
+                cp      (hl)
+                jr      nz, rqfrz1
+                ld      a, (blockcol)
+                inc     hl
+                cp      (hl)
+                jr      nz, rqfrz1
+                inc     b
+rqfrz1:         ld      a, b
+                ld      (rbfrz), a
+                ld      a, (blockrow)
+                ld      (rqfrzr), a
+                ld      a, (blockcol)
+                ld      (rqfrzc), a
+                ld      a, c
                 call    rb_step         ; carry: another band to come
-                push    af
+                jr      c, rqmore
+
+; And only the whole pass goes to the screen, when its last band is in: one
+; rectangle from the band it started at up to the top, so the screen goes
+; from one whole position to the next and never shows the bars at two
+; heights at once while a pass is under way.
+
+                ld      a, (rbh)        ; the last band's top row
+                ld      b, a
+                ld      a, (rbbot)
+                sub     b
+                inc     a
+                ld      b, a
+                ld      a, (rqflags)    ; and the band the pass began at
+                rlca
+                rlca
+                rlca
+                rlca
+                and     0x30            ; sixteen rows to each
+                ld      c, a
+                ld      a, (dy)
+                sub     c
+                ld      (rbbot), a      ; its bottom
+                sub     b
+                inc     a
+                ld      (rbh), a        ; and all its rows
                 call    rq_showadd
-                pop     af
-                jr      nc, rqlast
+                jr      rqlast
 rqmore:         ld      hl, rqq + 3     ; on to its next step
                 ld      a, (hl)
                 add     a, 4
@@ -3261,9 +3407,45 @@ rqlast:         ld      hl, rqq + 3
                 bit     6, (hl)         ; moved again meanwhile: from the top
                 jr      z, rqdone
                 ld      a, (hl)
-                and     0x83            ; width, kind and going first are all
-                ld      (hl), a         ; it keeps
-                jp      rqloop
+                and     0xb3            ; width, kind, start and going first
+                ld      b, a            ; are all it keeps, and the step goes
+                rrca                    ; back to the start
+                rrca
+                and     0x0c
+                or      b
+                ld      (hl), a
+
+; And not in this frame: the pass just done goes to the screen next frame,
+; copied out of the room, and a first band of the next one drawn into the
+; room meanwhile went with it -- the bars at two heights after all.  It goes
+; to the back of the line as well, or a gate that keeps moving would keep
+; the head of it and nothing behind it would be drawn until it stopped.
+
+                ld      a, (rqn)
+                dec     a
+                ret     z
+                add     a, a
+                add     a, a
+                ld      c, a
+                ld      b, 0
+                push    bc
+                ld      hl, rqq
+                ld      de, rqtmp
+                ld      bc, 4
+                ldir
+                pop     bc
+                push    bc
+                ld      hl, rqq + 4
+                ld      de, rqq
+                ldir
+                pop     bc
+                ld      hl, rqq
+                add     hl, bc
+                ex      de, hl
+                ld      hl, rqtmp
+                ld      bc, 4
+                ldir
+                ret
 rqdone:         ld      a, (rqn)        ; off the head
                 dec     a
                 ld      (rqn), a
@@ -3387,6 +3569,11 @@ rqsh1:          push    bc
 rqn:            db      0               ; entries waiting
 rqflags:        db      0
 rqprio:         db      0               ; the next request goes first
+rqstart:        db      0               ; and the band it starts at
+rbfrz:          db      0               ; rb_setup: 1 take, 2 keep the state
+rqfrzv:         db      0               ; the state taken
+rqfrzr:         db      0               ; for this block
+rqfrzc:         db      0
 rqtmp:          ds      4               ; an entry, on its way up the line
 rqdid:          db      0               ; a step done this frame
 rqq:            ds      4 * RQMAX
@@ -3457,6 +3644,8 @@ rgnext:         call    page_bg         ; the room to its right, if there is
                 ld      (blockcol), a
 
 rgdraw:         call    rq_block
+                xor     a               ; the block above: from its bottom
+                ld      (rqstart), a
                 ld      a, (blockrow)
                 or      a
                 ret     z
