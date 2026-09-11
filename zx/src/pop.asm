@@ -321,8 +321,19 @@ nextrow:        ld      de, ROOM_BYTES - 32
 ; room itself, and the only parts of the working copy anything reads are the
 ; two rectangles the erases put the room back under anyway.
 
-camera:         ld      a, (cam)
-                ld      b, a
+camera:         ld      a, (vwstep)     ; the view asked for is made: take it
+                cp      VWDONE          ; now, and show_rect shows it at the
+                jr      nz, camlook     ; top of the next frame, drawn for it
+                ld      a, (vwcam)      ; by then
+                ld      (cam), a
+                xor     a
+                ld      (vwstep), a
+                inc     a
+                ld      (flipnow), a
+                ret
+camlook:        or      a               ; being made: nothing to decide
+                ret     nz
+                ld      a, (cam)
                 add     a, a
                 add     a, a
                 add     a, a
@@ -332,28 +343,45 @@ camera:         ld      a, (cam)
                 or      a
                 sbc     hl, de          ; where he stands on screen
                 bit     7, h
-                jr      nz, camback     ; off the left of it
+                jr      nz, camleft     ; off the left of it
                 ld      a, h
                 or      a
-                jr      nz, camfwd      ; and off the right
+                jr      nz, camright    ; and off the right
                 ld      a, l
                 cp      160
-                jr      nc, camfwd
+                jr      nc, camright
                 cp      96
                 ret     nc
-camback:        ld      a, b
-                or      a
+
+; The whole of the way, not a step: a view takes some frames to make, and a
+; step at a time would leave him running off the edge of the old one while
+; the next was made.  The view is only three bytes wider than the screen.
+
+camleft:        xor     a
+                jr      cammove
+camright:       ld      a, CAM_MAX
+cammove:        ld      hl, cam
+                cp      (hl)
                 ret     z
-                dec     b
-                jr      camset
+                ld      (vwcam), a      ; and that view made, behind
+                ld      a, 1
+                ld      (vwstep), a
+                ret
 
 ; And on the way into a room, straight to the value it would settle at: he
 ; arrives at the far side of it, and a view that started over would be seen
 ; scrolling across to find him.
 
-camhome:        ld      hl, (charx)     ; the first step that brings him
-                ld      de, 152         ; under 160, which is where the camera
-                or      a               ; would come to rest by itself
+camhome:        call    camtarget
+                ld      (cam), a
+                ret
+
+; A = where the view comes to rest round him: the first step that brings him
+; under 160.
+
+camtarget:      ld      hl, (charx)
+                ld      de, 152
+                or      a
                 sbc     hl, de
                 bit     7, h
                 jr      nz, chzero
@@ -365,21 +393,84 @@ camhome:        ld      hl, (charx)     ; the first step that brings him
                 srl     a
                 srl     a               ; eight pixels to the step
                 cp      CAM_MAX
-                jr      c, chset
+                ret     c
 chmax:          ld      a, CAM_MAX
-                jr      chset
+                ret
 chzero:         xor     a
-chset:          ld      (cam), a
                 ret
-camfwd:         ld      a, b
-                cp      CAM_MAX
-                ret     nc
-                inc     b
-camset:         ld      a, b
+
+; ---------------------------------------------------------------- a new view
+;
+; A step of making the view the camera is going to: the colours first, then
+; the room's rows VWROWS at a time, into the screen not shown.  The steps go
+; at the end of a frame as the redraw queue's do, and the queue waits for
+; them -- the room must not change under a copy of it.  When the last is
+; done camera takes the view, and show_rect turns the screens round at the
+; top of the frame after, with him drawn into it by then.
+
+VWROWS          equ     16
+VWDONE          equ     2 + 192 / VWROWS
+
+vw_step:        ld      a, (cam)        ; worked out for the view it will be
+                push    af
+                ld      a, (vwcam)
                 ld      (cam), a
-                ld      a, 1
-                ld      (fullshow), a
-                ret
+                ld      a, (vwstep)
+                dec     a
+                jr      nz, vwrows
+                ld      a, (scrsel + 1) ; the colours, in the screen not shown
+                or      a
+                ld      hl, SCREEN + 6144
+                jr      nz, vwattr
+                ld      a, BANK_CANVAS
+                call    pageset
+                ld      hl, 0xC000 + 6144
+vwattr:         call    set_attrs_at
+                jr      vwnext
+vwrows:         dec     a               ; sixteen rows a step
+                add     a, a
+                add     a, a
+                add     a, a
+                add     a, a
+                ld      (rowy), a
+                call    page_art
+                ld      a, (rowy)
+                call    roomwin
+                ld      (roomp), hl
+                ld      b, VWROWS
+vwrow:          push    bc
+                ld      e, 0
+                ld      a, (rowy)
+                call    scraddr         ; the row on the screen
+                ld      a, (scrsel + 1)
+                or      a
+                jr      z, vwbounce
+                ex      de, hl          ; bank 7 shown: into bank 5, straight
+                ld      hl, (roomp)
+                call    copy32
+                call    nextrow
+                jr      vwrnext
+vwbounce:       push    hl              ; bank 5 shown: the room and bank 7
+                ld      hl, (roomp)     ; both want the window, so the row
+                ld      de, imgbuf      ; goes through a buffer down here
+                call    copy32
+                call    nextrow
+                ld      a, BANK_CANVAS
+                call    pageset
+                pop     de
+                ld      a, d
+                or      0x80
+                ld      d, a
+                ld      hl, imgbuf
+                call    copy32
+                call    page_art
+vwrnext:        pop     bc
+                djnz    vwrow
+vwnext:         pop     af
+                ld      (cam), a
+                ld      hl, vwstep
+                inc     (hl)
+                jp      page_art
 
 ; Every bank is signed at its end, and a red border says one did not arrive:
 ; a black screen leaves nothing to go on.
@@ -429,6 +520,25 @@ badload:        ld      a, 2
                 out     (254), a
                 jr      badload
 
+; Which screen the ULA shows: bank 5, the ordinary one at 0x4000, or bank 7,
+; the 128's second.  A new view is made in the one not shown and shown with
+; a single OUT, so a scroll is never seen being drawn.  What is kept is what
+; the show loop ORs into a screen address's high byte -- 0x80 moves 0x4000 to
+; 0xC000, where bank 7 is when it is paged to be written -- and the port's
+; bit 3 comes out of that; every page after keeps it.
+
+flip:           ld      a, (scrsel + 1)
+                xor     0x80
+setvis:         ld      (scrsel + 1), a
+                rrca                    ; 0x80 is bit 3, four places down
+                rrca
+                rrca
+                rrca
+                or      0x10            ; and the 48K ROM, as always
+                ld      (pgbits + 1), a
+                ld      a, (nowbank)
+                jr      pageset
+
 page_art:       ld      a, (artbank)
                 jr      pageset
 
@@ -441,7 +551,7 @@ page_frame:     ld      a, (curbank)
                 add     hl, de
                 ld      a, (hl)
 pageset:        ld      (nowbank), a    ; so a lookup that has to borrow
-                or      0x10            ; another bank can put this one back
+pgbits:         or      0x10            ; another bank can put this one back
                                         ; bit 4 keeps the 48K ROM, which is
                 push    bc              ; what the handler at 0x38 is.  By now
                 ld      bc, PAGEPORT    ; BASIC is gone and BANKM with it
@@ -2265,7 +2375,10 @@ flvw:           db      0               ; the flame's bytes that are in view
 ; the window is simply copied out -- again when the view moves.
 
 set_attrs:      ld      hl, SCREEN + 6144
-                ld      de, SCREEN + 6145
+set_attrs_at:   ld      (atbase), hl    ; or the other screen's, for a view
+                ld      d, h            ; being made in it
+                ld      e, l
+                inc     de
                 ld      bc, 767
                 ld      (hl), INK_ROOM
                 ldir
@@ -2343,7 +2456,7 @@ sarc:           ld      a, (hl)
                 add     hl, hl
                 add     hl, hl
                 add     hl, hl
-                ld      bc, SCREEN + 6144
+                ld      bc, (atbase)
                 add     hl, bc
                 ld      a, (sacol)
                 ld      c, a
@@ -3652,9 +3765,14 @@ mastercol:      ld      b, a
 ; not from the working copy, which is only right where he has been.  His own
 ; rectangle follows out of the working copy, as always.
 
-show_rect:      ld      a, (fullshow)
+show_rect:      ld      hl, flipnow     ; the view made behind is ready:
+                ld      a, (hl)         ; turned round now, while the beam is
+                ld      (hl), 0         ; still in the border
                 or      a
-                jr      z, showpart
+                call    nz, flip
+                ld      a, (fullshow)
+                or      a
+                jr      z, showmine
 
 ; The view has moved and the whole screen is being redrawn from the room --
 ; six kilobytes, which is longer than the beam takes to cross the screen, so
@@ -3684,7 +3802,17 @@ fsrow:          push    bc
                 pop     bc
                 djnz    fsrow
                 call    set_attrs       ; the colour slides with the view
+                xor     a               ; painted into bank 5, so bank 5 is
+                ld      (vwstep), a     ; the one to show -- and a view being
+                call    setvis          ; made anywhere is made over
                 jp      show_flames
+
+; The rectangles go to whichever screen is shown, bank 7 paged in case it is.
+
+showmine:       ld      a, BANK_CANVAS
+                call    pageset
+                call    showpart
+                jp      page_art
 
 ; In: HL = the screen address of column zero on this row.  Puts down the part
 ; of the sprite that falls on it, if any.
@@ -3765,7 +3893,9 @@ showgo:         ld      a, (shw)        ; none of him on screen: LDIR would
                 ld      a, c
                 call    scraddr
 showrow:        push    hl
-                ld      d, h            ; DE = screen
+                ld      a, h            ; DE = the screen shown: 0x80 up when
+scrsel:         or      0               ; that is bank 7
+                ld      d, a
                 ld      e, l
                 ld      a, h            ; HL = working copy, the same place
                 add     a, (work - SCREEN) / 256        ; a whole number
@@ -4074,6 +4204,10 @@ cdbelow:        ds      10
 
 cam:            db      0               ; the view's left edge, in bytes
 fullshow:       db      0
+vwstep:         db      0               ; the next step of a view, VWDONE made
+vwcam:          db      0               ; and the camera it is made for
+flipnow:        db      0               ; show it at the top of the next frame
+atbase:         dw      0               ; the colours set_attrs writes
 masterc:        db      0
 coverm:         dw      0
 coverb:         dw      0

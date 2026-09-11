@@ -2490,13 +2490,17 @@ nrright:        ld      a, (links + 1)
 ; working, and the new room arrives whole when it is ready.
 
 nrgo:           xor     a               ; nothing of the last room's still
-                ld      (rqn), a        ; to be drawn, nor to be shown
-                ld      (rqsn), a
+                ld      (rqn), a        ; to be drawn, nor to be shown, nor
+                ld      (rqsn), a       ; a view of it made
+                ld      (vwstep), a
+                ld      (flipnow), a
                 ld      hl, SCREEN
                 ld      de, SCREEN + 1
                 ld      bc, 6143
                 ld      (hl), 0
                 ldir
+                xor     a               ; and that black shown, whichever
+                call    setvis          ; screen was
                 call    newroom         ; the room and everything about it
                 call    readlinks
                 call    camhome         ; the view is already where he is
@@ -3747,8 +3751,10 @@ rqnext:         inc     hl
 rqnew:          ld      a, (rqn)
                 cp      RQMAX
                 jr      c, rqput
-                ld      a, c            ; full, which a frame never fills: do
-                and     1               ; it now, the old way
+                xor     a               ; full, which a frame never fills: do
+                ld      (vwstep), a     ; it now, the old way -- and a view
+                ld      a, c            ; being made of the room is made over
+                and     1
                 ld      (redwide), a
                 bit     1, c
                 jp      nz, maskblock
@@ -3775,21 +3781,22 @@ rqput:          ld      l, a
 
 ; Once a frame, at its end: as much of the queue as the clock allows.
 
-rq_run:         xor     a               ; the first step of a frame goes
-                ld      (rqdid), a      ; whatever the clock says: on the
-rqloop:         ld      a, (rqn)        ; machine a frame's own work ends in
-                or      a               ; its third period more often than
-                ret     z               ; not, and waiting for the second
-                ld      a, (rqdid)      ; drew nothing at all -- no plate went
-                or      a               ; down, no gate went up
-                jr      z, rqhead
-                ld      a, (FRAMES)     ; into the third period already: the
-                ld      hl, frstart     ; next frame begins before another
-                sub     (hl)            ; step could end
-                cp      2
-                ret     nc
-rqhead:         ld      a, 1
+rq_run:         xor     a
                 ld      (rqdid), a
+rqloop:         ld      a, (vwstep)     ; a view being made comes first, and
+                or      a               ; nothing goes into the room until it
+                jr      z, rqqueue      ; is on the screen: the room is what
+                cp      VWDONE          ; it is copied from
+                ret     z
+                call    rqtime
+                ret     nc
+                call    vw_step
+                jr      rqloop
+rqqueue:        ld      a, (rqn)
+                or      a
+                ret     z
+                call    rqtime
+                ret     nc
                 ld      hl, rqq         ; the head, in hand
                 ld      a, (hl)
                 ld      (blockrow), a
@@ -3844,6 +3851,25 @@ rqdone:         ld      a, (rqn)        ; off the head
                 ld      de, rqq
                 ldir
                 jp      rqloop
+
+; Carry: a step may begin.  The first of a frame goes whatever the clock
+; says: on the machine a frame's own work ends in its third period more
+; often than not, and waiting for the second drew nothing at all -- no plate
+; went down, no gate went up.  The rest only while the frame is in the first
+; two of its three periods: the next begins before another could end.
+
+rqtime:         ld      a, (rqdid)
+                or      a
+                jr      z, rqt1
+                ld      a, (FRAMES)
+                ld      hl, frstart
+                sub     (hl)
+                cp      2
+                ret
+rqt1:           inc     a
+                ld      (rqdid), a
+                scf
+                ret
 
 ; A block that has gone back into the room still has to reach the working
 ; copy, and at the end of a frame he has just been drawn into it: the room

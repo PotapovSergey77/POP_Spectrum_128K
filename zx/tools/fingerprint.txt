@@ -12,16 +12,16 @@ walk left 11 470 14 16 6 40
 walk left 12 373 13 17 5 39
 walk left 13 410 12 18 5 38
 walk left 14 435 11 16 6 40
-walk left 15 391 11 16 6 40
-walk left 16 315 12 17 4 39
-walk left 17 333 11 17 5 39
-walk left 18 379 9 16 6 40
-walk left 19 329 9 24 6 35
-walk left 20 356 9 29 5 36
-walk left 21 401 9 39 5 35
-walk left 22 479 9 48 5 38
-walk left 23 509 9 68 4 36
-walk left 24 514 9 83 4 36
+walk left 15 391 10 16 6 40
+walk left 16 315 10 17 4 39
+walk left 17 333 9 17 5 39
+walk left 18 379 7 16 6 40
+walk left 19 329 7 24 6 35
+walk left 20 356 7 29 5 36
+walk left 21 401 7 39 5 35
+walk left 22 479 7 48 5 38
+walk left 23 509 7 68 4 36
+walk left 24 514 7 83 4 36
 walk left 25 476 9 90 4 29
 walk left 26 420 9 96 4 23
 walk left 27 361 9 100 4 19
@@ -44,12 +44,12 @@ walk left 43 515 7 81 5 38
 walk right 1 0 0 0 0 0
 walk right 2 260 19 15 3 41
 walk right 3 272 18 17 3 39
-walk right 4 310 17 17 3 39
-walk right 5 380 17 16 4 40
-walk right 6 393 17 16 4 40
-walk right 7 274 18 15 3 41
-walk right 8 302 17 15 4 41
-walk right 9 364 17 16 4 40
+walk right 4 310 18 17 3 39
+walk right 5 380 18 16 4 40
+walk right 6 393 18 16 4 40
+walk right 7 274 19 15 3 41
+walk right 8 302 18 15 4 41
+walk right 9 364 18 16 4 40
 walk right 10 378 17 17 4 39
 walk right 11 392 17 18 5 38
 walk right 12 338 18 18 5 38
@@ -114,16 +114,16 @@ fall 11 470 14 16 6 40
 fall 12 373 13 17 5 39
 fall 13 410 12 18 5 38
 fall 14 435 11 16 6 40
-fall 15 391 11 16 6 40
-fall 16 315 12 17 4 39
-fall 17 333 11 17 5 39
-fall 18 379 9 16 6 40
-fall 19 329 9 24 6 35
-fall 20 356 9 29 5 36
-fall 21 401 9 39 5 35
-fall 22 479 9 48 5 38
-fall 23 509 9 68 4 36
-fall 24 514 9 83 4 36
+fall 15 391 10 16 6 40
+fall 16 315 10 17 4 39
+fall 17 333 9 17 5 39
+fall 18 379 7 16 6 40
+fall 19 329 7 24 6 35
+fall 20 356 7 29 5 36
+fall 21 401 7 39 5 35
+fall 22 479 7 48 5 38
+fall 23 509 7 68 4 36
+fall 24 514 7 83 4 36
 fall 25 476 9 90 4 29
 fall 26 420 9 96 4 23
 fall 27 361 9 100 4 19
