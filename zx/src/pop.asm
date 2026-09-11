@@ -2421,24 +2421,31 @@ flgot:          ld      a, (nowbank)    ; the flames are in the background
                 call    flvis
                 or      a
                 ret     z
-                ld      (flvw), a
-                ld      a, (flrect)     ; the camera says where that lands
+
+; The flame's three bytes of mask are the same on every one of its rows, so
+; they go into the three ANDs below; its pixels are walked in the alternate
+; HL, and the room and the working copy are worked out at its top row and
+; walked from there.  With all four kept in memory and every row's
+; addresses worked out afresh, two torches were a fifth of a frame.
+
+                ld      (flwid + 1), a  ; the bytes the view shows
                 ld      b, a
-                ld      a, (cam)
-                neg
-                add     a, b
-                ld      (linecol), a
-                call    startrows
-                ld      a, (flrect + 1)
-                ld      (rowy), a
-                ld      a, (flrect + 3)
-                ld      b, a
-flrow:          push    bc
-                call    line_addr       ; the working copy on this row
-                ld      de, work - SCREEN
-                add     hl, de
-                ld      (flwork), hl
-                ld      a, (rowy)       ; and the room under it
+                ld      a, (flrect + 2)
+                sub     b
+                ld      (flskp + 1), a  ; and those it cut off, past each row
+                ld      hl, (flmbase)
+                ld      a, (hl)         ; what the room keeps: not the mask
+                cpl
+                ld      (flm0 + 1), a
+                inc     hl
+                ld      a, (hl)
+                cpl
+                ld      (flm1 + 1), a
+                inc     hl
+                ld      a, (hl)
+                cpl
+                ld      (flm2 + 1), a
+                ld      a, (flrect + 1) ; the room at its top row
                 call    mul35
                 ld      de, room
                 add     hl, de
@@ -2447,42 +2454,65 @@ flrow:          push    bc
                 ld      d, 0
                 add     hl, de
                 ld      (flroom), hl
-                ld      hl, (flmbase)   ; the mask starts again each row
-                ld      (flmask), hl
-                ld      a, (flvw)
-                ld      b, a
-flbyte:         push    bc
-                ld      hl, (flsrc)     ; the flame's own pixels
-                ld      a, (hl)
-                inc     hl
-                ld      (flsrc), hl
-                ld      c, a
-                ld      hl, (flmask)    ; which of them are its own
-                ld      a, (hl)
-                inc     hl
-                ld      (flmask), hl
-                cpl
-                ld      hl, (flroom)    ; the room shows through the rest
-                and     (hl)
-                inc     hl
-                ld      (flroom), hl
-                or      c
-                ld      hl, (flwork)
-                ld      (hl), a
-                inc     hl
-                ld      (flwork), hl
-                pop     bc
-                djnz    flbyte
-                ld      a, (flrect + 2) ; past what the view cut off
-                ld      hl, flvw
-                sub     (hl)
+                ld      a, (flrect)     ; and the working copy, the camera
+                ld      b, a            ; saying where that lands
+                ld      a, (cam)
+                neg
+                add     a, b
                 ld      e, a
-                ld      d, 0
-                ld      hl, (flsrc)
+                ld      a, (flrect + 1)
+                call    scraddr
+                ld      de, work - SCREEN
                 add     hl, de
-                ld      (flsrc), hl
-                ld      hl, rowy
-                inc     (hl)
+                ld      (flwork), hl
+                ld      hl, flbuf
+                exx
+                ld      a, (flrect + 3)
+                ld      b, a
+flrow:          push    bc
+                ld      de, (flwork)
+                ld      hl, (flroom)
+flwid:          ld      c, 0            ; patched: the bytes shown
+flm0:           ld      a, 0xff         ; patched: what the room keeps
+                and     (hl)
+                exx
+                or      (hl)            ; and the flame's own pixels
+                inc     hl
+                exx
+                ld      (de), a
+                inc     hl
+                inc     e               ; a screen row never crosses a page
+                dec     c
+                jr      z, flrend
+flm1:           ld      a, 0xff
+                and     (hl)
+                exx
+                or      (hl)
+                inc     hl
+                exx
+                ld      (de), a
+                inc     hl
+                inc     e
+                dec     c
+                jr      z, flrend
+flm2:           ld      a, 0xff
+                and     (hl)
+                exx
+                or      (hl)
+                inc     hl
+                exx
+                ld      (de), a
+flrend:         exx                     ; past what the view cut off
+flskp:          ld      bc, 0           ; patched
+                add     hl, bc
+                exx
+                ld      hl, (flroom)    ; and a row down, in the room and in
+                ld      de, ROOM_BYTES  ; the working copy
+                add     hl, de
+                ld      (flroom), hl
+                ld      hl, (flwork)
+                call    nextline
+                ld      (flwork), hl
                 pop     bc
                 djnz    flrow
                 ret
