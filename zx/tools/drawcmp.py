@@ -84,8 +84,9 @@ def main(argv):
                 print('%r: one of them did not come back' % (k,))
                 bad += 1
             continue
-        if a[k][3] == 0 or a[k][4] == 0:    # no picture: the old loop went
-            continue                        # round 256 times on garbage
+        if a[k][3] == 0 or b[k][4] == 0:    # no picture: the old loop went
+            continue                        # round 256 times on garbage,
+                                            # its own curh with them
         if a[k][0] != b[k][0]:
             print('%r: rectangle %r against %r' % (k, a[k][0], b[k][0]))
             bad += 1

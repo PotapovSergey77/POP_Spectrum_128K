@@ -3399,76 +3399,84 @@ cover_rows:     ld      a, (neww)       ; likewise: djnz would go round
                 ld      (masterc), a
                 ld      a, (newh)
                 ld      b, a
-                ld      a, (newcol)
-                ld      (linecol), a
                 ld      a, (newtop)
                 ld      (rowy), a
-                call    startrows
+
+; Most of his rows have nothing of the mask on them, so the band is asked
+; first and the three addresses are worked out only for a row that has.
+
 coverrow:       push    bc
                 ld      a, (rowy)
                 cp      192
-                jr      nc, coverblank
-                call    room_addr       ; both walk on whatever the mask says
-                push    hl
-                call    line_addr
-                ld      a, (rowy)
+                jr      nc, covernxt
                 ld      l, a
                 ld      h, 0
                 ld      de, (coverb)
                 add     hl, de
                 ld      a, (hl)
                 inc     a
-                jr      z, coverpop     ; the mask has nothing on this row
+                jr      z, covernxt     ; the mask has nothing on this row
                 dec     a
                 call    mul35
                 ld      de, (coverm)
-                add     hl, de
-                ld      a, (masterc)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
+                call    covercol
                 push    hl              ; the mask's row
-                ld      hl, (rowptr)
+                ld      a, (rowy)
+                call    mul35
+                ld      de, room
+                call    covercol
+                push    hl              ; the room's
+                ld      a, (newcol)
+                ld      e, a
+                ld      a, (rowy)
+                call    scraddr
                 ld      de, work - SCREEN
                 add     hl, de
-                ld      (workp), hl     ; the working copy
-                pop     hl              ; the mask
+                push    hl              ; the working copy, into the
+                exx                     ; alternate DE
+                pop     de
+                exx
                 pop     de              ; the room
+                pop     hl              ; the mask
                 ld      a, (neww)
                 ld      b, a
                 call    cover_apply
-                jr      covernxt
-coverpop:       pop     hl
-                jr      covernxt
-coverblank:     call    startrows
 covernxt:       ld      hl, rowy
                 inc     (hl)
                 pop     bc
                 djnz    coverrow
                 ret
 
-; In: HL = mask, DE = room, (workp) = working copy, B = bytes.
+covercol:       add     hl, de          ; HL = a row, DE its base: the byte
+                ld      a, (masterc)    ; under his left edge
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ret
+
+; In: HL = mask, DE = room, the alternate DE = working copy, B = bytes.
+; Where the mask has a bit the room's goes in, and elsewhere his stays:
+; work ^ ((work ^ room) & mask).
 
 cover_apply:    ld      a, (hl)
                 or      a
                 jr      z, covernext
-                ld      c, a
-                push    hl
-                ld      hl, (workp)
-                cpl
-                and     (hl)            ; what the prince may keep
-                ld      (hl), a
                 ld      a, (de)
-                and     c               ; and the piece's own pixels
-                or      (hl)
+                exx
+                ex      de, hl
+                xor     (hl)
+                exx
+                and     (hl)
+                exx
+                xor     (hl)
                 ld      (hl), a
-                pop     hl
+                ex      de, hl
+                exx
 covernext:      inc     hl
                 inc     de
-                push    hl
-                ld      hl, workp       ; a screen row never crosses a page
-                inc     (hl)
-                pop     hl
+                exx
+                inc     e               ; a screen row never crosses a page
+                exx
                 djnz    cover_apply
                 ret
 
@@ -3496,37 +3504,86 @@ eraseset:       ld      de, ercol       ; col, top, width, height, in order
                 ld      a, (erw)
                 or      a
                 ret     z
-                ld      a, (ercol)      ; mastercol has B, so it goes first
-                call    mastercol
-                ld      (masterc), a
-                ld      a, (ertop)
-                ld      (rowy), a
+                ld      (erwid + 1), a
                 ld      a, (erh)
+                or      a
+                ret     z
                 ld      b, a
+                ld      a, (ertop)
+                call    cliprows
+                ret     c
+                call    rowcount
+                ld      a, c            ; the room's row, under the view
+                call    mul35
+                ld      de, room
+                add     hl, de
                 ld      a, (ercol)
-                ld      (linecol), a
-                call    startrows
-eraserow:       push    bc
-                ld      a, (rowy)
-                cp      192
-                jr      nc, eraseskip
-                call    room_addr
+                call    mastercol
+                ld      e, a
+                ld      d, 0
+                add     hl, de
                 push    hl
-                call    line_addr
+                ld      a, (ercol)      ; and the working copy's
+                ld      e, a
+                ld      a, c
+                call    scraddr
                 ld      de, work - SCREEN
                 add     hl, de
                 ex      de, hl
-                pop     hl              ; HL = room, DE = working copy
-                ld      a, (erw)
-                ld      c, a
+                pop     hl
+eraserow:       push    hl
+                push    de
                 ld      b, 0
+erwid:          ld      c, 0            ; patched with the width
                 ldir
-                jr      erasenext
-eraseskip:      call    startrows       ; off the screen: begin again below it
-erasenext:      ld      hl, rowy
-                inc     (hl)
-                pop     bc
-                djnz    eraserow
+                pop     hl              ; the working copy walks as the screen
+                call    nextline        ; does: it is the screen, moved up
+                ex      de, hl
+                pop     hl
+                ld      bc, ROOM_BYTES
+                add     hl, bc
+                exx
+                dec     b
+                exx
+                jr      nz, eraserow
+                ret
+
+; The rows of a rectangle that are on the screen.  A top of 192 or more is
+; above it -- he is drawn from his feet up, and his head can be over the
+; top -- and a band can run past the foot of it.
+;
+; In: A = the top row, B = rows.  Out: carry when none are on it; otherwise
+; C = the first on it, B = how many.
+
+cliprows:       cp      192
+                jr      c, crbot
+                neg                     ; this many above the screen
+                cp      b
+                ccf
+                ret     c
+                ld      c, a
+                ld      a, b
+                sub     c
+                ld      b, a
+                xor     a
+crbot:          ld      c, a
+                add     a, b
+                jr      c, crcut
+                cp      193
+                jr      c, crfit
+crcut:          ld      a, 192
+                sub     c
+                ld      b, a
+crfit:          or      a
+                ret
+
+; The row count goes into the alternate B, which the tight loops count on,
+; so that the whole of BC is theirs for LDIR.
+
+rowcount:       ld      a, b
+                exx
+                ld      b, a
+                exx
                 ret
 
 startrows:      ld      hl, 0
@@ -3570,27 +3627,6 @@ lafirst:        ld      a, (linecol)
                 ld      a, (rowy)
                 call    scraddr
                 ld      (rowptr), hl
-                ret
-
-; The same for the room, whose rows are plain.  In: (masterc).
-
-room_addr:      ld      hl, (roomp)
-                ld      a, h
-                or      l
-                jr      z, rafirst
-                ld      de, ROOM_BYTES
-                add     hl, de
-                ld      (roomp), hl
-                ret
-rafirst:        ld      a, (rowy)
-                call    mul35
-                ld      de, room
-                add     hl, de
-                ld      a, (masterc)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                ld      (roomp), hl
                 ret
 
 ; A screen byte column, and which byte of the room the camera puts under it.
@@ -3708,34 +3744,34 @@ show_one:       ld      de, shcol       ; col, top, width, height, in order
 showgo:         ld      a, (shw)        ; none of him on screen: LDIR would
                 or      a               ; read a width of zero as 65536 and
                 ret     z               ; take the stack with it
+                ld      (shwid + 1), a
                 ld      a, (shh)
                 or      a
                 ret     z
                 ld      b, a            ; B is the row count, not the width
                 ld      a, (shtop)
-                ld      (rowy), a
+                call    cliprows
+                ret     c
+                call    rowcount
                 ld      a, (shcol)
-                ld      (linecol), a
-                call    startrows
-showrow:        push    bc
-                ld      a, (rowy)
-                cp      192
-                jr      nc, showskip
-                call    line_addr
-                ld      d, h
-                ld      e, l            ; DE = screen
-                ld      bc, work - SCREEN
-                add     hl, bc          ; HL = working copy
-                ld      a, (shw)
-                ld      c, a
+                ld      e, a
+                ld      a, c
+                call    scraddr
+showrow:        push    hl
+                ld      d, h            ; DE = screen
+                ld      e, l
+                ld      a, h            ; HL = working copy, the same place
+                add     a, (work - SCREEN) / 256        ; a whole number
+                ld      h, a                            ; of pages up
                 ld      b, 0
+shwid:          ld      c, 0            ; patched with the width
                 ldir
-                jr      shownext
-showskip:       call    startrows
-shownext:       ld      hl, rowy
-                inc     (hl)
-                pop     bc
-                djnz    showrow
+                pop     hl
+                call    nextline
+                exx
+                dec     b
+                exx
+                jr      nz, showrow
                 ret
 
 ; A block that has just been redrawn, from the room to the working copy and
