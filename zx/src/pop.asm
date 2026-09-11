@@ -192,6 +192,7 @@ mainrun:        ld      a, (FRAMES)
                 call    checkpress
                 call    shakeloose
                 call    animtrans
+                call    rq_run          ; as much of the redrawing as fits
                 call    draw_prince
                 call    page_art
                 call    hide_floor
