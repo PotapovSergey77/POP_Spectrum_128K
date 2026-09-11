@@ -436,16 +436,28 @@ vb2:            rrca
                 ret
 
 ; What is left of a frame after the queue: the view ahead, a row at a time,
-; right up to the interrupt that starts the next frame.  A row is short
-; enough that the frame can begin the moment it is done, with the beam still
-; in the border, instead of waiting at the halt for the interrupt after.  A
-; frame that had overrun already keeps the halt, as ever.
+; right up to the interrupt the next frame starts on.  A row is short enough
+; that the frame can begin the moment it is done, with the beam still in the
+; border, instead of waiting at the halt.  That is the third interrupt; a
+; frame that has overrun it will start on the next one whatever happens, so
+; the view has until then.  And VWMIN rows go whatever the clock says: on a
+; machine slower than this one a frame had nothing left over, and the view
+; never moved at all.  So few rows are over before the beam leaves the
+; border even when they begin just ahead of the interrupt.
+
+VWMIN           equ     6
 
 vw_fill:        ld      a, (vwcam)
                 inc     a
                 ret     z               ; no view in hand
-                call    vwtime
-                ret     nc
+                call    vwdue
+                cp      FRAME_WAIT
+                jr      nc, vwgoal
+                ld      a, FRAME_WAIT - 1
+vwgoal:         inc     a
+                ld      (vwstop), a
+                ld      a, VWMIN
+                ld      (vwmin), a
 vwf1:           ld      a, (vwatt)
                 or      a
                 jr      nz, vwfatt
@@ -454,18 +466,23 @@ vwf1:           ld      a, (vwatt)
                 call    vw_row
                 jr      vwf2
 vwfatt:         call    vw_attrs
-vwf2:           call    vwtime
+vwf2:           ld      hl, vwmin       ; the rows it has whatever happens
+                dec     (hl)
+                jp      p, vwf1
+                inc     (hl)
+                call    vwdue
+                ld      hl, vwstop
+                cp      (hl)
                 jr      c, vwf1
                 ld      a, 1            ; the frame is due: it starts now
                 ld      (nohalt), a
                 ret
 
-; Carry: the next frame is not due yet.
+; A = the interrupts since the frame began.
 
-vwtime:         ld      a, (FRAMES)
+vwdue:          ld      a, (FRAMES)
                 ld      hl, frstart
                 sub     (hl)
-                cp      FRAME_WAIT
                 ret
 
 ; The colours, in the screen not shown.  set_attrs works them out for the
@@ -4237,6 +4254,8 @@ vwatt:          db      0               ; its colours still to do
 vwrow:          db      0               ; where to look for its next row
 flipnow:        db      0               ; show it at the top of the next frame
 nohalt:         db      0               ; the fill ran up to the interrupt
+vwstop:         db      0               ; the one it runs up to
+vwmin:          db      0               ; rows still owed it this frame
 atbase:         dw      0               ; the colours set_attrs writes
 masterc:        db      0
 coverm:         dw      0

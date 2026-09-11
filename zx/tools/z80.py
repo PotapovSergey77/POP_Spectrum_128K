@@ -48,6 +48,27 @@ class Z80:
         # memory contention a real 128K has and this core does not model.
         import os
         self.slow = float(os.environ.get('POP_SLOW', '1.0'))
+        # POP_CONTEND models the 128K's contention itself: while the ULA
+        # fetches the picture, an access to 0x4000-0x7FFF, or to the window
+        # with an odd bank in it, waits for the ULA -- 6, 5, 4, 3, 2, 1, 0, 0
+        # T by where in its eight it falls, from T 14361 of the frame, for
+        # the first 128 T of each of the 192 lines.  An instruction's
+        # accesses are taken three T apart, which is near enough.  The code
+        # from 0x6000 to 0x7FFF runs in contended memory, and a uniform
+        # stretch was far too kind to it.
+        # POP_CONTEND=plus3 is the +2A and +3 instead: banks 4 to 7 are the
+        # slow ones there -- the room's among them -- and the pattern is
+        # 1, 0, 7, 6, 5, 4, 3, 2 from T 14365.
+        self._acc = 0
+        mode = os.environ.get('POP_CONTEND', '')
+        if mode:
+            self.rb = self._rb_c
+            self.wb = self._wb_c
+        if mode == 'plus3':
+            self._cbanks, self._cfirst = (4, 5, 6, 7), 14365
+            self.CONT = (1, 0, 7, 6, 5, 4, 3, 2)
+        else:
+            self._cbanks, self._cfirst = (1, 3, 5, 7), 14361
         self.halted_now = False
         self.cycles = 0
         self.ports = {}          # port -> value returned by IN
@@ -123,6 +144,28 @@ class Z80:
 
     def wb(self, addr, val):
         self.mem[addr & 0xffff] = val & 0xff
+
+    CONT = (6, 5, 4, 3, 2, 1, 0, 0)
+
+    def _contend(self, addr):
+        t = self.cycles + self._acc
+        self._acc += 3
+        if 0x4000 <= addr < 0x8000 or (addr >= 0xC000 and self.page in self._cbanks):
+            t = t % FRAME_TSTATES - self._cfirst
+            if 0 <= t < 192 * 228:
+                lt = t % 228
+                if lt < 128:
+                    self.cycles += self.CONT[lt & 7]
+
+    def _rb_c(self, addr):
+        addr &= 0xffff
+        self._contend(addr)
+        return self.mem[addr]
+
+    def _wb_c(self, addr, val):
+        addr &= 0xffff
+        self._contend(addr)
+        self.mem[addr] = val & 0xff
 
     def rw(self, addr):
         return self.rb(addr) | (self.rb(addr + 1) << 8)
@@ -212,6 +255,7 @@ class Z80:
     # -- execution ------------------------------------------------------
 
     def step(self):
+        self._acc = 0
         if self.slow == 1.0:
             self._step()
         else:                                       # contended memory,
