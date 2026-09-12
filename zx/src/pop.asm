@@ -3226,20 +3226,6 @@ shoff:          ld      hl, (charx)
                 inc     a
                 ld      (newtop), a
 
-; Point the shift at the right pair of tables and pick up its edge fills.
-
-                ld      a, (curshift)
-                ld      e, a
-                ld      d, 0
-                ld      hl, fill
-                add     hl, de
-                ld      a, (hl)
-                ld      (fillhi), a
-                ld      hl, fill + 8
-                add     hl, de
-                ld      a, (hl)
-                ld      (filllo), a
-
                 ld      a, (curw)       ; the shift needs one byte more
                 inc     a
                 ld      (neww), a
@@ -3354,17 +3340,16 @@ drawskip:       ld      hl, rowy
 ;
 ; The edges come out of CROPCHAR's clipping: spskip bytes cut off at the
 ; left, neww bytes shown.  Worked out once a frame --
-;   dfsrc    how far into a row the first pair to read is
-;   dfcnt    how many whole pairs are laid down
-;   dfspill  whether the byte the last pair spills into is on the screen
-; A pair the left edge cut off still spills into the first byte shown, so
-; with spskip set the row starts one pair early and reads it for that alone.
+;   dfsrc    how far into a row the first byte to read is
+;   dfcnt    how many whole bytes are laid down
+;   dfspill  whether the byte the last one spills into is on the screen
+; A byte the left edge cut off still spills into the first byte shown, so
+; with spskip set the row starts one byte early and reads it for that alone.
 
 dfsetup:        ld      a, (neww)
                 ld      c, a
                 ld      a, (curw)
                 ld      b, a
-                add     a, a
                 ld      (dfrowlen), a
                 ld      d, 0
                 ld      a, (spskip)
@@ -3394,8 +3379,7 @@ dfskip1:        ld      e, a
 dfsetm:         ld      a, b            ; facing right, from the end of the
                 sub     e               ; row back
                 ld      hl, dfmirror
-dfset:          add     a, a
-                ld      (dfsrc), a
+dfset:          ld      (dfsrc), a
                 ld      (dfcall + 1), hl
                 ld      a, (curshift)   ; and the tables' pages, for good
                 ld      c, a
@@ -3414,49 +3398,33 @@ dfset:          add     a, a
 
 dfleft:         ld      a, (spskip)
                 or      a
-                call    z, dffill
-                jr      z, dflgo
-                ld      a, (de)         ; the pair cut off, for its spill
+                jr      nz, dflcut
+                exx                     ; nothing cut off: nothing spilled in
+                ld      b, 0
+                exx
+                jr      dflgo
+dflcut:         ld      a, (de)         ; the byte cut off, for its spill
                 inc     de
                 exx
                 ld      l, a
                 ld      h, e
                 ld      b, (hl)
                 exx
-                ld      a, (de)
-                inc     de
-                exx
-                ld      l, a
-                ld      h, e
-                ld      c, (hl)
-                exx
 dflgo:          ld      a, (dfcnt)
                 or      a
                 jr      z, dfend
                 ld      b, a
-dflpair:        ld      a, (de)         ; the mask
-                inc     de
+dflpair:        ld      a, (de)         ; the byte, and only it: the mask is
+                inc     de              ; its complement and the blit is an OR
                 exx
                 ld      l, a
                 ld      h, d
-                ld      a, (hl)         ; what stays
+                ld      a, (hl)         ; what stays in this byte
                 or      b               ; and what came over from the left
                 ld      h, e
                 ld      b, (hl)         ; what goes over to the right
                 exx
-                and     (hl)
-                ld      c, a
-                ld      a, (de)         ; the data
-                inc     de
-                exx
-                ld      l, a
-                ld      h, d
-                ld      a, (hl)
-                or      c
-                ld      h, e
-                ld      c, (hl)
-                exx
-                or      c
+                or      (hl)            ; the room keeps every bit he has not
                 ld      (hl), a
                 inc     l               ; a screen row never crosses a page
                 djnz    dflpair
@@ -3467,34 +3435,26 @@ dflpair:        ld      a, (de)         ; the mask
 
 dfmirror:       ld      a, (spskip)
                 or      a
-                call    z, dffill
-                jr      z, dfmgo
-                ld      a, (de)
-                inc     de
+                jr      nz, dfmcut
+                exx
+                ld      b, 0
+                exx
+                jr      dfmgo
+dfmcut:         ld      a, (de)
+                dec     de
                 exx
                 ld      l, a
                 ld      h, revtab / 256
                 ld      l, (hl)
                 ld      h, e
                 ld      b, (hl)
-                exx
-                ld      a, (de)
-                dec     de
-                dec     de
-                dec     de
-                exx
-                ld      l, a
-                ld      h, revtab / 256
-                ld      l, (hl)
-                ld      h, e
-                ld      c, (hl)
                 exx
 dfmgo:          ld      a, (dfcnt)
                 or      a
                 jr      z, dfend
                 ld      b, a
 dfmpair:        ld      a, (de)
-                inc     de
+                dec     de
                 exx
                 ld      l, a
                 ld      h, revtab / 256
@@ -3505,54 +3465,23 @@ dfmpair:        ld      a, (de)
                 ld      h, e
                 ld      b, (hl)
                 exx
-                and     (hl)
-                ld      c, a
-                ld      a, (de)
-                dec     de
-                dec     de
-                dec     de
-                exx
-                ld      l, a
-                ld      h, revtab / 256
-                ld      l, (hl)
-                ld      h, d
-                ld      a, (hl)
-                or      c
-                ld      h, e
-                ld      c, (hl)
-                exx
-                or      c
+                or      (hl)
                 ld      (hl), a
                 inc     l
                 djnz    dfmpair
 
-; The byte the last pair spills into, the mask's ones filling its right.
+; The byte the last one spills into: what came over, laid on the room the
+; same way.  The spill lives in the alternate B, the screen address in the
+; main HL -- and A is A in both sets.
 
 dfend:          ld      a, (dfspill)
                 or      a
                 ret     z
-                ld      a, (filllo)
                 exx
-                or      b
+                ld      a, b
                 exx
-                and     (hl)
-                ld      c, a
-                exx
-                ld      a, c
-                exx
-                or      c
+                or      (hl)
                 ld      (hl), a
-                ret
-
-; Nothing cut off at the left: the mask's ones shift in there, and no data.
-; Out: Z still set.
-
-dffill:         ld      a, (fillhi)
-                exx
-                ld      b, a
-                ld      c, 0
-                exx
-                xor     a
                 ret
 
 ; ---------------------------------------------------------------- walls
@@ -4288,8 +4217,6 @@ curshift:       db      0
 curdat:         dw      0
 curbank:        db      0
 curent:         dw      0
-fillhi:         db      0
-filllo:         db      0
 rowy:           db      0
 
 ; show_one and keep_rect copy four bytes as one record -- col, top, width,
@@ -4406,7 +4333,6 @@ floorband:      incbin  "floorband.bin"
 torches:        ds      1 + 6 * 7
 flametab:       incbin  "flametab.bin"
 flamemask:      incbin  "flamemask.bin"
-fill:           incbin  "fill.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
 shiftlo:        incbin  "shiftlo.bin"
@@ -4532,10 +4458,16 @@ roomblk:
                 include "roomblk.asm"
 roomend:
 
+; The two banks it is kept in, and how much of it each one holds.  The
+; lengths are the block's own, not what is free past the tables: roomrest
+; copies exactly these back over the working copy, and the canvas moved down
+; when the sprites lost their masks, which would have made the second of
+; them nine kilobytes of whatever lies beyond.
+
 RBAT7           equ     HALFCAN + CANVAS_W * 45 ; past the floorpiece masks
 RB7LEN          equ     0x10000 - RBAT7
 RBAT1           equ     CANVAS + CANVAS_W * 192 ; past the canvas
-RB1LEN          equ     0x10000 - RBAT1
+RB1LEN          equ     roomend - roomblk - RB7LEN
 
 ; ----------------------------------------------------------- under the load
 ;

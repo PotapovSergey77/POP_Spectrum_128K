@@ -4007,8 +4007,16 @@ rqdone:         ld      a, (rqn)        ; off the head
 ; Carry: a step may begin.  The first of a frame goes whatever the clock
 ; says: on the machine a frame's own work ends in its third period more
 ; often than not, and waiting for the second drew nothing at all -- no plate
-; went down, no gate went up.  The rest only while the frame is in the first
-; two of its three periods: the next begins before another could end.
+; went down, no gate went up.  The rest only while the frame is still in its
+; first period.
+;
+; The clock here counts whole periods and a step is one indivisible piece of
+; work of up to fifty six thousand cycles -- a quarter of the slot -- so
+; "not in the last period yet" says nothing about whether the step will fit:
+; the start and the end of a period are further apart than the step is long.
+; While his own work ran into the third period that was safe by accident;
+; the frame got cheaper, the question began to be asked a period earlier,
+; and the second step started with less left than it needed.
 
 rqtime:         ld      a, (rqdid)
                 or      a
@@ -4016,7 +4024,7 @@ rqtime:         ld      a, (rqdid)
                 ld      a, (FRAMES)
                 ld      hl, frstart
                 sub     (hl)
-                cp      2
+                cp      1
                 ret
 rqt1:           inc     a
                 ld      (rqdid), a

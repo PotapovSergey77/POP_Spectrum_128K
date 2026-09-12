@@ -47,6 +47,13 @@ def main(argv):
                  'entry': org + len(banks) * STUB}]
     for bank, path in banks:
         payload = open(path, 'rb').read()
+        # The loader LOADs each of these by line number, and the ROM cannot
+        # load a block of no length: it stops with "R Tape loading error" on
+        # that line.  Nothing here can see it -- runtap puts the banks in
+        # from the manifest without the ROM -- so the build has to.
+        if not payload:
+            raise SystemExit('%s пуст: плёнка с блоком нулевой длины не '
+                             'загрузится' % os.path.basename(path))
         tap += t.code_file(os.path.basename(path)[:10], payload, PAGE_WINDOW)
         manifest.append({'file': path, 'addr': PAGE_WINDOW, 'bank': bank})
 
