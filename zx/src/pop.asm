@@ -1594,6 +1594,7 @@ ANGLE140        equ     7
 THINNER         equ     3
 F_THIN          equ     0x20
 OOFVEL          equ     22
+DEATHVEL        equ     33              ; and past this one he does not get up
 
 check_barr:     ld      a, 0xff         ; no collision yet
                 ld      (collidel), a
@@ -3076,14 +3077,49 @@ dfspace:        call    cmp_space
                 inc     (hl)            ; Three is the row under the screen,
                 ret                     ; and CUT takes him to it
 
+; The landing, out of CTRL.S: under OofVelocity he takes it on his feet, a
+; storey and a half costs him a life, and past DeathVelocity nothing is left
+; to save.  The speed has to be read before it is cleared.
+
 hit_floor:      call    floor_plane
                 ld      (chary), a
+                ld      a, (yvel)
+                ld      b, a
                 xor     a
                 ld      (yvel), a
-                ld      a, 1
+                inc     a
                 ld      (charact), a
-                ld      a, SQ_SOFTLAND
+                ld      a, b
+                ld      b, SQ_SOFTLAND
+                cp      OOFVEL
+                jr      c, hfland
+                cp      DEATHVEL
+                jr      nc, hfhard
+                ld      a, 1            ; a storey and a half: one life
+                call    decstr
+                ld      b, SQ_MEDLAND
+                jr      nz, hfland
+hfhard:         ld      a, 100          ; POP spends more than he can have
+                call    decstr
+                ld      b, SQ_HARDLAND
+hfland:         ld      a, b
                 jp      jumpseq
+
+; DECSTR in MISC.S.  A = what to take off him.  Out: Z when that was the last
+; of it and he dies.  POP keeps the change in ChgKidStr so the meter can be
+; redrawn from it; there is nothing drawing a meter here yet.
+
+decstr:         ld      hl, kidstr
+                cp      (hl)
+                jr      c, dsleft
+                ld      (hl), 0
+                xor     a
+                ret
+dsleft:         ld      b, a
+                ld      a, (hl)
+                sub     b
+                ld      (hl), a
+                ret
 
 ; ---------------------------------------------------------------- frames
 ;
@@ -4171,7 +4207,6 @@ rdstart:        db      0
 rdw:            db      0
 redh:           db      63
 dirtyn:         db      0               ; rectangles waiting for the blit
-dirtyq:         ds      4 * DIRTYMAX    ; col, top, width, height each
 
 ; Remember where the sprite went, so the next frame can rub it out.
 
@@ -4242,6 +4277,7 @@ curleft:        dw      0
 croprow:        db      0
 croptop:        db      0
 yvel:           db      0
+kidstr:         db      3               ; initmaxstr in TOPCTRL.S
 charact:        db      1
 wanted:         db      0
 
@@ -4275,7 +4311,6 @@ spskip:         db      0               ; and what the left edge cut off
 frstart:        db      0               ; the interrupt this frame began on
 tilestate:      db      0               ; the state of the tile last read
 curfdy:         db      0               ; SETUPCHAR's Fdy for this frame
-flbuf:          ds      FLAME_BYTES     ; one frame of a torch's flame
 collidel:       db      0               ; CHECKBARR and its helpers
 collider:       db      0
 collx:          db      0
@@ -4305,10 +4340,6 @@ snlast:         db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
 snthis:         db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
 snabove:        db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
 snbelow:        db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
-cdlast:         ds      10              ; each ten on from the one before
-cdthis:         ds      10
-cdabove:        ds      10
-cdbelow:        ds      10
 
 cam:            db      0               ; the view's left edge, in bytes
 fullshow:       db      0
@@ -4346,7 +4377,6 @@ flmbase:        dw      0
 flroom:         dw      0
 flwork:         dw      0
 flrect:         ds      4
-flstate:        ds      8
 linecol:        db      0
 ercol:          db      0
 ertop:          db      0
@@ -4506,6 +4536,42 @@ RBAT7           equ     HALFCAN + CANVAS_W * 45 ; past the floorpiece masks
 RB7LEN          equ     0x10000 - RBAT7
 RBAT1           equ     CANVAS + CANVAS_W * 192 ; past the canvas
 RB1LEN          equ     0x10000 - RBAT1
+
+; ----------------------------------------------------------- under the load
+;
+; Between the system variables and org lies the tape's BASIC loader: the
+; program, its variables, and the stack CLEAR left it.  All of it is wanted
+; until the last RANDOMIZE USR -- the stubs return into BASIC so it can load
+; the next bank -- and none of it after: start takes the stack with its first
+; instruction and never goes back.  So the buffers that hold nothing at load
+; time live down there instead of in the image, and the image is that much
+; smaller.  Nothing here is read before the game begins, and nothing here is
+; loaded from the tape.
+;
+; The ROM's interrupt handler keeps the frame counter and scans the keyboard
+; in the system variables below, which is why the block stops short of them.
+;
+; Order matters in two places: aboverow is read from -2, which is the tail of
+; belowrow, and the four cd* are walked ten bytes apart.
+
+LOWBUF          equ     24320 - 490     ; the block ends just under org
+
+frontlist       equ     LOWBUF                      ; five bytes an entry, as
+roomids         equ     frontlist + MAXFRONT * 5    ; frontrec writes them
+flbuf           equ     roomids + 60                ; thirty ids, then states
+rqq             equ     flbuf + FLAME_BYTES         ; one frame of a flame
+rqs             equ     rqq + 4 * RQMAX             ; row, column, band, wide
+cvbuf           equ     rqs + 4 * RQSMAX
+dirtyq          equ     cvbuf + CANVAS_W            ; col, top, width, height
+belowrow        equ     dirtyq + 4 * DIRTYMAX
+aboverow        equ     belowrow + 20               ; the ceiling: the bottom
+moblist         equ     aboverow + 20               ; row of the room above
+flstate         equ     moblist + MOBLEN * MAXMOB
+cdlast          equ     flstate + 8                 ; each ten on from the
+cdthis          equ     cdlast + 10                 ; one before
+cdabove         equ     cdthis + 10
+cdbelow         equ     cdabove + 10
+LOWTOP          equ     cdbelow + 10
 
 ; The tape carries one block, so both bank images ride along inside it.
 ;

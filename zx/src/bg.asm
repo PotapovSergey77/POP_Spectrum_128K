@@ -1103,9 +1103,9 @@ sbcprev:        ld      a, (prevblk)
 ; underneath.  With no room that way POP puts a solid block; below, floor.
 
 prevblk:        ds      6
-belowrow:       ds      20
-aboverow:       ds      20              ; and the ceiling: the bottom row of
-                                        ; the room above, its D sections alone
+                                        ; belowrow and aboverow are under the
+                                        ; loader now: the ceiling is the bottom
+                                        ; row of the room above, D sections
 
 ; B = row, C = column.  Out: (blockptr) = where that block's id sits.
 
@@ -1177,7 +1177,6 @@ blockcol:       db      0
 blockptr:       dw      0
 roomnum:        db      START_ROOM      ; the way into the level
 blockbot:       db      2, 65, 128, 191, 254
-roomids:        ds      60              ; thirty ids, then thirty states
 imgbuf:         ds      384             ; the largest piece is 378 bytes
 
 ; ---------------------------------------------------------------- repack
@@ -1189,7 +1188,6 @@ imgbuf:         ds      384             ; the largest piece is 378 bytes
 
 cvleft2:        db      0
 cvacc:          db      0
-cvbuf:          ds      CANVAS_W
 ; Eight bytes of seven pixels are exactly seven of eight, so the row divides
 ; into five of these and nothing is left over.  The art is stored with its
 ; leftmost pixel already in bit 7 -- see bgexport.py -- so all that is left
@@ -1391,7 +1389,8 @@ frbodyw:        db      0
 recfront:       db      0
 frontok:        db      0               ; a room is being built, not redrawn
 nfront:         db      0
-frontlist:      ds      MAXFRONT * 5    ; five bytes an entry, as frontrec
+                                        ; frontlist is under the loader now:
+                                        ; five bytes an entry, as frontrec
                                         ; writes and frontrect reads them --
                                         ; at four, the last six ran on into
                                         ; halfpiece and the code after it
@@ -2779,7 +2778,6 @@ DISAPPEARTIME   equ     2               ; or falling off the world
 CRUSHDIST       equ     30
 
 nummob:         db      0
-moblist:        ds      MOBLEN * MAXMOB
 
 mobx:           db      0               ; the one in hand, the same five bytes
 moby:           db      0               ; in the same order as a record
@@ -3086,8 +3084,7 @@ mobmark:        ld      a, (mobroom)    ; and it waits its turn in the queue:
                 jp      redplate        ; a frame over its three periods
 
 ; CHECKCRUSH: it comes down on him if he is under it in the same column, and
-; POP takes a life for it.  There is no strength here yet, so it only throws
-; him into the sequence.
+; POP takes a life for it -- and kills him outright when that was his last.
 
 mobcrush:       ld      a, (mobroom)
                 ld      hl, roomnum
@@ -3114,7 +3111,10 @@ mobcrush:       ld      a, (mobroom)
                 jr      c, mbcr1
                 cp      7
                 ret     nz
-mbcr1:          ld      a, (blocky)     ; put him on the floor of his row
+mbcr1:          ld      a, (frame)      ; crouched under it already: POP
+                cp      109             ; leaves him alone
+                ret     z
+                ld      a, (blocky)     ; put him on the floor of his row
                 inc     a
                 ld      l, a
                 ld      h, 0
@@ -3122,8 +3122,19 @@ mbcr1:          ld      a, (blocky)     ; put him on the floor of his row
                 add     hl, de
                 ld      a, (hl)
                 ld      (chary), a
-                ld      a, SQ_CRUSH
-                jp      jumpseq
+
+                ld      a, 1            ; a life for it, as POP takes one
+                call    decstr
+                ld      b, SQ_CRUSH
+                jr      nz, mbcr2
+                ld      b, SQ_HARDLAND  ; that was the last of his strength
+mbcr2:          ld      a, (nowbank)    ; the sequences are in the canvas
+                push    af              ; bank and animmobs runs with the
+                call    page_canvas     ; level's in: jumpseq read its table
+                ld      a, b            ; out of the wrong bank, and he went
+                call    jumpseq         ; off into whatever the rubbish said
+                pop     af
+                jp      pageset
 
 ; PUSHPP: the plate's own state is its index into the link tables.
 
@@ -4110,9 +4121,7 @@ rqfrzr:         db      0               ; for this block
 rqfrzc:         db      0
 rqtmp:          ds      4               ; an entry, on its way up the line
 rqdid:          db      0               ; a step done this frame
-rqq:            ds      4 * RQMAX
 rqsn:           db      0               ; blocks waiting to be shown
-rqs:            ds      4 * RQSMAX      ; row, column, band, wide
 
 ; The exit's stairs and door are all in the block to its right.
 
