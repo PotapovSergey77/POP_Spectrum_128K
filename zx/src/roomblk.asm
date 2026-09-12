@@ -929,8 +929,8 @@ nrcgo:          xor     a               ; nothing of the last room's still
                 call    camhome         ; the view is already where he is
                 xor     a
                 ld      (oldw), a
-                call    repaint
-                jp      set_attrs
+                jp      nrfinish        ; and out of this block first: the
+                                        ; repaint goes straight over it
 
 ; He is at one end of the room or the other, and there is a room that way.
 

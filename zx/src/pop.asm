@@ -249,6 +249,15 @@ copy32:         ldi
                 ldi
                 ret
 
+; The end of a room change, and it has to be here rather than in the block
+; that builds a room: repaint writes the whole working copy, and those rows
+; ARE the bytes that block sits in.  Called from inside it, the repaint went
+; over the code that was running and the machine came back up executing room
+; pixels -- so the block jumps out to this, and never returns to itself.
+
+nrfinish:       call    repaint
+                jp      set_attrs
+
 ; The working copy starts out as the room, once.  After that it is only ever
 ; right where the sprite has been, which is all anything reads of it.
 
