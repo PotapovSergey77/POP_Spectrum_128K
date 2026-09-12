@@ -47,7 +47,25 @@ KID_SEQS = (list(range(1, 51))
                72,      # stepback
                73,      # climbfail
                79,      # crawl
-               84])     # running
+               84]      # running
+            # The sword, and the fight it is for.  Both fighters are drawn
+            # out of the same pictures -- chtable4 is the fencing set, and
+            # guardengarde stands in frames 158, 170 and 171 just as he does
+            # -- so the guard costs nothing here beyond his own few.
+            + [53,      # deadfall
+               54,      # halve
+               55, 56, 57, 60,           # engarde, advance, retreat, turn
+               58, 75, 67, 76, 69, 66,   # strike, fast, adv, ret, blocked
+               61, 62,                   # strikeblock, readyblock
+               63, 64, 65,               # landengarde, bumpeng fwd and back
+               71, 74, 85,               # dropdead, stabbed, stabkill
+               77, 80, 87,               # alertstand, alertturn, goalert
+               86,                       # fastadvance
+               88, 89,                   # arise, turndraw
+               90,                       # guardengarde
+               91,                       # pickupsword
+               92, 93,                   # resheathe, fastsheathe
+               81, 82, 83, 104])         # fightfall, efightfall, patchfall
 
 CHAR_ANCHOR = 21
 
