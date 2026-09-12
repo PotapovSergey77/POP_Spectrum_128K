@@ -73,6 +73,7 @@ dopage:         and     7
 
                 include "assets.inc"
                 include "bg.inc"
+MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 
 SCREEN          equ     16384
 FRAMES          equ     23672           ; the ROM's own count of interrupts,
@@ -634,15 +635,10 @@ vbb2:           push    bc
 ; The room's code back where it runs, from the two banks it is kept in: see
 ; roomblk.  Only ever with the screen black and the working copy unwritten.
 
-roomrest:       ld      a, BANK_CANVAS
-                call    pageset
-                ld      hl, RBAT7
-                ld      de, roomblk
-                ld      bc, RB7LEN
-                ldir
-                ld      a, BANK_CVS
+roomrest:       ld      a, BANK_CVS
                 call    pageset
                 ld      hl, RBAT1
+                ld      de, roomblk
                 ld      bc, RB1LEN
                 ldir
                 jp      page_art
@@ -717,6 +713,8 @@ nowbank:        db      BANK_ART
 ; Spectrum, and every emulator makes them caps shift and 5-6-7-8.  Using it
 ; for the button would mean every step was a careful one.
 
+mfix0:
+                org     MODORG              ; into the canvas bank: see MODORG
 read_input:     ld      bc, 0xF7FE
                 in      a, (c)
                 ld      d, a            ; D = the 1-5 half row
@@ -1114,7 +1112,7 @@ tpfront:        call    get_fwd_dist    ; fwdinx: the block he faces
                 ret     z
                 ld      a, (frame)
                 cp      109
-                jr      z, take_sword
+                jp      z, take_sword
                 ld      a, (fwdkind)    ; PickItUp: up to it, unless he is
                 cp      2               ; there
                 ld      a, b
@@ -1139,6 +1137,8 @@ sword_at:       push    af
                 sbc     a, a
                 ret
 
+mpc0:
+                org     mfix0
 take_sword:     ld      a, (roomnum)
                 ld      (trscrn), a
                 ld      a, (blocky)     ; ten blocks to the row, as checkpress
@@ -1188,6 +1188,8 @@ take_sword:     ld      a, (roomnum)
 ; makes it a standing jump instead, which is the other way round of pressing
 ; the two keys: up first, then the direction.
 
+mfix1:
+                org     mpc0              ; into the canvas bank: see MODORG
 stjumpup:       ld      a, (jstkx)
                 or      a
                 jp      m, do_standjump
@@ -1545,6 +1547,8 @@ SEQ_FIRSTOP     equ     0xF1
 
 ; A = one of POP's sequence numbers.  Start it.
 
+mpc1:
+                org     mfix1
 jumpseq:        ld      l, a
                 ld      h, 0
                 add     hl, hl
@@ -1558,6 +1562,8 @@ seqbase:        ld      hl, seqs        ; the table holds offsets, not
                 ld      (seqptr), hl    ; relocated at startup
                 ret
 
+mfix2:
+                org     mpc1              ; into the canvas bank: see MODORG
 step_seq:       ld      hl, (seqptr)
 seqloop:        ld      a, (hl)
                 inc     hl
@@ -2219,6 +2225,8 @@ tile_flags:     ld      a, (blocky)
                 ld      c, a
                 jp      tile_in_row
 
+mpc2:
+                org     mfix2
 tilenone:       xor     a
                 ret
 
@@ -2253,6 +2261,8 @@ cmp_space:      ld      l, a
                 or      a
                 ret
 
+mfix3:
+                org     mpc2              ; into the canvas bank: see MODORG
 cmp_barr:       ld      l, a
                 ld      h, 0
                 ld      de, cmpbarr
@@ -2287,6 +2297,8 @@ gatebarr:       ld      a, (nowbank)    ; the frame table is in the canvas
 ; In: A = a screen x, C = a block row.  Out: A = that tile's flags.  The row
 ; is free here, which tile_flags cannot afford -- it runs inside movetry.
 
+mpc3:
+                org     mfix3
 tile_in_row:    call    blockcol_of
 tile_at:        ld      b, a            ; B = the column, C = the row, both
                 or      a               ; signed: a block off the screen is
@@ -3022,6 +3034,8 @@ frame_check:    ld      a, (nowbank)
 
 ; Out: A = the flags of the tile he is standing on.
 
+mfix4:
+                org     mpc3              ; into the canvas bank: see MODORG
 under_flags:    call    base_x
                 jp      tile_flags
 
@@ -3040,9 +3054,13 @@ ffback:         call    base_x
                 ld      de, -BLOCK_PX
                 add     hl, de
                 jp      tile_flags
+mpc4:
+                org     mfix4
 ffnone:         xor     a
                 ret
 
+mfix5:
+                org     mpc4              ; into the canvas bank: see MODORG
 behind_flags:   ld      a, (facing)
                 or      a
                 jr      z, fffwd
@@ -3249,6 +3267,8 @@ hfland:         ld      a, b
 ; of it and he dies.  POP keeps the change in ChgKidStr so the meter can be
 ; redrawn from it; there is nothing drawing a meter here yet.
 
+mpc5:
+                org     mfix5
 decstr:         ld      hl, kidstr
                 cp      (hl)
                 jr      c, dsleft
@@ -4632,17 +4652,14 @@ start:          di
 
                 ld      a, BANK_CANVAS  ; the frame table and the sequences
                 call    pageset         ; came in at the window, where the
-                ld      hl, 0xC000 + SPARE_LEN - 1      ; second screen goes:
-                ld      de, sprites + SPARE_LEN - 1     ; up past it they go,
-                ld      bc, SPARE_LEN                   ; last byte first, as
+                ld      hl, 0xC000 + SPAREALL - 1       ; second screen goes:
+                ld      de, sprites + SPAREALL - 1      ; up past it they go,
+                ld      bc, SPAREALL                    ; last byte first, as
                 lddr                                    ; the two overlap
 
-                ld      hl, roomblk     ; and the code that builds a room put
-                ld      de, RBAT7       ; by, for the rooms after this one:
-                ld      bc, RB7LEN      ; the end of this bank and of the
-                ldir                    ; canvas's
-                ld      a, BANK_CVS
-                call    pageset
+                ld      a, BANK_CVS     ; and the code that builds a room put
+                call    pageset         ; by, for the rooms after this one:
+                ld      hl, roomblk     ; past the canvas and its masks
                 ld      de, RBAT1
                 ld      bc, RB1LEN
                 ldir
@@ -4740,10 +4757,19 @@ roomend:
 ; when the sprites lost their masks, which would have made the second of
 ; them nine kilobytes of whatever lies beyond.
 
-RBAT7           equ     HALFCAN + CANVAS_W * 45 ; past the floorpiece masks
-RB7LEN          equ     0x10000 - RBAT7
-RBAT1           equ     CANVAS + CANVAS_W * 192 ; past the canvas
-RB1LEN          equ     roomend - roomblk - RB7LEN
+RBAT1           equ     HALFCAN + CANVAS_W * 45 ; past the canvas and masks
+
+; The control code -- GENCTRL and all it calls, the sequence interpreter and
+; the checks for walls and floors -- runs only while the canvas bank is in,
+; for the sequences and the frame tables, so that is where it lives: past the
+; tables, in the room the masks left.  It is assembled here, in place, between
+; the org pairs round each piece, cut out of pop.bin by build.sh and carried
+; up with the tables.  What it calls outside restores the bank it found.
+
+modend          equ     mpc5
+MODLEN          equ     modend - MODORG
+SPAREALL        equ     SPARE_LEN + MODLEN
+RB1LEN          equ     roomend - roomblk
 
 ; ----------------------------------------------------------- under the load
 ;

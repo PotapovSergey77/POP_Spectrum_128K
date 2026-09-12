@@ -38,17 +38,16 @@ page_canvas:    ld      a, BANK_CANVAS
 
 ; The canvas's own pixels are not in the canvas bank: the second screen took
 ; the bottom of it, and they went to the bank the last sprites leave half
-; empty.  The frame table, the sequences and the two floorpiece masks stayed.
+; empty -- and the two floorpiece masks with them, so that the canvas bank
+; keeps only what the control code reads while it runs.
 
 page_pixels:    ld      a, BANK_CVS
                 jp      pageset
 
-; Whichever bgdraw is laying into: the picture, or one of the masks.
+; Whichever bgdraw is laying into -- the picture or one of the masks, which
+; are in the one bank now.
 
-page_target:    ld      a, (bgmask)
-                or      a
-                jr      z, page_pixels
-                jr      page_canvas
+page_target     equ     page_pixels
 
 ; ---------------------------------------------------------------- the tables
 ;
@@ -1426,7 +1425,7 @@ nfront:         db      0
 ; scanline is, or -1.  Two masks: the whole piece, and the shorter one
 ; climbing up uses, which leaves the hands on the ledge showing.
 
-FLOORCAN        equ     MASKCAN         ; in the canvas bank, past the tables
+FLOORCAN        equ     MASKCAN         ; in the pixels' bank, past the canvas
 HALFCAN         equ     FLOORCAN + CANVAS_W * 45
 
 ; The tiles that have a half piece in the dungeon set.  Anything else falls
@@ -1607,7 +1606,7 @@ mo1:            ld      (mocan), hl
                 ld      (morow), a
                 ld      a, (xco)        ; the wipe works in the block's own
                 ld      (mooff), a      ; four bytes
-                call    page_canvas
+                call    page_pixels
                 call    mocanrow
                 ld      b, 15
 mowipe:         ld      (hl), 0
@@ -1635,7 +1634,7 @@ mowipe:         ld      (hl), 0
                 ld      (morow), a
                 ld      b, 15
 mopack:         push    bc
-                call    page_canvas
+                call    page_pixels
                 call    mocanrow
                 ld      de, cvbuf
                 ld      bc, 8
@@ -1793,6 +1792,7 @@ cc1:            cp      135
                 ret     c
 
 cc2:            call    char_edges
+                call    page_art        ; as it always left it
                 ld      a, (facing)
                 or      a
                 jr      nz, ccright
@@ -1857,7 +1857,9 @@ cmp16:          or      a
 ; is measured against.  The frame table says how wide it is and how far the
 ; anchor sits from its leading edge.
 
-char_edges:     call    page_canvas
+char_edges:     ld      a, (nowbank)    ; called from the control code in the
+                push    af              ; canvas bank too: put back what was in
+                call    page_canvas
                 call    frame_entry
                 ld      a, (hl)
                 ld      c, a            ; width in bytes
@@ -1868,9 +1870,6 @@ char_edges:     call    page_canvas
                 jr      z, ce1
                 inc     hl
 ce1:            ld      a, (hl)         ; the anchor offset, signed
-                ld      b, a            ; page_art leaves the bank number in
-                call    page_art        ; A, which is where the 22 came from
-                ld      a, b
                 ld      e, a
                 ld      d, 0
                 or      a
@@ -1888,7 +1887,8 @@ ce2:            ld      hl, (charx)
                 ld      d, 0
                 add     hl, de
                 ld      (edger), hl
-                ret
+                pop     af
+                jp      pageset
 
 edgel:          dw      0
 edger:          dw      0

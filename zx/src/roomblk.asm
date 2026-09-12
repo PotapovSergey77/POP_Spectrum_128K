@@ -780,7 +780,7 @@ onemask:        ld      (bgmask), a     ; which canvas, before paging: pageset
                 jr      z, om1          ; twice and FLOORCAN never -- so the
                 ld      hl, HALFCAN     ; floor mask kept the ink of every room
 om1:            push    hl              ; visited before this one
-                call    page_canvas
+                call    page_pixels
                 pop     hl
                 ld      d, h
                 ld      e, l
@@ -852,7 +852,7 @@ omcol:          call    setblock
 
 packmask:       ld      a, 45
                 ld      (cvleft), a
-pmrow:          call    page_canvas
+pmrow:          call    page_pixels
                 ld      hl, (cvsrc2)
                 ld      de, cvbuf
                 ld      bc, CANVAS_W
