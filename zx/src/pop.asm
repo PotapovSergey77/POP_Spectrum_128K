@@ -18,18 +18,18 @@
 ; holds the room with its foreground mask in one bank and the prince's pixels
 ; in another, paged in for the part of the frame that reads them.
 
-                org     24576
+                org     24320
 PAGEPORT        equ     0x7FFD
 BANKM           equ     0x5B5C  ; the 128 ROM's copy of it
 
 ; The tape's BASIC loader cannot page banks itself -- OUT is the one statement
 ; this build cannot try out before it ships -- so it calls in here instead.
-; Each of these is four bytes, so the loader knows where they are: 24576 for
+; Each of these is four bytes, so the loader knows where they are: 24320 for
 ; the first, then every four, and the last one starts the game.
 ;
 ;   10 CLEAR 24575
 ;   20 LOAD ""CODE : REM the program
-;   30 RANDOMIZE USR 24576 : REM page a bank in
+;   30 RANDOMIZE USR 24320 : REM page a bank in
 ;   40 LOAD ""CODE : REM into it at 49152
 ;   ...
 ;   RANDOMIZE USR 24592 : REM go
@@ -165,6 +165,7 @@ mainrun:        ld      a, (FRAMES)
                 call    checkpress
                 call    shakeloose
                 call    animtrans
+                call    animmobs
                 call    draw_prince
                 call    page_art
                 call    hide_floor

@@ -41,7 +41,8 @@ import zxscreen
 # movement; the rest of it is scattered further up the table among the guards
 # and the princess.  Fighting and dying are left out for now.
 KID_SEQS = (list(range(1, 51))
-            + [68,      # climbdown
+            + [52,      # crush, under a floor that lands on him
+               68,      # climbdown
                70,      # climbstairs
                72,      # stepback
                73,      # climbfail
@@ -172,6 +173,55 @@ def build_sprites(frames_used):
                               | len(banks[-1])).to_bytes(2, 'little')
         banks[-1] += data
     return bytes(table), [bytes(b) for b in banks]
+
+
+# DrawFF in FRAMEADV.S: a floor on its way down is the loose floor's own art
+# at the mob's foot -- maska[floor] masked in at y - 3, loosea over it,
+# loosed stamped at y, and looseb a block to the right at y - 4.  It is laid
+# over the room rather than into it, so it is composed here once and drawn
+# the way a sprite is: rendered over a clear background and over a solid one,
+# the pixels where the two agree are the piece's own, and the rest is where
+# the room shows through -- which is exactly the mask the blitter wants.
+
+FF_ROWS = 16                    # the foot's row and fifteen above it
+
+
+def falling_floor():
+    """(width in bytes, the rows as (mask, data) pairs)."""
+    bgd, x, y = renderroom.bg, 8, 100
+    f = bgd.Ffalling
+
+    def render(fill):
+        r = renderroom.Room('DUN')
+        if fill:
+            for line in r.canvas:
+                for i in range(len(line)):
+                    line[i] = 0x7f
+        if bgd.maska[bgd.floor]:
+            r.draw(bgd.maska[bgd.floor], x, y - 3, renderroom.AND)
+        r.draw(bgd.loosea[f], x, y - 3, renderroom.ORA)
+        r.draw(bgd.loosed[f], x, y, renderroom.STA)
+        r.draw(bgd.looseb, x + 4, y - 4, renderroom.ORA)
+        return r.to_pixels()
+
+    clear, solid = render(False), render(True)
+    left, rows = x * 7, range(y - FF_ROWS + 1, y + 1)
+    own = [c for c in range(left, min(len(clear[0]), left + 8 * 8))
+           if any(clear[r][c] == solid[r][c] for r in rows)]
+    width = (own[-1] - left + 8) // 8
+    out = bytearray()
+    for r in rows:
+        for b in range(width):
+            mask = data = 0
+            for bit in range(8):
+                c = left + b * 8 + bit
+                if c >= len(clear[r]) or clear[r][c] != solid[r][c]:
+                    mask |= 0x80 >> bit         # the room shows through here
+                elif clear[r][c]:
+                    data |= 0x80 >> bit
+            out.append(mask)
+            out.append(data)
+    return width, bytes(out)
 
 
 def build_sequences():
@@ -406,6 +456,14 @@ def main(argv):
     seq, code, entry = build_sequences()
     used = seq.walk(KID_SEQS)
     table, blobs = build_sprites(used)
+    # A falling floor is nobody's frame, so it goes one past his own, in the
+    # bank the last of the sprites leave half empty.
+    ff_w, ff_data = falling_floor()
+    ff_frame = len(table) // 6
+    ff_at = ((len(blobs) - 1) << BANK_SHIFT) | len(blobs[-1])
+    table += bytes([ff_w, FF_ROWS, 0, 0]) + ff_at.to_bytes(2, 'little')
+    blobs[-1] += ff_data
+    assert len(blobs[-1]) <= BANK_SIZE - 2, 'the falling floor does not fit'
     # The frame table and the sequences share the canvas bank.  Both are
     # read at points in a frame where nothing wants the room, so they are
     # paged in for those, and the canvas starts after them.
@@ -483,7 +541,7 @@ def main(argv):
     for n, o in bgoffs:
         inc.append('T_%-9s equ %d' % (n.upper(), o))
     for n in ('space', 'floor', 'posts', 'gate', 'panelwif', 'pillartop',
-              'loose', 'panelwof', 'block', 'archtop1', 'archtop2',
+              'loose', 'panelwof', 'block', 'spikes', 'archtop1', 'archtop2',
               'torch', 'dpressplate', 'pressplate', 'upressplate',
               'rubble', 'sword', 'flask'):
         inc.append('BG_%-8s equ %d' % (n.upper(), getattr(renderroom.bg, n)))
@@ -566,6 +624,9 @@ def main(argv):
         f.write('BLK_BLOCK   equ %d' % renderroom.bg.block + chr(10))
         f.write('F_CHECK     equ %d' % 0x40 + chr(10))
         f.write('F_FOOTMARK  equ %d' % 0x1f + chr(10))
+        f.write('FF_FRAME    equ %d' % ff_frame + chr(10))
+        f.write('FF_W        equ %d' % ff_w + chr(10))
+        f.write('FF_H        equ %d' % FF_ROWS + chr(10))
 
         # POP's own sequence numbers, so the control code can read the way
         # CTRL.S does: `lda #climbdown / jmp jumpseq`.

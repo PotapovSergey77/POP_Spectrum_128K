@@ -868,5 +868,69 @@ readlinks:      call    page_bg
                 ldir
                 jp      page_art
 
+; CUT in AUTO.S: a whole screen's width sideways, three block rows and 189
+; scanlines up or down.  The stubs in the fixed half of the map say which way
+; he went and put this block back before they come here.
+
+nrcut:          ld      a, (nrwhich)    ; the stub has the room already: all
+                or      a               ; that is left is where he lands in it
+                jr      z, nrcup
+                dec     a
+                jr      z, nrcdown
+                dec     a
+                jr      z, nrcleft
+
+                ld      hl, (charx)     ; right
+                ld      de, -280
+                add     hl, de
+                ld      (charx), hl
+                jr      nrcgo
+
+nrcleft:        ld      hl, (charx)
+                ld      de, 280
+                add     hl, de
+                ld      (charx), hl
+                jr      nrcgo
+
+nrcup:          ld      a, (chary)
+                add     a, 189
+                ld      (chary), a
+                ld      a, (blocky)
+                add     a, 3
+                ld      (blocky), a
+                jr      nrcgo
+
+nrcdown:        ld      a, (chary)
+                sub     189
+                ld      (chary), a
+                ld      a, (blocky)
+                sub     3
+                ld      (blocky), a
+
+; Building a room takes the best part of a second, and a frozen picture of the
+; room he has just left reads as the game having stopped.  Black says it is
+; working, and the new room arrives whole when it is ready.
+
+nrcgo:          xor     a               ; nothing of the last room's still
+                ld      (rqn), a        ; to be drawn, nor to be shown, nor
+                ld      (rqsn), a       ; a view of it made
+                ld      (flipnow), a
+                dec     a
+                ld      (vwcam), a
+                ld      hl, SCREEN
+                ld      de, SCREEN + 1
+                ld      bc, 6143
+                ld      (hl), 0
+                ldir
+                xor     a               ; and that black shown, whichever
+                call    setvis          ; screen was
+                call    newroom         ; this block is already back, so the
+                call    readlinks       ; room itself is all that is left
+                call    camhome         ; the view is already where he is
+                xor     a
+                ld      (oldw), a
+                call    repaint
+                jp      set_attrs
+
 ; He is at one end of the room or the other, and there is a room that way.
 

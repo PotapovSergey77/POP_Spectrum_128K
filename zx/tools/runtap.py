@@ -66,13 +66,18 @@ def boot(path):
     manifest = os.path.splitext(path)[0] + '.banks.json'
     banks = json.load(open(manifest)) if os.path.exists(manifest) else []
     cpu = z80.Z80()
-    cpu.sp = 0x5FF0                 # somewhere for the stubs to return to
     cpu.mem[0x5B5C] = 0x00          # BANKM, as 128 BASIC leaves it
     blocks = code_blocks(path)
+    # Somewhere for the stubs to return to, below the program the way CLEAR
+    # leaves it: a fixed address of its own would be inside the program as
+    # soon as it loads any lower, and the two bytes written there came out
+    # as a handful of wrong pixels in every check at once.
+    stack = blocks[0][0] - 16
+    cpu.sp = stack
     entry = None
     for i, (addr, payload) in enumerate(blocks):
         if i and banks:             # page the bank this block belongs in
-            _usr(cpu, banks[0]['entry'] - STUB * (len(banks) - i))
+            _usr(cpu, banks[0]['entry'] - STUB * (len(banks) - i), stack)
         cpu.mem[addr:addr + len(payload)] = payload
         if not i:
             entry = banks[0]['entry'] if banks else addr
@@ -84,11 +89,11 @@ def boot(path):
 STUB = 4
 
 
-def _usr(cpu, addr):
+def _usr(cpu, addr, stack=0x5FF0):
     """RANDOMIZE USR: call it and let it come back."""
-    cpu.mem[0x5FF0] = 0
-    cpu.mem[0x5FF1] = 0
-    cpu.sp = 0x5FF0
+    cpu.mem[stack] = 0
+    cpu.mem[stack + 1] = 0
+    cpu.sp = stack
     cpu.pc = addr
     for _ in range(200):
         if cpu.pc == 0:

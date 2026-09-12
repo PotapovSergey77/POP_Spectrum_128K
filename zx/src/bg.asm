@@ -1691,29 +1691,30 @@ nextroom:       jp      cutchar
 
 ; CUT in AUTO.S: three block rows and 189 scanlines, whichever way he went.
 
-nrup:           ld      a, (links + 2)
-                or      a
-                ret     z
-                ld      (roomnum), a
-                ld      a, (chary)
-                add     a, 189
-                ld      (chary), a
-                ld      a, (blocky)
-                add     a, 3
-                ld      (blocky), a
-                jp      nrgo
+; Which way he went, and no more than that: taking him there runs only at a
+; room change, when the code that builds a room is paged back in anyway, so
+; it lives in that block and these four stubs are all that stay here.
 
+nrup:           ld      a, (links + 2)
+                ld      c, 0
+                jr      nrcall
 nrdown:         ld      a, (links + 3)
-                or      a
-                ret     z
-                ld      (roomnum), a
-                ld      a, (chary)
-                sub     189
-                ld      (chary), a
-                ld      a, (blocky)
-                sub     3
-                ld      (blocky), a
-                jp      nrgo
+                ld      c, 1
+                jr      nrcall
+nrleft:         ld      a, (links)
+                ld      c, 2
+                jr      nrcall
+nrright:        ld      a, (links + 1)
+                ld      c, 3
+nrcall:         or      a
+                ret     z               ; no room that way, and nothing done:
+                ld      (roomnum), a    ; putting the block back would take the
+                ld      a, c            ; working copy's first rows with it,
+                ld      (nrwhich), a    ; and nothing would repaint them
+                call    roomrest
+                jp      nrcut
+
+nrwhich:        db      0
 
 ; CUTCHAR in AUTO.S.  A cut is not a matter of getting near the edge: the
 ; picture itself has to have left the screen, by four of POP's units -- eight
@@ -1869,53 +1870,6 @@ ce2:            ld      hl, (charx)
 
 edgel:          dw      0
 edger:          dw      0
-
-; CUT: a whole screen's width sideways, three block rows and 189 scanlines up
-; or down.
-
-nrleft:         ld      a, (links)
-                or      a
-                ret     z
-                ld      (roomnum), a
-                ld      hl, (charx)
-                ld      de, 280
-                add     hl, de
-                ld      (charx), hl
-                jp      nrgo
-nrright:        ld      a, (links + 1)
-                or      a
-                ret     z
-                ld      (roomnum), a
-                ld      hl, (charx)
-                ld      de, -280
-                add     hl, de
-                ld      (charx), hl
-
-; Building a room takes the best part of a second, and a frozen picture of the
-; room he has just left reads as the game having stopped.  Black says it is
-; working, and the new room arrives whole when it is ready.
-
-nrgo:           xor     a               ; nothing of the last room's still
-                ld      (rqn), a        ; to be drawn, nor to be shown, nor
-                ld      (rqsn), a       ; a view of it made
-                ld      (flipnow), a
-                dec     a
-                ld      (vwcam), a
-                ld      hl, SCREEN
-                ld      de, SCREEN + 1
-                ld      bc, 6143
-                ld      (hl), 0
-                ldir
-                xor     a               ; and that black shown, whichever
-                call    setvis          ; screen was
-                call    roombuild       ; the room and everything about it
-                call    readlinks
-                call    camhome         ; the view is already where he is
-                xor     a
-                ld      (oldw), a
-                call    repaint
-                call    set_attrs
-                ret
 
 links:          ds      4
 
@@ -2751,7 +2705,10 @@ slrow1:         ld      a, c
                 cp      3
                 ret     nc
                 ld      (slrow2), a
-                ld      a, 9
+
+; SHAKEM1: the row named by (slrow2) in room (trscrn), whoever asked for it.
+
+shakerow:       ld      a, 9
                 ld      (slcol), a
 slloop:         ld      a, (slrow2)
                 ld      l, a
@@ -2803,6 +2760,370 @@ ceilroom:       ld      a, (links + 2)
 slrow2:         db      0
 slcol:          db      0
 cpabove:        db      0
+
+; ------------------------------------------------------------ falling floors
+;
+; MOVER.S's MOBs.  A loose floor that has broken off is no longer part of the
+; room: it falls under its own weight, passes through empty floor planes,
+; knocks out any loose floor it meets on the way, and turns what it lands on
+; into rubble.  They live in a list of their own, each with the room it is
+; falling through, since one that comes out of a ceiling belongs to the room
+; above and finishes in this one.
+
+MAXMOB          equ     2               ; a floor, and the one it knocks out
+MOBLEN          equ     5
+FFACCEL         equ     3
+FFTERMVEL       equ     29
+CRUMBLETIME     equ     2               ; frames of it crumbling where it hit
+DISAPPEARTIME   equ     2               ; or falling off the world
+CRUSHDIST       equ     30
+
+nummob:         db      0
+moblist:        ds      MOBLEN * MAXMOB
+
+mobx:           db      0               ; the one in hand, the same five bytes
+moby:           db      0               ; in the same order as a record
+mobroom:        db      0
+mobvel:         db      0
+moblevel:       db      0
+
+; C = an entry.  Load it into the five the routines work on, or put it back.
+
+mobat:          ld      a, c            ; five bytes to a record
+                add     a, a
+                add     a, a
+                add     a, c
+                ld      l, a
+                ld      h, 0
+                ld      de, moblist
+                add     hl, de
+                ld      de, mobx
+                ld      bc, MOBLEN
+                ret
+
+mobload:        call    mobat
+                ldir
+                ret
+
+mobsave:        call    mobat
+                ex      de, hl
+                ldir
+                ret
+
+; The five in hand as a block of the room: its column and row, so trobat,
+; trobtype and PUSHPP can work on the piece it is over.
+
+mobtrob:        ld      a, (moblevel)   ; ten blocks to a row
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de
+                call    mobcol
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      a, l
+                ld      (trloc), a
+                ld      a, (mobroom)
+                ld      (trscrn), a
+                jp      trobat          ; A = the piece, trobst and blueptr set
+
+mobcol:         ld      a, (mobx)       ; four Apple bytes to a block
+                rrca
+                rrca
+                and     0x3f
+                ret
+
+; A = a room.  Out: A = the one below it.  POP's GETDOWN, through the same
+; step of the map that RDBLOCK's handler takes.
+
+roomdown:       ld      (tirroom), a
+                ld      a, (nowbank)
+                push    af
+                call    page_bg
+                ld      e, 3
+                call    tirstep
+                pop     af
+                call    pageset
+                ld      a, (tirroom)
+                ret
+
+; The block (trloc) in room (trscrn) has just come away: it starts falling
+; from the floor line of its own row, at rest.
+
+mobstart:       call    trrowcol        ; UNINDEX: its row and its column
+                ld      a, (blockcol)
+                add     a, a            ; four Apple bytes to a block
+                add     a, a
+                ld      (mobx), a
+                ld      a, (blockrow)
+                ld      (moblevel), a
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blockbot
+                add     hl, de
+                ld      a, (hl)
+                ld      (moby), a
+                ld      a, (trscrn)
+                ld      (mobroom), a
+                xor     a
+                ld      (mobvel), a
+
+addmob:         ld      a, (nummob)     ; and on to the list, if there is room
+                cp      MAXMOB
+                ret     nc
+                ld      c, a
+                inc     a
+                ld      (nummob), a
+                jp      mobsave
+
+; ---- one step of everything falling ----
+
+animmobs:       ld      a, (nummob)
+                or      a
+                ret     z
+                ld      b, a
+                ld      c, 0
+anml:           push    bc
+                call    mobload
+                call    mobfloor
+                call    mobcrush
+                pop     bc
+                push    bc
+                call    mobsave
+                pop     bc
+                inc     c
+                djnz    anml
+
+; and drop whatever has finished, closing the list up over it
+
+                xor     a
+                ld      (mbsrc), a
+                ld      (mbdst), a
+mbcl:           ld      a, (mbsrc)
+                ld      hl, nummob
+                cp      (hl)
+                jr      nc, mbcdone
+                ld      c, a
+                call    mobload
+                ld      a, (mobvel)
+                inc     a               ; -1: it is not there any more
+                jr      z, mbcnext
+                ld      a, (mbdst)
+                ld      c, a
+                call    mobsave
+                ld      hl, mbdst
+                inc     (hl)
+mbcnext:        ld      hl, mbsrc
+                inc     (hl)
+                jr      mbcl
+mbcdone:        ld      a, (mbdst)
+                ld      (nummob), a
+                ret
+
+mbsrc:          db      0
+mbdst:          db      0
+mobunder:       db      0               ; what it is about to land on
+
+; MOBFLOOR.  It gathers speed to a limit, and where it crosses the floor
+; line of the row it is in, what is there decides: empty space lets it
+; through to the next row and the room below, a loose floor is knocked out
+; and falls with it, and anything else stops it.  A negative velocity is the
+; count while it crumbles where it landed, or falls off the world.
+
+mobfloor:       ld      a, (mobvel)
+                bit     7, a
+                jr      nz, mobcount
+                cp      FFTERMVEL
+                jr      nc, mbftv
+                add     a, FFACCEL
+                ld      (mobvel), a
+mbftv:          ld      b, a
+                ld      a, (moby)
+                add     a, b
+                ld      (moby), a
+
+                ld      a, (mobroom)    ; nothing that way: it falls out of
+                or      a               ; the world
+                jr      z, mobnull
+                ld      a, (moby)
+                cp      226             ; still above the top of the room
+                ret     nc
+                ld      a, (moblevel)   ; the floor line of its row
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blockbot
+                add     hl, de
+                ld      a, (hl)
+                sub     3               ; POP's BlockAy, the floor's own line
+                ld      b, a
+                ld      a, (moby)
+                cp      b
+                ret     c               ; not down to it yet
+
+                ld      a, (moblevel)   ; what is in the way
+                ld      c, a
+                call    mobcol
+                ld      b, a
+                ld      a, (mobroom)
+                call    blk_in
+                ld      (mobunder), a
+                or      a
+                jr      z, mobpass      ; space: straight through
+                cp      BG_LOOSE
+                jr      z, mobknock
+                jr      mobcrash
+
+mobcount:       inc     a               ; crumbling: count up to nothing
+                ld      (mobvel), a
+                ret
+
+mobnull:        ld      a, (moby)       ; off a null screen and gone
+                cp      192 + 17
+                ret     c
+                ld      a, -DISAPPEARTIME
+                ld      (mobvel), a
+                ret
+
+; PASSTHRU: down a row, and past the bottom one into the room below.
+
+mobpass:        ld      hl, moblevel
+                inc     (hl)
+                ld      a, (hl)
+                cp      3
+                ret     c
+                ld      a, (moby)
+                sub     192
+                ld      (moby), a
+                xor     a
+                ld      (moblevel), a
+                ld      a, (mobroom)
+                call    roomdown
+                ld      (mobroom), a
+                ret
+
+; KNOCKLOOSE: the floor it met is knocked out and falls too, half a block
+; below this one, and this one goes on at half the speed.
+
+mobknock:       call    mobtrob         ; that floor is space now
+                ld      a, BG_SPACE
+                call    trobtype
+                xor     a
+                ld      (trobst), a
+                call    trobsave
+                ld      a, (mobvel)
+                srl     a
+                ld      (mobvel), a
+                ld      a, (mbsrc)      ; keep this one where it was
+                push    af
+                ld      a, (moby)       ; and start the other just under it
+                add     a, 6
+                ld      (moby), a
+                call    mobpass
+                call    addmob
+                pop     af
+                ld      c, a
+                call    mobload
+                jp      mobmark
+
+; It lands: the row it hit is shaken, it crumbles where it stopped, and what
+; it landed on becomes rubble.
+
+mobcrash:       ld      a, (mobroom)
+                ld      (trscrn), a
+                ld      a, (moblevel)
+                ld      (slrow2), a
+                call    shakerow
+                ld      a, (moblevel)
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, blockbot
+                add     hl, de
+                ld      a, (hl)
+                sub     3
+                ld      (moby), a
+                ld      a, -CRUMBLETIME
+                ld      (mobvel), a
+
+; MAKERUBBLE: a plate is pushed and jammed first, and only a floor, spikes,
+; a flask or a torch can become rubble at all.
+
+mobrubble:      call    mobtrob
+                cp      BG_PRESSPLATE
+                jr      z, mbrpp
+                cp      BG_UPRESSPLATE
+                jr      z, mbrjam
+                cp      BG_FLOOR
+                jr      z, mbrput
+                cp      BG_SPIKES
+                jr      z, mbrput
+                cp      BG_FLASK
+                jr      z, mbrput
+                cp      BG_TORCH
+                ret     nz
+                jr      mbrput
+mbrjam:         ld      a, BG_RUBBLE    ; jammed: the gates it holds stay open
+                call    trobtype
+mbrpp:          ld      a, (mobunder)
+                call    pushpp
+                call    mobtrob
+mbrput:         ld      a, BG_RUBBLE
+                call    trobtype
+
+; MARKMOB: the block it landed on and the one to its right, redrawn.
+
+mobmark:        ld      a, (mobroom)    ; and it waits its turn in the queue:
+                ld      (trscrn), a     ; rubble stays put, so nothing is lost
+                ld      a, LOOSEWIPE    ; by drawing it a frame or two later,
+                ld      (redh), a       ; and a landing is heavy enough to put
+                jp      redplate        ; a frame over its three periods
+
+; CHECKCRUSH: it comes down on him if he is under it in the same column, and
+; POP takes a life for it.  There is no strength here yet, so it only throws
+; him into the sequence.
+
+mobcrush:       ld      a, (mobroom)
+                ld      hl, roomnum
+                cp      (hl)
+                ret     nz
+                call    base_x
+                call    blockcol_of
+                ld      b, a
+                call    mobcol
+                sub     b
+                ret     nz              ; not in his column
+                ld      a, (moby)
+                ld      hl, chary
+                cp      (hl)
+                ret     nc              ; below him altogether
+                ld      a, (chary)
+                sub     CRUSHDIST
+                ld      b, a
+                ld      a, (moby)
+                cp      b
+                ret     c               ; and not yet on him
+                ld      a, (charact)    ; POP lets a runner escape it
+                cp      2
+                jr      c, mbcr1
+                cp      7
+                ret     nz
+mbcr1:          ld      a, (blocky)     ; put him on the floor of his row
+                inc     a
+                ld      l, a
+                ld      h, 0
+                ld      de, floory
+                add     hl, de
+                ld      a, (hl)
+                ld      (chary), a
+                ld      a, SQ_CRUSH
+                jp      jumpseq
 
 ; PUSHPP: the plate's own state is its index into the link tables.
 
@@ -3227,6 +3548,7 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 ld      (trobst), a
                 ld      hl, aoid        ; and it is space that gets redrawn
                 ld      (hl), a
+                call    mobstart        ; and from here it is falling
                 jp      stopobj
 
 afwiggle:       cp      0x80 + WIGGLETIME
@@ -3305,7 +3627,15 @@ rpceil:         ld      a, (links + 2)
 ; next, and on the real machine the clock counts what contended memory
 ; costs as well.
 
-RQMAX           equ     8
+; A floor that breaks fills more of the line than the comment above allowed
+; for -- its own block and the one to its right, both floorpiece masks, and
+; the rubble where it lands -- and a full line is drawn on the spot, which is
+; the one thing the queue exists to avoid: two frames of the loose floors ran
+; to four periods that way.  Twelve entries, and the line holds.  What waits
+; to be shown is one rectangle a pass, so eight is plenty there.
+
+RQMAX           equ     12
+RQSMAX          equ     8
 
 rq_block:       xor     a               ; the picture of the block in hand
                 jr      rq_add
@@ -3688,7 +4018,7 @@ rqt1:           inc     a
 ; does it after he has been rubbed out and before he is drawn again.
 
 rq_showadd:     ld      a, (rqsn)
-                cp      RQMAX
+                cp      RQSMAX
                 jr      c, rqsa1
                 ld      a, 1            ; more than that: the whole screen
                 ld      (fullshow), a   ; from the room, next frame
@@ -3782,7 +4112,7 @@ rqtmp:          ds      4               ; an entry, on its way up the line
 rqdid:          db      0               ; a step done this frame
 rqq:            ds      4 * RQMAX
 rqsn:           db      0               ; blocks waiting to be shown
-rqs:            ds      4 * RQMAX       ; row, column, band, wide
+rqs:            ds      4 * RQSMAX      ; row, column, band, wide
 
 ; The exit's stairs and door are all in the block to its right.
 
