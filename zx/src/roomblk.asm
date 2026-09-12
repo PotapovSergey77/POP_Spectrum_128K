@@ -177,9 +177,79 @@ compcol:        call    setblock
                 ld      hl, blockrow
                 ld      a, (hl)
                 or      a
-                ret     z
+                jr      z, cproof
                 dec     (hl)
                 jr      comprow
+
+; The last pass of SURE: the bottom row of the room above, D sections alone,
+; with Dy at 2 and Ay at -1, so what shows along the top of the screen is the
+; underside of its floor -- the ceiling.  The blocks below it are this room's
+; own top row, and column zero's comes from the room to the left, which is
+; what getbelow would have handed back with scrnBelow pretending to be this
+; room.  PRECED starts empty; spreced POP leaves as the last block left it.
+
+cproof:         ld      a, 2
+                ld      (dy), a
+                ld      a, 0xff
+                ld      (ay), a
+                xor     a
+                ld      (preced), a
+                ld      (blockcol), a
+                ld      (xco), a
+
+cpcloop:        ld      a, (blockcol)   ; the ceiling block itself
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, aboverow
+                add     hl, de
+                ld      a, (hl)
+                ld      (objid), a
+                inc     hl
+                ld      a, (hl)
+                ld      (state), a
+
+                ld      a, (blockcol)   ; and the one below and to its left
+                or      a
+                jr      z, cpcprev
+                dec     a
+                ld      c, a
+                ld      b, 0
+                call    blockat
+                ld      hl, (blockptr)
+                ld      a, (hl)
+                and     0x1f
+                ld      (below), a
+                ld      de, 30
+                add     hl, de
+                ld      a, (hl)
+                ld      (sbelow), a
+                jr      cpcdraw
+cpcprev:        ld      a, (prevblk)
+                ld      (below), a
+                ld      a, (prevblk + 1)
+                ld      (sbelow), a
+
+cpcdraw:        call    draw_c          ; RedDSure: no A section, and nothing
+                call    draw_mc         ; movable but the C and D ones
+                call    draw_b
+                call    draw_d
+                call    draw_md
+                call    draw_front
+
+                ld      a, (objid)      ; on to the next block
+                ld      (preced), a
+                ld      a, (state)
+                ld      (spreced), a
+                ld      a, (xco)
+                add     a, 4
+                ld      (xco), a
+                ld      hl, blockcol
+                inc     (hl)
+                ld      a, (hl)
+                cp      10
+                jr      c, cpcloop
+                ret
 
 ; The block in hand, and the one below and to its left.  getbelow stores the
 ; row below starting one along, so the C section sees the block down-left.
@@ -244,12 +314,42 @@ rebcorn:        ld      de, belowrow    ; and the corner, down and to the left
                 jr      z, rebcnone
                 ld      c, 9
                 call    edgeblk
-                jp      page_art
+                jr      reabove
 rebcnone:       ld      a, BG_BLOCK
                 ld      (de), a
                 inc     de
                 xor     a
                 ld      (de), a
+
+; And the ceiling: the bottom row of the room above, blocks 20 to 29, whose
+; D sections hang into the top of this screen.  Where there is no room up
+; there POP lays a row of floorpieces, so the world has a lid wherever it
+; ends.
+
+reabove:        ld      de, aboverow
+                ld      a, (links + 2)
+                or      a
+                jr      z, reanone
+                ld      a, 20
+                ld      (edgecol), a
+reabl:          ld      a, (edgecol)
+                ld      c, a
+                ld      a, (links + 2)
+                call    edgeblk
+                ld      hl, edgecol
+                inc     (hl)
+                ld      a, (hl)
+                cp      30
+                jr      c, reabl
+                jp      page_art
+reanone:        ld      b, 10
+reanl:          ld      a, BG_FLOOR     ; nothing above is a lid all the same
+                ld      (de), a
+                inc     de
+                xor     a
+                ld      (de), a
+                inc     de
+                djnz    reanl
                 jp      page_art
 
 ; A = a room, C = one of its thirty blocks, DE = where the id and its state

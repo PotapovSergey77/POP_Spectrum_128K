@@ -2888,12 +2888,10 @@ afright:        ld      de, BLOCK_PX
                 jr      arow
 afleft:         ld      de, -BLOCK_PX
                 add     hl, de
-arow:           ld      a, (blocky)
-                or      a
-                jr      z, ffnone       ; nothing above the top row
-                dec     a
-                ld      c, a
-                jp      tile_in_row
+arow:           ld      a, (blocky)     ; row -1 is the bottom row of the room
+                dec     a               ; above, which RDBLOCK's handler goes
+                ld      c, a            ; and reads there: GETABOVE asks for it
+                jp      tile_in_row     ; the same way from any row
 
 ; InsideBlock in CTRL.S.  A solid block reads as clear to cmpspace, so a
 ; character who ends up over one would drop straight through it.  This bumps
@@ -4400,54 +4398,54 @@ start:          di
                 call    page_art
                 jp      start2
 
-; Every bank is signed at its end, and a red border says one did not arrive:
-; a black screen leaves nothing to go on.
-
-check_banks:    ld      a, BANK_ART
-                call    pageset
-                ld      hl, (SIG_ART_AT)
-                ld      de, SIG_ART
-                or      a
-                sbc     hl, de
-                jp      nz, badload
-                ld      hl, sigtab
-                ld      b, 3
-cbloop:         push    bc
-                ld      a, (hl)
-                inc     hl
-                call    pageset
-                ld      e, (hl)
-                inc     hl
-                ld      d, (hl)
-                inc     hl
-                push    hl
-                ex      de, hl
-                ld      e, (hl)
-                inc     hl
-                ld      d, (hl)
-                ld      hl, SIG_SPR
-                or      a
-                sbc     hl, de
-                pop     hl
-                pop     bc
-                jp      nz, badload
-                djnz    cbloop
-                ld      a, BANK_ART
-                jp      pageset
-
-sigtab:         db      BANK_SPR1
-                dw      SIG_SPR1_AT
-                db      BANK_SPR2
-                dw      SIG_SPR2_AT
-                db      BANK_SPR3
-                dw      SIG_SPR3_AT
-
-; A bank that did not arrive: red border, and nothing else is going to work.
-
-badload:        ld      a, 2
-                out     (254), a
-                jr      badload
-
+; Every bank is signed at its end, and a red border says one did not arrive:
+; a black screen leaves nothing to go on.
+
+check_banks:    ld      a, BANK_ART
+                call    pageset
+                ld      hl, (SIG_ART_AT)
+                ld      de, SIG_ART
+                or      a
+                sbc     hl, de
+                jp      nz, badload
+                ld      hl, sigtab
+                ld      b, 3
+cbloop:         push    bc
+                ld      a, (hl)
+                inc     hl
+                call    pageset
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                push    hl
+                ex      de, hl
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                ld      hl, SIG_SPR
+                or      a
+                sbc     hl, de
+                pop     hl
+                pop     bc
+                jp      nz, badload
+                djnz    cbloop
+                ld      a, BANK_ART
+                jp      pageset
+
+sigtab:         db      BANK_SPR1
+                dw      SIG_SPR1_AT
+                db      BANK_SPR2
+                dw      SIG_SPR2_AT
+                db      BANK_SPR3
+                dw      SIG_SPR3_AT
+
+; A bank that did not arrive: red border, and nothing else is going to work.
+
+badload:        ld      a, 2
+                out     (254), a
+                jr      badload
+
 initend:
 
 ; ---------------------------------------------------------------- a room

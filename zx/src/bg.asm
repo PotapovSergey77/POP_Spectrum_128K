@@ -144,6 +144,10 @@ bgd1:           and     0x7f
 ; rest used to be copied, and every one of them tested, for nothing.
 
                 push    hl              ; the piece's bytes
+                ld      a, (yco)        ; POP's YCO is signed, and the rows
+                cp      192             ; climb from it: a bottom row above
+                jp      nc, bgdnone     ; the screen puts none of it down --
+                                        ; the ceiling row draws at Ay = -1
                 ld      a, (bandbot)
                 cp      192
                 jr      c, bgdhi
@@ -832,8 +836,9 @@ dgbtop:         ld      a, (yco)        ; and what is left at the top
 
 ; The exit: stairs, and a door that rises four pixels to the step the way a
 ; gate does.  Both stand in the block to the right of the exit tile, one byte
-; further in again -- and in the room the prince starts in, that tile is the
-; way he came in, so it gets no stairs.
+; further in again -- and in the level's start room, KidStartScrn, that tile
+; is the way he came in, so it gets no stairs.  Without them nothing wipes
+; the rows the door leaves as it rises: POP never opens that one.
 
 EXITINC         equ     4
 EMAXVAL         equ     172
@@ -849,8 +854,11 @@ drawexitb:      ld      a, (xco)
                 ld      (xco), a
                 ret
 
-dxbody:         ld      a, (roomnum)
-                cp      START_ROOM
+dxbody:         ld      a, (dxonly)     ; the top slat alone: the stairs are
+                or      a               ; far below those rows, and so is
+                jr      nz, dxdoor      ; every slice under the top one
+                ld      a, (roomnum)
+                cp      KIDSTART_SCRN
                 jr      z, dxdoor
                 call    page_bg
                 ld      a, (ay)
@@ -875,6 +883,20 @@ dxdoor:         ld      a, (dy)
                 sub     14
                 sub     c
                 ld      (yco), a
+                ld      c, a            ; the top slat alone: the highest
+                ld      a, (dxonly)     ; slice and the one under it hold
+                or      a               ; those four rows between them
+                jr      z, dxloop
+                ld      a, c
+                ld      hl, blockthr
+                sub     (hl)
+                and     3
+                add     a, (hl)
+                add     a, 4
+                cp      c
+                jr      c, dxo1
+                ld      a, c
+dxo1:           ld      (yco), a
 dxloop:         call    page_bg
                 ld      a, (bgtables + T_DOORMASK)
                 ld      c, BG_AND
@@ -893,7 +915,10 @@ dxloop:         call    page_bg
                 ld      (yco), a
                 jr      dxloop
 
-dxtop:          ld      a, (ay)         ; part of the C section, really
+dxtop:          ld      a, (dxonly)     ; the repair sits above those rows
+                or      a
+                ret     nz
+                ld      a, (ay)         ; part of the C section, really
                 sub     64
                 ret     c
                 cp      192
@@ -923,6 +948,7 @@ restorebot:     call    page_bg
 
 blockthr:       db      0
 gatebot:        db      0
+dxonly:         db      0               ; the door's top slat, and no more
 
 ; drawfrnt: what goes over the characters.  Stamped rather than ORed for the
 ; posts and the arches, so the neighbour's B section does not show through.
@@ -981,6 +1007,9 @@ dfgo:           push    bc              ; C is the opacity and bgentry uses it
 ; screen redraw of FRAMEADV.S walks them.
 
 setblock:       ld      a, (blockrow)
+                inc     a
+                jr      z, sbceil       ; row -1: the ceiling, kept aside
+                ld      a, (blockrow)
                 ld      b, a
                 ld      a, (blockcol)
                 ld      c, a
@@ -1027,7 +1056,7 @@ sbhere:         dec     a
                 ld      a, (blockrow)
                 inc     a
                 ld      b, a
-                call    blockat
+sbat:           call    blockat
                 ld      hl, (blockptr)
                 ld      a, (hl)
                 and     0x1f
@@ -1035,6 +1064,34 @@ sbhere:         dec     a
                 ld      de, 30
                 add     hl, de
                 ld      a, (hl)
+                ld      (sbelow), a
+                ret
+
+; The ceiling block comes out of aboverow, and what is below and to its left
+; is this room's own top row -- column zero's from the room to the left, the
+; way compose lays the row down.
+
+sbceil:         ld      a, (blockcol)
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, aboverow
+                add     hl, de
+                ld      a, (hl)
+                ld      (objid), a
+                inc     hl
+                ld      a, (hl)
+                ld      (state), a
+                ld      a, (blockcol)
+                or      a
+                jr      z, sbcprev
+                dec     a
+                ld      c, a
+                ld      b, 0
+                jr      sbat
+sbcprev:        ld      a, (prevblk)
+                ld      (below), a
+                ld      a, (prevblk + 1)
                 ld      (sbelow), a
                 ret
 
@@ -1047,6 +1104,8 @@ sbhere:         dec     a
 
 prevblk:        ds      6
 belowrow:       ds      20
+aboverow:       ds      20              ; and the ceiling: the bottom row of
+                                        ; the room above, its D sections alone
 
 ; B = row, C = column.  Out: (blockptr) = where that block's id sits.
 
@@ -1901,6 +1960,12 @@ rbend:          pop     af
 rb_step:        push    af
                 call    rb_setup
                 pop     af
+                push    af
+                call    rbband          ; the top band: the door's top first
+                ld      a, 0
+                ld      (rbdoor), a
+                call    nc, rbdoortop
+                pop     af
                 call    rbband
                 push    af
                 call    rbwipe
@@ -1915,6 +1980,9 @@ rb_step:        push    af
                 call    draw_front
                 call    rbband0
                 call    rb_pack
+                ld      a, (rbdoor)     ; the door's top: those rows are the
+                or      a               ; band's too from here on, for the view
+                call    nz, rbdoorrows  ; and for the screen
                 ld      a, (rbh)        ; and a view being made wants those
                 ld      b, a            ; rows of the room again
                 ld      a, (rbbot)
@@ -1923,6 +1991,48 @@ rb_step:        push    af
                 call    vw_mark
                 pop     af
                 ret
+
+; The exit's door is drawn from its foot up to four rows short of the block
+; above -- dy - 67 -- and so its top slat is in that block's rows, above the
+; block's own band.  POP draws the moving door over whatever is there, with
+; its mask; wiping those rows would take the block above's pixels with them.
+; So the top band draws the door alone over them, unwiped, and packs them.
+
+EXITTOP         equ     67
+
+rbdoortop:      ld      a, (preced)
+                cp      BG_EXIT
+                ret     nz
+                ld      a, (dy)
+                sub     EXITTOP - 1
+                ret     c
+                ld      (bandtop), a
+                add     a, 3
+                ld      (bandbot), a
+                ld      (rbbot), a
+                ld      a, 4
+                ld      (rbh), a
+                ld      (dxonly), a     ; any value but zero
+                call    draw_mb
+                xor     a
+                ld      (dxonly), a
+                call    rbband0
+                call    rb_pack
+                ld      a, 1
+                ld      (rbdoor), a
+                ret
+
+rbdoorrows:     ld      a, (dy)         ; the band's rows reach up to them
+                ld      b, a
+                ld      a, (rbbot)
+                sub     b
+                add     a, EXITTOP
+                ld      (rbh), a
+                ld      a, EXITTOP      ; and redblock's redshow as well
+                ld      (redh), a
+                ret
+
+rbdoor:         db      0
 
 ; The rows of band A: RQBAND of them up from the floor line and each band
 ; above the last, the top one stopping where the block's own band does.
@@ -1939,7 +2049,9 @@ rbband:         add     a, a            ; sixteen rows to a band
                 ld      (bandbot), a
                 ld      (rbbot), a
                 sub     RQBAND - 1
-                ld      c, a            ; C = the top of a full band
+                jr      nc, rbbfull
+                xor     a               ; the ceiling sits at the top of the
+rbbfull:        ld      c, a            ; screen: no band starts above it
                 ld      a, (redh)
                 ld      b, a
                 ld      a, (dy)
@@ -1978,7 +2090,29 @@ rb_setup:       xor     a               ; the room is built: note no more
                 sub     3
                 ld      (ay), a
 
-                ld      a, (blockcol)   ; the piece to its left, for drawc
+                ld      a, (blockrow)   ; the ceiling's neighbour is in the
+                inc     a               ; row the room above lent us, and its
+                jr      nz, rbsown      ; column zero has nothing to the left,
+                ld      a, (blockcol)   ; as SURE leaves PRECED empty there
+                or      a
+                jr      z, rbsnone
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, aboverow - 2
+                add     hl, de
+                ld      a, (hl)
+                ld      (preced), a
+                inc     hl
+                ld      a, (hl)
+                ld      (spreced), a
+                jr      rbxco
+rbsnone:        xor     a
+                ld      (preced), a
+                ld      (spreced), a
+                jr      rbxco
+
+rbsown:         ld      a, (blockcol)   ; the piece to its left, for drawc
                 or      a               ; and drawb
                 jr      nz, rbleft
                 ld      a, (blockrow)   ; column zero takes it from the room
@@ -2278,9 +2412,7 @@ trobsave:       call    page_bg
                 add     hl, de
                 ld      a, (trobst)
                 ld      (hl), a
-                call    onscreen
-                ret     nz
-                ld      hl, (blueptr)
+                ld      hl, (blueptr)   ; what a copy of it would show
                 ld      a, (hl)
                 and     0x1f
                 push    af
@@ -2289,6 +2421,8 @@ trobsave:       call    page_bg
                 pop     af
                 call    subplate
                 ld      b, a
+                call    onscreen
+                jr      nz, tsceil
                 ld      a, (trloc)
                 ld      l, a
                 ld      h, 0
@@ -2297,6 +2431,26 @@ trobsave:       call    page_bg
                 ld      (hl), b
                 ld      de, 30
                 add     hl, de
+                ld      (hl), c
+                ret
+
+; And the ceiling has a copy of its own: the bottom row of the room above,
+; read once when the room was built and drawn from there ever since.
+
+tsceil:         ld      a, (links + 2)
+                ld      hl, trscrn
+                cp      (hl)
+                ret     nz
+                ld      a, (trloc)
+                sub     20
+                ret     c
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, aboverow
+                add     hl, de
+                ld      (hl), b
+                inc     hl
                 ld      (hl), c
                 ret
 
@@ -2517,7 +2671,15 @@ cpwhere:        ld      (cpabove), a
                 or      a
                 jr      z, cprow
                 dec     b
-cprow:          ld      a, b
+cprow:          ld      a, (roomnum)    ; the row above the top one is the
+                ld      (trscrn), a     ; bottom row of the room above, and
+                ld      a, b            ; that is where RDBLOCK's handler goes
+                inc     a               ; to break a loose floor in the ceiling
+                jr      nz, cprow1
+                call    ceilroom
+                ret     z
+                ld      b, 2
+cprow1:         ld      a, b
                 cp      3
                 ret     nc              ; and off the screen is nothing
                 ld      l, a
@@ -2531,8 +2693,6 @@ cprow:          ld      a, b
                 ld      a, l
                 add     a, c
                 ld      (trloc), a
-                ld      a, (roomnum)
-                ld      (trscrn), a
 
                 call    trobat
                 ld      b, a
@@ -2578,11 +2738,19 @@ shakeloose:     ld      a, (jarabove)
                 bit     7, b
                 jr      nz, slrow       ; jard: the row he is on
                 dec     a               ; jaru: the one above it
-slrow:          cp      3
+slrow:          ld      c, a
+                ld      a, (roomnum)    ; jaru from the top row shakes the
+                ld      (trscrn), a     ; ceiling, which is the bottom row of
+                ld      a, c            ; the room above: SHAKEM reads its
+                inc     a               ; blocks through rdblock1, and that
+                jr      nz, slrow1      ; goes there for a row of -1
+                call    ceilroom
+                ret     z
+                ld      c, 2
+slrow1:         ld      a, c
+                cp      3
                 ret     nc
                 ld      (slrow2), a
-                ld      a, (roomnum)
-                ld      (trscrn), a
                 ld      a, 9
                 ld      (slcol), a
 slloop:         ld      a, (slrow2)
@@ -2622,6 +2790,15 @@ shakeit:        ld      a, (trobst)     ; already going, or on its way down
                 ld      a, LOOSEWIPE
                 ld      (redh), a
                 jp      redplate
+
+; The room above, for the two places that act on a block rather than read
+; one: POP's RDBLOCK handler goes there for a row of -1.  Out: Z when there
+; is no room that way, and (trscrn) is the room when there is.
+
+ceilroom:       ld      a, (links + 2)
+                ld      (trscrn), a
+                or      a
+                ret
 
 slrow2:         db      0
 slcol:          db      0
@@ -2890,9 +3067,11 @@ aonostart:      xor     a
 aonotx:         cp      BG_PRESSPLATE   ; a plate coming back up goes first too
                 jr      z, aoprio
                 cp      BG_UPRESSPLATE
-                jr      nz, aoplain
-aoprio:         ld      a, 1
-                ld      (rqprio), a
+                jr      z, aoprio
+                cp      BG_LOOSE        ; and a floor that has been jarred: it
+                jr      nz, aoplain     ; wobbles for four frames and settles,
+aoprio:         ld      a, 1            ; and a redraw that waits for the view
+                ld      (rqprio), a     ; to step arrives after it is over
 aoplain:        call    redplate
                 xor     a
                 ld      (rqprio), a
@@ -3064,8 +3243,33 @@ afwiggle:       cp      0x80 + WIGGLETIME
 ; where the top of them pokes through.
 
 redplate:       call    onscreen
-                ret     nz
+                jr      nz, rpceil
                 call    trrowcol
+                call    rq_block
+                ld      a, (blockcol)
+                cp      9
+                ret     nc
+                inc     a
+                ld      (blockcol), a
+                jp      rq_block
+
+; The bottom row of the room above is this screen's ceiling, and POP marks it
+; in topbuf, which RedDFast redraws as D sections alone.  Here it is a queue
+; entry with a row of -1, whose floor line blockbot puts at 2 and whose three
+; rows are all of it that show.
+
+rpceil:         ld      a, (links + 2)
+                ld      hl, trscrn
+                cp      (hl)
+                ret     nz
+                ld      a, (trloc)
+                sub     20
+                ret     c               ; only its bottom row reaches us
+                ld      (blockcol), a
+                ld      a, 0xff
+                ld      (blockrow), a
+                ld      a, 3
+                ld      (redh), a
                 call    rq_block
                 ld      a, (blockcol)
                 cp      9

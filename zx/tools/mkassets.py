@@ -579,9 +579,11 @@ def main(argv):
         f.write('BLOCKOF_BIAS equ %d\n' % BLOCKOF_BIAS)
         f.write('BLOCKOF_LEN equ %d\n' % BLOCKOF_LEN)
         f.write('ANGLE_PX    equ %d\n' % angle_px)
-        # The room he starts in is the way into the level, so the
-        # same tile there is an entrance and gets no stairs.
+        # The room the tape starts him in, and the level's own start
+        # room -- KidStartScrn -- where the exit tile is the way in and
+        # gets no stairs, wherever a test tape starts.
         f.write('START_ROOM  equ %d\n' % int(os.environ.get('POP_START_ROOM', level.kid_start[0])))
+        f.write('KIDSTART_SCRN equ %d\n' % level.kid_start[0])
 
     print('bank_art    %d байт' % len(art))
     for i, b in enumerate(blobs):

@@ -362,6 +362,37 @@ class Room:
                 self.draw_front(st)
                 preced, spreced = ids[i], specs[i]
 
+        # SURE's last pass: the bottom row of the screen above, D-sections
+        # only, at Dy = 2 and Ay = -1.  What shows along the top of the
+        # screen is the underside of its floor -- the ceiling.  With no
+        # screen above, a row of floorpieces.  PRECED starts empty; spreced
+        # POP leaves as the row just drawn left it.
+        above = level.links(scrnum)[2]
+        if above:
+            atypes, aspecs = level.screen(above)
+            agot = [self._subplate(level, atypes[i] & poplevel.IDMASK,
+                                   aspecs[i]) for i in range(20, 30)]
+            aids = [g[0] for g in agot]
+            aspecs = [g[1] for g in agot]
+        else:
+            aids, aspecs = [bg.floor] * 10, [0] * 10
+        below = [prev[0]] + list(ids[0:9])
+        sbelow = [sprev[0]] + list(specs[0:9])
+        preced = 0
+        for col in range(10):
+            st = {'objid': aids[col], 'state': aspecs[col],
+                  'preced': preced, 'spreced': spreced,
+                  'below': below[col], 'sbelow': sbelow[col],
+                  'xco': col * 4, 'Dy': 2, 'Ay': -1,
+                  'scrnum': scrnum, 'startscrn': level.kid_start[0]}
+            self.draw_c(st)
+            self.draw_mc(st)
+            self.draw_b(st)
+            self.draw_d(st)
+            self.draw_md(st)
+            self.draw_front(st)
+            preced, spreced = aids[col], aspecs[col]
+
         self.hatch_walls(ids)
 
     @staticmethod
