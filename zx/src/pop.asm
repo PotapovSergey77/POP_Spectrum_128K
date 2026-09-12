@@ -93,6 +93,7 @@ FRAME_WAIT      equ     3
 BLOCK_PX        equ     28
 STEP_OFF_FWD    equ     3               ; CTRL.S
 STEP_OFF_BACK   equ     8
+GCLIMBTHRES     equ     6               ; a gate held from above: CTRL.S
 JUMP_BACK_THRES equ     6
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
@@ -885,7 +886,10 @@ ctrl1:          cp      109
 
 ; ------------------------------------------------------------------ standing
 
-standing:       ld      a, (btn)
+standing:       ld      a, (clrbtn)     ; a fresh click is "pick it up", and
+                or      a               ; CTRL.S asks that first of all
+                jp      m, stgrab
+stback:         ld      a, (btn)
                 or      a
                 jp      z, stnobtn
 
@@ -1045,7 +1049,10 @@ hangdrop:       call    clrall
 
 ; ------------------------------------------------------------------ crouching
 
-crouching:      ld      a, (jstky)      ; still holding down?
+crouching:      ld      a, (clrbtn)     ; a fresh click, crouched: this is
+                or      a               ; where the thing is actually taken
+                jp      m, crgrab
+crback:         ld      a, (jstky)      ; still holding down?
                 cp      1
                 jr      z, crawlmaybe
                 ld      a, SQ_STANDUP
@@ -1057,6 +1064,119 @@ crawlmaybe:     ld      a, (clrf)       ; a fresh push forward, and only
                 ld      (clrf), a
                 ld      a, SQ_CRAWL
                 jp      jumpseq
+
+; PickItUp and RemoveObj, for the sword alone: the block he is stooped in
+; front of becomes plain floor, the room is told to draw it again, and he
+; picks the sword up, brandishes it and puts it away -- pickupsword runs
+; into resheathe, so CharSword stays nought and he can still take hold of a
+; ledge.  Out: Z when there was no sword there and the crouch goes on as it
+; was.
+
+SWORDWIPE       equ     16              ; the gleam's 12 rows: one band, so the
+                                        ; queue draws it in one step -- RemoveObj
+                                        ; has 35, marked TEMP, and three bands
+                                        ; left the sword on the floor in his hand
+
+; TryPickup and PickItUp in CTRL.S, for the sword alone.  Standing, CTRL.S
+; asks it only on a fresh click with the button still down -- a click left
+; over from a careful step long before is not one.  A sword underfoot sends
+; him a block back first, unless there is nothing behind; only the one in
+; front is ever taken.  Out of the crouch he takes it; standing he walks up
+; to the edge of his own block and stoops, and DoCrouch clears the stick.
+
+stgrab:         ld      a, (btn)
+                or      a
+                jp      z, stback
+                call    try_pickup
+                jp      z, stback
+                ret
+
+crgrab:         call    try_pickup
+                jp      z, crback
+                ret
+
+; Out: Z when he does nothing about it.
+
+try_pickup:     call    base_x          ; underfoot?
+                call    blockcol_of
+                call    sword_at
+                jr      z, tpfront
+                call    behind_flags
+                call    cmp_space
+                ret     z               ; nothing to back on to
+                ld      a, -14
+                call    move_by
+tpfront:        call    get_fwd_dist    ; fwdinx: the block he faces
+                push    af
+                ld      a, (fwdinx)
+                call    sword_at
+                pop     bc              ; B: how far to its edge
+                ret     z
+                ld      a, (frame)
+                cp      109
+                jr      z, take_sword
+                ld      a, (fwdkind)    ; PickItUp: up to it, unless he is
+                cp      2               ; there
+                ld      a, b
+                call    nz, move_by
+                ld      a, (facing)
+                or      a
+                ld      a, -2
+                call    nz, move_by
+                call    do_crouch
+                or      1
+                ret
+
+; A = a column of his row.  NZ when the sword lies in it.
+
+sword_at:       push    af
+                ld      a, (blocky)
+                ld      c, a
+                pop     af
+                call    tile_at
+                sub     BG_SWORD
+                sub     1
+                sbc     a, a
+                ret
+
+take_sword:     ld      a, (roomnum)
+                ld      (trscrn), a
+                ld      a, (blocky)     ; ten blocks to the row, as checkpress
+                ld      l, a            ; works it out
+                ld      h, 0
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de
+                ld      a, (fwdinx)
+                add     a, l
+                ld      (trloc), a
+
+                call    trobat          ; and it is floor from now on
+                ld      a, BG_FLOOR
+                call    trobtype
+                xor     a
+                ld      (trobst), a
+                call    trobsave
+
+                ld      a, SWORDWIPE    ; the space it stood in, redrawn at
+                ld      (redh), a       ; once, as RemoveObj marks it: at the
+                ld      a, 1            ; back of the queue it lay there on
+                ld      (rqprio), a     ; the floor while he held it
+                call    redplate
+                xor     a
+                ld      (rqprio), a
+
+                ld      a, 1
+                ld      (gotsword), a
+                call    page_canvas     ; trobat and redplate paged the level
+                ld      a, SQ_PICKUPSWORD ; in, and jumpseq and step_seq after
+                call    jumpseq         ; it read the sequences from here
+                ld      a, 1            ; NZ: the crouch is spent on this
+                or      a
+                ret
 
 ; --------------------------------------------------------------- jumping up
 ;
@@ -1225,10 +1345,30 @@ downback:       call    behind_flags
                 call    get_dist
                 cp      STEP_OFF_BACK
                 jr      c, do_crouch    ; not backed up to the edge
-                call    under_flags     ; and there has to be a ledge to hold
-                call    cmp_space
+
+; CHECKLEDGE, as CTRL.S asks it: what he lowers himself into has to be clear
+; and what he holds on to solid.  cmp_space calls a solid block clear, so a
+; wall at his back passed the test above for a drop -- and he went down
+; through the floor.  check_ledge turns a block away first.
+
+                call    behind_flags
+                ld      (blockid), a
+                call    under_flags
+                call    check_ledge
                 jr      z, do_crouch
-                call    get_dist        ; line him up with it
+                ld      a, (facing)     ; facing left, a gate underfoot is only
+                or      a               ; a ledge once it is up far enough
+                jr      nz, dbledge
+                call    under_flags
+                cp      BG_GATE
+                jr      nz, dbledge
+                ld      a, (tilestate)
+                rrca
+                rrca
+                and     0x3f
+                cp      GCLIMBTHRES
+                jr      c, do_crouch
+dbledge:        call    get_dist        ; line him up with it
                 sub     9
                 call    move_by
                 ld      a, SQ_CLIMBDOWN
@@ -3140,15 +3280,146 @@ frame_entry:    ld      a, (frame)
 
 ; ---------------------------------------------------------------- draw
 
-draw_prince:    call    page_canvas     ; the frame table lives there now
+; He is one picture and the sword in his hand another, as SETUPSWORD adds
+; it.  The frame's rectangle -- what is rubbed out, covered by the front and
+; shown -- is the two of them together; each is then laid down with a clip
+; of its own.  CROPCHAR reads his own picture, so it goes before the sword.
+
+draw_prince:    call    body_rec
+                call    dp_place
+                call    crop_char
+                ld      hl, newcol
+                ld      de, rbody
+                ld      bc, 4
+                ldir
+                call    sword_rec
+                jr      z, dpone
+                call    dp_place
+                call    dp_union
+dpone:          call    dp_clip
+                call    erase_new
+                call    draw_flames     ; background, so before he is drawn
+                ld      hl, newcol
+                ld      de, runion
+                ld      bc, 4
+                ldir
+                call    body_rec
+                call    dp_image
+                call    sword_rec
+                call    nz, dp_image
+                ld      hl, runion
+                ld      de, newcol
+                ld      bc, 4
+                ldir
+                ret
+
+; In: HL = where the body puts a thing and DE = where the sword does, each
+; with its size two bytes on.  Out: A = where the two together begin and
+; B = how far they run.  Either may be off an edge, and a place gone round
+; past 255 compares wrongly by value -- so they are compared by difference,
+; which is small.
+
+span:           ld      c, (hl)
+                ld      a, (de)
+                sub     c
+                jp      p, spnear
+                ld      a, (de)
+                ld      c, a
+spnear:         ld      a, (hl)
+                inc     hl
+                inc     hl
+                add     a, (hl)
+                ld      b, a
+                ld      a, (de)
+                inc     de
+                inc     de
+                ex      de, hl
+                add     a, (hl)
+                sub     b
+                jp      m, spfar
+                add     a, b
+                ld      b, a
+spfar:          ld      a, b
+                sub     c
+                ld      b, a
+                ld      a, c
+                ret
+
+dp_union:       ld      hl, rbody
+                ld      de, newcol
+                call    span
+                ld      (newcol), a
+                ld      a, b
+                ld      (neww), a
+                ld      hl, rbody + 1
+                ld      de, newtop
+                call    span
+                ld      (newtop), a
+                ld      a, b
+                ld      (newh), a
+                ret
+
+; SETUPSWORD in CTRLSUBS.S.  Sheathing, frames 229 to 237, the sword is seen
+; whatever CharSword says; otherwise only while he has it out.  The export
+; has folded its offset in with his, so a pose is a frame's record and the
+; sword's Fdy after it.  Out: NZ with its picture loaded, Z when none.
+
+sword_rec:      call    page_canvas
+                ld      a, (frame)
+                cp      229
+                jr      c, srheld
+                cp      238
+                jr      c, srpose
+srheld:         ld      a, (charsword)
+                or      a
+                jr      z, srnone
+srpose:         ld      a, (frame)
+                ld      l, a
+                ld      h, 0
+                ld      de, fswd
+                add     hl, de
+                ld      a, (hl)
+                or      a
+                jr      z, srnone
+                dec     a               ; seven bytes a pose
+                ld      l, a
+                ld      h, 0
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                or      a
+                sbc     hl, de
+                ld      de, swposes
+                add     hl, de
+                push    hl
+                ld      de, 6
+                add     hl, de
+                ld      a, (hl)
+                pop     hl
+                call    dp_load
+                or      1
+                ret
+srnone:         call    page_art
+                xor     a
+                ret
+
+body_rec:       call    page_canvas     ; the frame table lives there now
                 ld      a, (frame)      ; and Fdy with it, wanted after the
                 ld      l, a            ; room has been paged back in
                 ld      h, 0
                 ld      de, fdy
                 add     hl, de
                 ld      a, (hl)
-                ld      (curfdy), a
+                push    af
                 call    frame_entry
+                pop     af
+
+; HL = a picture's record -- width, height, the two anchors, the blob -- and
+; A = its Fdy.  Into cur*, and the room paged back in.
+
+dp_load:        ld      (curfdy), a
                 ld      a, (hl)
                 ld      (curw), a
                 inc     hl
@@ -3179,12 +3450,12 @@ dpxoff:         ld      a, (hl)
                 ld      hl, sprblob
                 add     hl, de
                 ld      (curdat), hl
-                call    page_art        ; and the room is wanted again
+                jp      page_art        ; and the room is wanted again
 
 ; The anchor is the leading edge, so the offset differs with facing and is
 ; kept with the sprite rather than worked out here.
 
-                ld      a, (curoff)     ; signed, and his coordinate is two
+dp_place:       ld      a, (curoff)     ; signed, and his coordinate is two
                 ld      e, a            ; bytes wide
                 ld      d, 0
                 or      a
@@ -3208,7 +3479,7 @@ shoff:          ld      hl, (charx)
                 neg
                 add     a, b
 
-                ld      (rawcol), a
+                ld      (newcol), a     ; unclipped: dp_clip clips it
 
 ; SETUPCHAR: the picture sits at CharY + Fdy, not at CharY.  Every frame of a
 ; sequence has its own, and that is what carries him up and down within it.
@@ -3231,6 +3502,7 @@ shoff:          ld      hl, (charx)
                 ld      (neww), a
                 ld      a, (curh)
                 ld      (newh), a
+                ret
 
 ; Clip him to the thirty two columns the screen has.  The room is 280 wide
 ; and the view 256, so he can be half off the side of it -- and a byte column
@@ -3238,9 +3510,9 @@ shoff:          ld      hl, (charx)
 ; is where the rubbish on the left came from.  What the left edge cuts off is
 ; skipped in the source too, so the rest still lines up.
 
-                xor     a
+dp_clip:        xor     a
                 ld      (spskip), a
-                ld      a, (rawcol)
+                ld      a, (newcol)
                 ld      c, a
                 bit     7, a
                 jr      z, clipright
@@ -3270,15 +3542,14 @@ clipset:        ld      a, c
 clipnone:       xor     a               ; none of him is on screen
                 ld      (neww), a
                 ld      (newcol), a
-clipdone:
-                call    crop_char
-                call    erase_new
-                call    draw_flames     ; background, so before he is drawn
+clipdone:       ret
 
-; Only now: everything above reads the room and the tables, and the sprite's
-; bank goes over the top of the room.
+; One picture: placed, clipped, and laid down row by row.  Only now does the
+; sprite's bank go over the top of the room.
 
-                ld      a, (neww)       ; none of him on the screen
+dp_image:       call    dp_place
+                call    dp_clip
+                ld      a, (neww)       ; none of it on the screen
                 or      a
                 ret     z
                 call    dfsetup
@@ -4237,6 +4508,11 @@ rawcol:         db      0               ; where his picture wanted to go,
 spskip:         db      0               ; and what the left edge cut off
 frstart:        db      0               ; the interrupt this frame began on
 tilestate:      db      0               ; the state of the tile last read
+gotsword:       db      0               ; he has picked the sword up: CTRL.S
+                                        ; asks it before he may draw on anyone
+charsword:      db      0               ; CharSword: 2 with it out, en garde
+rbody:          ds      4               ; where his own picture goes
+runion:         ds      4               ; and the frame's, with the sword
 curfdy:         db      0               ; SETUPCHAR's Fdy for this frame
 collidel:       db      0               ; CHECKBARR and its helpers
 collider:       db      0

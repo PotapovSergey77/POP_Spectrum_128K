@@ -23,6 +23,8 @@ mtc:            ld      a, (mtrow)
                 add     hl, de
                 ld      a, (hl)
                 and     0x1f
+                cp      BG_SWORD
+                jp      z, mtsword
                 cp      BG_TORCH
                 jp      nz, mtnext
                 ld      a, (mtcol)
@@ -101,6 +103,27 @@ mtnext:         ld      hl, mtcol
                 cp      3
                 jp      c, mtr
                 ret
+
+; ADDTORCHES puts the swords on the list as well, and TRIGSWORD starts each
+; one at a random point of its wait so two never gleam together.  HL is
+; still at its byte of roomids, which is the block's own index.
+
+mtsword:        ld      de, roomids
+                or      a
+                sbc     hl, de
+                ld      a, l
+                ld      (trloc), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+                call    trobat
+                ld      a, r
+                and     0x1f
+                ld      (trobst), a
+                call    trobsave
+                ld      a, 1
+                ld      (trdirec), a
+                call    addtrob
+                jp      mtnext
 
 mtrow:          db      0
 mtcol:          db      0

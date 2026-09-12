@@ -634,10 +634,14 @@ damask:         ld      a, (objid)
 
 damain:         ld      a, (objid)
                 cp      BG_LOOSE
-                jr      nz, dapiece
+                jr      nz, danotloose
                 call    loose_y
                 ld      hl, bgtables + T_LOOSEA
                 call    bgentry
+                jr      dago
+danotloose:     cp      BG_SWORD        ; drawsworda: its own picture, and
+                jr      nz, dapiece     ; piecea has none for it
+                call    sword_gleam
                 jr      dago
 dapiece:        call    tab_piecea
 dago:           or      a
@@ -651,6 +655,21 @@ dago:           or      a
                 ld      a, c
                 ld      c, BG_ORA
                 jp      bglay
+
+; DRAWSWORDA in FRAMEADV.S.  The sword on the ground is no piece of the
+; background -- piecea has a nought where its picture would be -- but a
+; picture of its own laid over the floor, and it gleams: state 1 is the
+; bright one, every other state the plain.  Out: A = the image.
+
+SWORDGLEAM0     equ     0x99
+SWORDGLEAM1     equ     0xb3
+
+sword_gleam:    ld      a, (state)
+                dec     a
+                ld      a, SWORDGLEAM1
+                ret     z
+                ld      a, SWORDGLEAM0
+                ret
 
 ; getloosey: at rest a loose floor draws exactly like a solid one.
 
@@ -1466,10 +1485,14 @@ fpwhole:        ld      a, (objid)      ; addamask, then adda
                 call    page_bg
 fpa:            ld      a, (objid)
                 cp      BG_LOOSE
-                jr      nz, fppiece
+                jr      nz, fpnotloose
                 call    loose_y
                 ld      hl, bgtables + T_LOOSEA
                 call    bgentry
+                jr      fpgo
+fpnotloose:     cp      BG_SWORD
+                jr      nz, fppiece
+                call    sword_gleam
                 jr      fpgo
 fppiece:        call    tab_piecea
 fpgo:           or      a
@@ -3322,6 +3345,8 @@ animobj:        xor     a               ; nothing wants redrawing yet -- and
                 jr      z, aofloor
                 cp      BG_EXIT
                 jr      z, aoexit
+                cp      BG_SWORD
+                jp      z, aosword
                 cp      BG_SPACE
                 jr      z, aodone       ; the floor that was here has gone
                 jp      stopobj         ; none of these: off the list
@@ -3422,6 +3447,31 @@ aoplain:        call    redplate
                 inc     a
                 ld      (blockcol), a
                 jp      rq_mask
+
+; ANIMSWORD in MOVER.S.  Out of sight it comes off the list.  The state
+; counts down a frame at a time; at 1 DRAWSWORDA draws the bright picture,
+; and at nought the wait starts again, 40 to 103 frames.  POP redraws it
+; every frame; the picture only changes as the gleam comes and as it goes,
+; so only those two are drawn.
+
+aosword:        call    onscreen
+                jp      nz, stopobj
+                ld      a, (trobst)
+                dec     a
+                jr      z, aoswnew
+                ld      (trobst), a
+                cp      1
+                jp      nz, aodone
+                jr      aoswred
+aoswnew:        ld      a, r
+                and     0x3f
+                add     a, 40
+                ld      (trobst), a
+aoswred:        ld      a, 1
+                ld      (redwant), a
+                ld      a, SWORDWIPE
+                ld      (redh), a
+                jp      aodone
 
 redwant:        db      0
 mskwant:        db      0

@@ -28,10 +28,12 @@ sign is applied by whichever way the prince faces.
 Usage: mkassets.py [outdir]
 """
 import os
+import re
 import sys
 
 import bgexport
 import popframe
+import popimg
 import popseq
 import poplevel
 import renderroom
@@ -240,6 +242,21 @@ def build_sprites(frames_used):
                               | len(banks[-1])).to_bytes(2, 'little')
         banks[-1] += data
     return bytes(table), [bytes(b) for b in banks], trims
+
+
+def sword_table():
+    """SWORDTAB in FRAMEDEF.S: (image in chtable3, dx, dy) for swords 1 on."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..',
+                        '01 POP Source', 'Source', 'FRAMEDEF.S')
+    src = open(path).read()
+    src = src[src.index('SWORDTAB'):]
+    out = []
+    for m in re.finditer(r'^:\d+\s+db\s+(\$?[0-9a-fA-F]+),(-?\d+),(-?\d+)',
+                         src, re.M):
+        v = m.group(1)
+        out.append((int(v[1:], 16) if v.startswith('$') else int(v),
+                    int(m.group(2)), int(m.group(3))))
+    return out
 
 
 # The one picture whose mask is real: it is composed of two renderings and
@@ -537,6 +554,45 @@ def main(argv):
     table += bytes([ff_w, FF_ROWS, 0, 0]) + ff_at.to_bytes(2, 'little')
     blobs[-1] += ff_data
     assert len(blobs[-1]) <= BANK_SIZE - 2, 'the falling floor does not fit'
+
+    # SETUPSWORD in CTRLSUBS.S: the sword in his hand is not in his picture
+    # but a picture of its own out of chtable3, laid over him at SWORDTAB's
+    # offset from his anchor -- dx the way he faces, dy down from FCharY.
+    # Both offsets are folded here into one record per frame, shaped like a
+    # frame's own (width, height, anchor facing left, anchor facing right,
+    # blob) and the sword's Fdy after it, so the engine lays it down exactly
+    # as it lays him down.  fswd says which record a frame has, 0 for none.
+    swtab = sword_table()
+    t3 = popimg.Table(os.path.join(popframe.IMAGES, popframe.TABLES[2]))
+    frl = popframe.load()
+    fswd = bytearray(len(table) // 6)
+    poses = bytearray()
+    for n in sorted(used):
+        f = frl.get(n)
+        if f is None or not f.sword & 0x3f:
+            continue
+        im, sdx, sdy = swtab[(f.sword & 0x3f) - 1]
+        if not im:
+            continue                    # image 0: SETUPSWORD draws nothing
+        w, h, data = sprite_bytes(t3.get(im), 0)
+        cut, below, w, h, data = trim_frame(w, h, data)
+        if not h:
+            continue
+        if len(blobs[-1]) + len(data) > BANK_SIZE - 2:
+            blobs.append(b'')
+        at = ((len(blobs) - 1) << BANK_SHIFT) | len(blobs[-1])
+        blobs[-1] += data
+        # SETUPCHAR doubles his Fdx into FCharX, which is in pixels already,
+        # and ADDFCHARX then adds the sword's dx to that as it stands: the
+        # sword's is in pixels, his in 140 wide units.
+        total = 2 * f.dx + sdx
+        left, right = -total + cut * 8, total - (cut + w) * 8
+        dy = f.dy + sdy - below
+        assert all(-128 <= v < 128 for v in (left, right, dy)), n
+        poses += bytes([w, h, left & 0xff, right & 0xff]) \
+            + at.to_bytes(2, 'little') + bytes([dy & 0xff])
+        fswd[n] = len(poses) // 7
+    assert len(blobs) <= 3, 'the swords do not fit'
     # The frame table and the sequences share the canvas bank.  Both are
     # read at points in a frame where nothing wants the room, so they are
     # paged in for those, and the canvas starts after them.
@@ -563,7 +619,7 @@ def main(argv):
             fcheck[n] = fr[n].check
             fdx[n] = fr[n].dx & 0xff
             fdy[n] = (fr[n].dy - trims.get(n, 0)) & 0xff
-    spare = table + code + entry + fcheck + fdx + fdy
+    spare = table + code + entry + fcheck + fdx + fdy + fswd + poses
     open(os.path.join(binout, 'bank_spare.bin'), 'wb').write(spare)
 
     # The background bank: the two dungeon image tables, the piece tables of
@@ -607,6 +663,10 @@ def main(argv):
                                    + len(entry) + top),
            'fdy         equ %d' % (tables + len(table) + len(code)
                                    + len(entry) + 2 * top),
+           'fswd        equ %d' % (tables + len(table) + len(code)
+                                   + len(entry) + 3 * top),
+           'swposes     equ %d' % (tables + len(table) + len(code)
+                                   + len(entry) + 4 * top),
            'MASKCAN     equ %d' % maskcan,
            'CANVAS      equ %d' % canvas]
     for k, v in bgat.items():

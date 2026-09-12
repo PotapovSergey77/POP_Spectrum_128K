@@ -186,6 +186,10 @@ class Room:
         if objid == bg.loose:
             y = st['state'] & 0x7f if st['state'] & 0x80 else 0
             img = bg.loosea[min(y, len(bg.loosea) - 1)]
+        elif objid == bg.sword:
+            # drawsworda: piecea has no picture for the sword, it has one of
+            # its own, and it gleams -- state 1 is the bright one.
+            img = bg.swordgleam1 if st['state'] == 1 else bg.swordgleam0
         else:
             img = bg.piecea[objid]
         if img:
@@ -650,6 +654,8 @@ class Cover(Room):
             if objid == bg.loose:                   # adda
                 y = st['state'] & 0x7f if st['state'] & 0x80 else 0
                 img = bg.loosea[min(y, len(bg.loosea) - 1)]
+            elif objid == bg.sword:                 # drawsworda
+                img = bg.swordgleam1 if st['state'] == 1 else bg.swordgleam0
             else:
                 img = bg.piecea[objid]
             if img:
