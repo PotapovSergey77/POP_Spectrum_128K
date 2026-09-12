@@ -139,6 +139,42 @@ def sprite_bytes(img, mirror):
     return width, len(rows), bytes(out)
 
 
+def trim_frame(width, height, data):
+    """
+    The frame's own box: the (mask, data) pairs that are wholly transparent
+    make a border round every picture -- a standing figure in a box wide
+    enough for a sword -- and two fifths of the bytes are in it.  Cutting the
+    box down to what is drawn saves the space and the blitter's time both,
+    and costs nothing at all in the drawing: every row is still the same
+    length and the same stride, so dfsetup goes on working out the row once
+    for the whole frame.  Only whole byte columns go, so nothing has to shift.
+
+    Out: (left, bottom, width, height, data) -- left in byte columns and
+    bottom in rows, for the anchors to be moved by.
+    """
+    rows = [[(data[(r * width + b) * 2], data[(r * width + b) * 2 + 1])
+             for b in range(width)] for r in range(height)]
+    clear = (0xff, 0)
+    left, right = 0, width - 1
+    while left < width and all(r[left] == clear for r in rows):
+        left += 1
+    while right >= left and all(r[right] == clear for r in rows):
+        right -= 1
+    top, bottom = 0, height - 1
+    while top < height and all(p == clear for p in rows[top]):
+        top += 1
+    while bottom >= top and all(p == clear for p in rows[bottom]):
+        bottom -= 1
+    if right < left or bottom < top:
+        return 0, 0, 0, 0, b''           # nothing to draw at all
+    out = bytearray()
+    for r in rows[top:bottom + 1]:
+        for pair in r[left:right + 1]:
+            out += bytes(pair)
+    return (left, height - 1 - bottom,
+            right - left + 1, bottom - top + 1, bytes(out))
+
+
 def build_sprites(frames_used):
     """
     Table of (width, height, xoff left, xoff right, blob offset), indexed by
@@ -146,16 +182,20 @@ def build_sprites(frames_used):
     pixels behind it cut into bank sized pieces.  Only one facing is stored --
     mirroring at draw time through a bit reversal table costs a lookup per
     byte and saves ten kilobytes.
+
+    Also out: the rows cut off the bottom of each frame, which Fdy carries.
     """
     frames = popframe.load()
     top = max(frames_used) + 1
-    table, banks = bytearray(top * 6), [bytearray()]
+    table, banks, trims = bytearray(top * 6), [bytearray()], {}
     for n in frames_used:
         if n not in frames:
             continue            # frame 0 is "nothing to draw"
         img = popframe.image(frames[n])
         apple_bytes = (img.px_width + 6) // 7
         width, height, data = sprite_bytes(img, 0)
+        cut, below, width, height, data = trim_frame(width, height, data)
+        trims[n] = below
         if len(banks[-1]) + len(data) > BANK_SIZE - 2:
             banks.append(bytearray())   # this one will not fit: start the next
         e = n * 6
@@ -166,13 +206,18 @@ def build_sprites(frames_used):
         # where it is mirrored inside its buffer, at CharX + Fdx less the
         # buffer's width.  Both then have the foot in the same place, which
         # one constant for the two of them could never manage.
+        #
+        # The box cut off the left moves both of them along by what it took:
+        # facing left the stored edge now stands `cut` bytes further in, and
+        # facing right, where the row is reversed inside a buffer that is
+        # narrower by as much, the far edge is `cut + width` from the anchor.
         dx = 2 * frames[n].dx
-        table[e:e + 4] = bytes([width, height, (-dx) & 0xff,
-                                (dx - width * 8) & 0xff])
+        table[e:e + 4] = bytes([width, height, (-dx + cut * 8) & 0xff,
+                                (dx - (cut + width) * 8) & 0xff])
         table[e + 4:e + 6] = (((len(banks) - 1) << BANK_SHIFT)
                               | len(banks[-1])).to_bytes(2, 'little')
         banks[-1] += data
-    return bytes(table), [bytes(b) for b in banks]
+    return bytes(table), [bytes(b) for b in banks], trims
 
 
 # DrawFF in FRAMEADV.S: a floor on its way down is the loose floor's own art
@@ -455,7 +500,7 @@ def main(argv):
 
     seq, code, entry = build_sequences()
     used = seq.walk(KID_SEQS)
-    table, blobs = build_sprites(used)
+    table, blobs, trims = build_sprites(used)
     # A falling floor is nobody's frame, so it goes one past his own, in the
     # bank the last of the sprites leave half empty.
     ff_w, ff_data = falling_floor()
@@ -481,11 +526,15 @@ def main(argv):
     fcheck = bytearray(top)
     fdx = bytearray(top)
     fdy = bytearray(top)
+    # Fdy is where the drawing hangs the picture, so the rows cut off the
+    # bottom of a frame come off it: the top row then lands where it did.
+    # Fdx and Fcheck are the logic's own -- GETBASEX asks them where his
+    # weight is, not where his pixels are -- and the box never touches them.
     for n in range(top):
         if n in fr:
             fcheck[n] = fr[n].check
             fdx[n] = fr[n].dx & 0xff
-            fdy[n] = fr[n].dy & 0xff
+            fdy[n] = (fr[n].dy - trims.get(n, 0)) & 0xff
     spare = table + code + entry + fcheck + fdx + fdy
     open(os.path.join(binout, 'bank_spare.bin'), 'wb').write(spare)
 

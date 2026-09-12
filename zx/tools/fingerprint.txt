@@ -1,25 +1,25 @@
 walk left 1 0 0 0 0 0
 walk left 2 260 20 15 3 41
 walk left 3 278 19 15 3 41
-walk left 4 305 19 15 4 41
+walk left 4 295 19 15 3 41
 walk left 5 366 19 16 4 40
 walk left 6 377 19 17 4 39
 walk left 7 394 18 18 5 38
-walk left 8 362 18 18 5 38
-walk left 9 388 17 17 5 39
-walk left 10 461 16 16 6 40
+walk left 8 352 18 18 5 37
+walk left 9 378 17 17 5 38
+walk left 10 449 16 16 6 39
 walk left 11 470 16 16 6 40
 walk left 12 373 15 17 5 39
 walk left 13 410 14 18 5 38
-walk left 14 435 13 16 6 40
-walk left 15 391 12 16 6 40
-walk left 16 315 12 17 4 39
-walk left 17 333 11 17 5 39
-walk left 18 379 9 16 6 40
-walk left 19 329 9 24 6 35
+walk left 14 423 13 16 6 39
+walk left 15 369 12 16 5 39
+walk left 16 308 12 17 4 38
+walk left 17 326 11 17 5 38
+walk left 18 374 9 16 6 39
+walk left 19 313 9 24 5 35
 walk left 20 356 9 29 5 36
-walk left 21 401 9 39 5 35
-walk left 22 479 9 48 5 38
+walk left 21 344 9 39 4 35
+walk left 22 393 9 48 4 38
 walk left 23 509 9 68 4 36
 walk left 24 514 9 83 4 36
 walk left 25 476 9 90 4 29
@@ -28,16 +28,16 @@ walk left 27 361 9 100 4 19
 walk left 28 303 8 99 4 20
 walk left 29 329 8 97 4 22
 walk left 30 492 8 95 5 24
-walk left 31 526 8 93 5 26
+walk left 31 374 8 93 4 26
 walk left 32 581 8 90 5 29
 walk left 33 575 8 89 5 30
 walk left 34 613 8 86 5 33
 walk left 35 418 8 84 4 35
-walk left 36 408 8 81 4 38
+walk left 36 293 8 81 3 38
 walk left 37 370 9 80 3 39
 walk left 38 377 9 78 3 41
 walk left 39 322 8 78 3 41
-walk left 40 462 8 78 4 41
+walk left 40 338 8 78 3 41
 walk left 41 512 8 79 4 40
 walk left 42 501 8 80 4 39
 walk left 43 515 7 81 5 38
@@ -48,13 +48,13 @@ walk right 4 310 19 17 3 39
 walk right 5 380 19 16 4 40
 walk right 6 393 19 16 4 40
 walk right 7 274 19 15 3 41
-walk right 8 302 18 15 4 41
+walk right 8 285 19 15 3 41
 walk right 9 364 18 16 4 40
 walk right 10 378 17 17 4 39
 walk right 11 392 17 18 5 38
-walk right 12 338 18 18 5 38
-walk right 13 390 19 17 5 39
-walk right 14 461 19 16 6 40
+walk right 12 328 18 18 5 37
+walk right 13 380 19 17 5 38
+walk right 14 449 19 16 6 39
 walk right 15 438 19 16 6 40
 walk right 16 559 21 17 5 39
 walk right 17 663 22 18 5 38
@@ -103,25 +103,25 @@ walk right 59 646 25 15 3 41
 fall 1 0 0 0 0 0
 fall 2 260 20 15 3 41
 fall 3 278 19 15 3 41
-fall 4 305 19 15 4 41
+fall 4 295 19 15 3 41
 fall 5 366 19 16 4 40
 fall 6 377 19 17 4 39
 fall 7 394 18 18 5 38
-fall 8 362 18 18 5 38
-fall 9 388 17 17 5 39
-fall 10 461 16 16 6 40
+fall 8 352 18 18 5 37
+fall 9 378 17 17 5 38
+fall 10 449 16 16 6 39
 fall 11 470 16 16 6 40
 fall 12 373 15 17 5 39
 fall 13 410 14 18 5 38
-fall 14 435 13 16 6 40
-fall 15 391 12 16 6 40
-fall 16 315 12 17 4 39
-fall 17 333 11 17 5 39
-fall 18 379 9 16 6 40
-fall 19 329 9 24 6 35
+fall 14 423 13 16 6 39
+fall 15 369 12 16 5 39
+fall 16 308 12 17 4 38
+fall 17 326 11 17 5 38
+fall 18 374 9 16 6 39
+fall 19 313 9 24 5 35
 fall 20 356 9 29 5 36
-fall 21 401 9 39 5 35
-fall 22 479 9 48 5 38
+fall 21 344 9 39 4 35
+fall 22 393 9 48 4 38
 fall 23 509 9 68 4 36
 fall 24 514 9 83 4 36
 fall 25 476 9 90 4 29
@@ -138,7 +138,7 @@ fall 35 361 9 100 4 19
 fall 36 303 8 99 4 20
 fall 37 329 8 97 4 22
 fall 38 492 8 95 5 24
-fall 39 526 8 93 5 26
+fall 39 374 8 93 4 26
 fall 40 581 8 90 5 29
 fall 41 575 8 89 5 30
 fall 42 613 8 86 5 33
@@ -163,12 +163,12 @@ jump up 17 289 20 16 3 40
 jump up 18 296 20 16 3 40
 jump up 19 308 20 16 4 40
 jump up 20 314 20 16 4 40
-jump up 21 335 20 17 5 39
+jump up 21 305 20 17 4 39
 jump up 22 309 20 18 4 38
 jump up 23 271 20 20 4 36
 jump up 24 293 19 21 4 35
 jump up 25 295 19 18 4 38
-jump up 26 311 19 6 4 47
+jump up 26 307 19 6 3 47
 jump up 27 350 19 252 4 50
 jump up 28 366 19 0 3 54
 jump up 29 322 19 8 3 48
@@ -200,12 +200,12 @@ crouch 15 218 19 37 4 19
 crouch 16 251 19 36 4 20
 crouch 17 273 19 34 4 22
 crouch 18 306 18 32 5 24
-crouch 19 322 18 30 5 26
+crouch 19 312 18 30 4 26
 crouch 20 350 18 27 5 29
 crouch 21 331 18 26 5 30
 crouch 22 334 18 23 5 33
 crouch 23 312 18 21 4 35
-crouch 24 290 18 18 4 38
+crouch 24 280 18 18 3 38
 crouch 25 262 19 17 3 39
 crouch 26 266 19 15 3 41
 crouch 27 266 19 15 3 41
