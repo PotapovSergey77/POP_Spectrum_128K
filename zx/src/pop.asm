@@ -1153,7 +1153,37 @@ jhmed:          call    get_fwd_dist
                 ld      a, SQ_JUMPHANGMED
                 jp      jumpseq
 
-jumphigh:       ld      a, SQ_HIGHJUMP
+; DoJumphigh.  A barrier close in front is backed away from first, and then
+; the block his hands reach decides which jump it is: a ceiling over him and
+; he pushes it -- jumpup, the sequence that carries the jar -- while open sky
+; gives the plain high jump.  Only highjump was here, so nothing he jumped
+; into was ever jarred.
+
+jumphigh:       call    get_fwd_dist
+                cp      4
+                jr      nc, jhceil
+                ld      b, a
+                ld      a, (fwdkind)
+                dec     a               ; only a barrier is backed away from
+                jr      nz, jhceil
+                ld      a, b
+                sub     3
+                call    addcharx
+
+jhceil:         call    base_x          ; where his hands touch: DoJumphigh
+                ld      de, ANGLE_PX - 6 ; reads it with getblockx, which
+                add     hl, de          ; takes no angle off
+                ld      a, (blocky)
+                dec     a
+                ld      c, a
+                call    tile_in_row
+                cp      BLK_BLOCK
+                jr      z, jhtouch
+                call    cmp_space
+                jr      nz, jhtouch
+                ld      a, SQ_HIGHJUMP  ; no ceiling above
+                jp      jumpseq
+jhtouch:        ld      a, SQ_JUMPUP    ; touch it, and jar the room above
                 jp      jumpseq
 
 ; DoStandjump marks both presses used and clears nothing else -- the
