@@ -4200,26 +4200,31 @@ rqdone:         ld      a, (rqn)        ; off the head
                 ldir
                 jp      rqloop
 
-; Carry: a step may begin.  The clock here counts whole periods, and a step is
-; one indivisible piece of work of up to a period -- the exit door's bands run
-; to seventy thousand cycles.  So: any number while the frame is in its first
-; period; a single one begun in the second, which ends inside the third at the
-; latest; none in the third.  When his own work is light that is a whole pass
-; of a gate or the door every frame, which is what shows it moving smoothly,
-; and when it is heavy the queue waits rather than make the frame late.
+; Carry: a step may begin.  The first of a frame goes whatever the clock
+; says: on the machine a frame's own work often ends in its third period, and
+; holding the queue back then drew nothing at all -- floors did not wiggle, a
+; flask taken stayed, gates did not rise.  After that the clock counts whole
+; periods and a step can be most of one -- the exit door's bands run to
+; seventy thousand cycles -- so: any more while the frame is in its first
+; period, one more begun in its second, and none in its third.
 
-rqtime:         ld      a, (FRAMES)
-                ld      hl, frstart
+rqtime:         ld      hl, rqdid
+                ld      a, (hl)
+                or      a
+                jr      z, rqtyes       ; the first
+                ld      a, (FRAMES)
+                ld      de, frstart
+                ex      de, hl
                 sub     (hl)
-                jr      z, rqtyes       ; still the frame's first period
+                ex      de, hl
+                jr      z, rqtyes       ; still the first period
                 cp      FRAME_WAIT - 1
                 ret     nc              ; the last: nothing more
-                ld      hl, rqdid       ; the middle one: a single step, the
-                ld      a, (hl)         ; longest being all but a period, so
-                or      a               ; that it ends before the frame is due
+                bit     1, (hl)         ; the middle one: a single step
                 ret     nz
-                inc     (hl)
-rqtyes:         scf
+                set     1, (hl)
+rqtyes:         set     0, (hl)
+                scf
                 ret
 
 ; A block that has gone back into the room still has to reach the working
