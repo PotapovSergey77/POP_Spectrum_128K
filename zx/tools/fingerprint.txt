@@ -20,27 +20,27 @@ walk left 19 313 9 24 5 35
 walk left 20 356 9 29 5 36
 walk left 21 344 9 39 4 35
 walk left 22 393 9 48 4 38
-walk left 23 509 9 68 4 36
-walk left 24 514 9 83 4 36
-walk left 25 476 9 90 4 29
-walk left 26 420 9 96 4 23
-walk left 27 361 9 100 4 19
+walk left 23 539 9 68 4 36
+walk left 24 565 9 83 4 36
+walk left 25 499 9 90 4 29
+walk left 26 296 8 96 4 23
+walk left 27 265 8 100 4 19
 walk left 28 303 8 99 4 20
 walk left 29 329 8 97 4 22
-walk left 30 492 8 95 5 24
-walk left 31 374 8 93 4 26
-walk left 32 581 8 90 5 29
-walk left 33 575 8 89 5 30
-walk left 34 613 8 86 5 33
-walk left 35 418 8 84 4 35
-walk left 36 293 8 81 3 38
-walk left 37 370 9 80 3 39
-walk left 38 377 9 78 3 41
-walk left 39 322 8 78 3 41
-walk left 40 338 8 78 3 41
-walk left 41 512 8 79 4 40
-walk left 42 501 8 80 4 39
-walk left 43 515 7 81 5 38
+walk left 30 361 7 95 5 24
+walk left 31 304 7 93 4 26
+walk left 32 421 7 90 5 29
+walk left 33 406 7 89 5 30
+walk left 34 417 7 86 5 33
+walk left 35 401 8 84 4 35
+walk left 36 278 8 81 3 38
+walk left 37 300 8 80 3 39
+walk left 38 311 8 78 3 41
+walk left 39 310 8 78 3 41
+walk left 40 323 8 78 3 41
+walk left 41 377 7 79 4 40
+walk left 42 396 7 80 4 39
+walk left 43 419 6 81 5 38
 walk right 1 0 0 0 0 0
 walk right 2 260 20 15 3 41
 walk right 3 272 19 17 3 39
@@ -122,27 +122,27 @@ fall 19 313 9 24 5 35
 fall 20 356 9 29 5 36
 fall 21 344 9 39 4 35
 fall 22 393 9 48 4 38
-fall 23 509 9 68 4 36
-fall 24 514 9 83 4 36
-fall 25 476 9 90 4 29
-fall 26 420 9 96 4 23
-fall 27 361 9 100 4 19
-fall 28 361 9 100 4 19
-fall 29 361 9 100 4 19
-fall 30 361 9 100 4 19
-fall 31 361 9 100 4 19
-fall 32 361 9 100 4 19
-fall 33 361 9 100 4 19
-fall 34 361 9 100 4 19
-fall 35 361 9 100 4 19
+fall 23 539 9 68 4 36
+fall 24 565 9 83 4 36
+fall 25 499 9 90 4 29
+fall 26 296 8 96 4 23
+fall 27 265 8 100 4 19
+fall 28 265 8 100 4 19
+fall 29 265 8 100 4 19
+fall 30 265 8 100 4 19
+fall 31 265 8 100 4 19
+fall 32 265 8 100 4 19
+fall 33 265 8 100 4 19
+fall 34 265 8 100 4 19
+fall 35 265 8 100 4 19
 fall 36 303 8 99 4 20
 fall 37 329 8 97 4 22
-fall 38 492 8 95 5 24
-fall 39 374 8 93 4 26
-fall 40 581 8 90 5 29
-fall 41 575 8 89 5 30
-fall 42 613 8 86 5 33
-fall 43 418 8 84 4 35
+fall 38 361 7 95 5 24
+fall 39 304 7 93 4 26
+fall 40 421 7 90 5 29
+fall 41 406 7 89 5 30
+fall 42 417 7 86 5 33
+fall 43 401 8 84 4 35
 jump up 1 0 0 0 0 0
 jump up 2 260 20 15 3 41
 jump up 3 260 20 15 3 41

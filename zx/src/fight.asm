@@ -430,7 +430,7 @@ aganim:         call    step_seq
                 xor     a
                 ld      (yvel), a
                 ld      hl, newcol      ; nothing of him drawn yet
-                ld      b, 8
+                ld      b, 13           ; and his rectangles, and CharXVel
 agrect:         ld      (hl), a
                 inc     hl
                 djnz    agrect

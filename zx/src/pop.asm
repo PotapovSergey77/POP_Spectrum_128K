@@ -866,7 +866,8 @@ input_step:     ld      a, (charlife)   ; PLAYERCTRL: no strength left, no
                 or      a
                 jr      nz, isalive
                 ld      (charlife), a
-isalive:        call    read_input
+isalive:        call    stun_tick
+                call    read_input
                 call    facejstk
                 call    ctrl
                 jp      facejstk
@@ -1065,8 +1066,8 @@ runturn:        call    clrall
 
 hanging:        ld      a, (jstky)
                 or      a
-                jp      m, hangup       ; up: climb
-                ld      a, (btn)
+                jp      m, climb_up     ; up: climb
+hangbtn:        ld      a, (btn)
                 or      a
                 jr      z, hangdrop     ; let go of the button, let go of the
                                         ; ledge
@@ -1077,15 +1078,6 @@ hanging:        ld      a, (jstky)
                 cp      BLK_BLOCK
                 ret     nz
                 ld      a, SQ_HANGSTRAIGHT
-                jp      jumpseq
-
-; :climbup in CTRL.S reads the block above but only to refuse a mirror, a
-; slicer or a gate that is not open far enough.  There is no "is there floor
-; up there" test -- he is holding the ledge, so there is.
-
-hangup:         call    clrall
-                ld      (clru), a
-                ld      a, SQ_CLIMBUP
                 jp      jumpseq
 
 hangdrop:       call    clrall
@@ -1392,10 +1384,7 @@ do_standjump:   ld      a, 1
                 ld      a, SQ_STANDJUMP
                 jp      jumpseq
 
-do_runjump:     call    clrall
-                ld      (clru), a
-                ld      a, SQ_RUNJUMP
-                jp      jumpseq
+do_runjump:     jp      run_jump
 
 ; ------------------------------------------------------------------ down
 ;
@@ -1740,7 +1729,9 @@ sqact:          ld      a, (hl)
                 ld      (charact), a
                 jp      seqloop
 
-sqsetfall:      inc     hl              ; the X velocity, which we do not use
+sqsetfall:      ld      a, (hl)         ; how fast along, and how fast down
+                inc     hl
+                ld      (xvel), a
                 ld      a, (hl)
                 inc     hl
                 ld      (yvel), a
@@ -2042,9 +2033,12 @@ airbump:        ld      a, SND_SMACKWALL ; BumpSound
                 ld      a, -4           ; four back off the wall
                 call    addcharx
                 ld      a, (charact)
-                cp      4               ; falling already: that is all
-                ret     z
-                ld      a, SQ_BUMPFALL
+                cp      4               ; falling already: he rebounds off
+                ld      a, 0            ; the wall and drops
+                jr      nz, abfall
+                ld      (xvel), a
+                ret
+abfall:         ld      a, SQ_BUMPFALL
                 jr      bumpseq
 
 groundbump:     ld      a, (blocky)
@@ -3250,7 +3244,7 @@ ibreland:       call    move_by
 ; into one block's width and halved -- and 288 bytes we did not have.
 
 get_dist:       call    base_x
-                ld      de, -ANGLE_PX
+dist_hl:        ld      de, -ANGLE_PX
                 add     hl, de
 gdup:           bit     7, h            ; up into the block above zero
                 jr      z, gddown
@@ -3299,7 +3293,7 @@ check_floor:    ld      a, (charact)
                 cp      6               ; hanging straight
                 ret     z
                 cp      3               ; in the air already
-                ret     z
+                jp      z, cf_air
                 cp      4
                 ret     z
                 call    frame_index     ; does this frame look for floor?
@@ -3321,14 +3315,7 @@ cfspace:        call    cmp_space       ; solid: he stays where he is
                 xor     a
                 ld      (yvel), a
                 ld      (charsword), a  ; so that he can grab on
-                ld      a, (frame)
-                cp      150
-                jr      c, cfstep
-                cp      180
-                jr      nc, cfstep
-                call    fightfall_seq   ; from a fighting stance
-                jp      jumpseq
-cfstep:         ld      a, SQ_STEPFALL
+                call    fall_seq        ; which fall it is
                 jp      jumpseq
 
 ; GRAVITY and ADDFALL, then the floor plane test of `falling`.  stepfall
@@ -3354,11 +3341,13 @@ fallvel:        ld      (yvel), a
                 ld      a, (chary)
                 add     a, b
                 ld      (chary), a
+                ld      a, (xvel)       ; ADDFALL: and along, as the jump or
+                call    move_by         ; the fall set him going
 fallplane:      call    floor_plane
                 ld      b, a
                 ld      a, (chary)
                 cp      b
-                ret     c               ; not down to the plane yet
+                jp      c, fall_on      ; not down to the plane yet: grab?
                 call    under_flags
                 cp      BLK_BLOCK
                 jr      nz, dfspace
@@ -3439,6 +3428,216 @@ dsleft:         ld      b, a
                 sub     b
                 ld      (hl), a
                 ret
+
+; ---------------------------------------------------------------- grabbing
+;
+; fallon in CTRL.S: falling, the button down, not yet down to the floor
+; plane and slow enough to hold on, he reaches eight units forward for a
+; ledge above and in front -- and gets it, if there is one: square on the
+; block, at the floor line, hanging, and stunned a moment so that he cannot
+; climb straight on up.
+
+GRABREACH       equ     -8
+GRABSPEED       equ     32
+GRABLEAD        equ     25
+STUNTIME        equ     12
+
+fall_on:        ld      a, (btn)
+                or      a
+                ret     z
+                ld      a, (charlife)   ; & is he alive?
+                or      a
+                ret     p
+                ld      a, (yvel)
+                cp      GRABSPEED
+                ret     nc              ; falling too fast
+                call    floor_plane
+                ld      b, a
+                ld      a, (chary)
+                add     a, GRABLEAD
+                cp      b
+                ret     c               ; not within grabbing range yet
+                ld      hl, (charx)
+                ld      (fosave), hl
+                ld      a, GRABREACH
+                call    move_by
+                call    above_flags     ; can he grab the ledge?
+                ld      (blockid), a
+                call    abovefront_flags
+                call    check_ledge
+                jr      nz, fograb
+                ld      hl, (fosave)    ; no
+                ld      (charx), hl
+                ret
+fograb:         call    get_dist        ; square on the block
+                call    move_by
+                call    floor_plane
+                ld      (chary), a
+                xor     a
+                ld      (yvel), a
+                ld      a, STUNTIME
+                ld      (stunned), a
+                ld      a, SQ_FALLHANG
+                call    jumpseq
+                jp      step_seq
+
+; CHECKFLOOR: the first frames of a fall off a ledge are in the air too, and
+; he can catch hold in those.  A = 3.
+
+cf_air:         ld      a, (frame)
+                cp      102
+                ret     c
+                cp      106
+                ret     nc
+                jr      fall_on
+
+; PLAYERCTRL counts the stun down.
+
+stun_tick:      ld      hl, stunned
+                ld      a, (hl)
+                or      a
+                ret     z
+                dec     (hl)
+                ret
+
+; hanging's :climbup in CTRL.S.  A gate over him is climbed only facing
+; right, or when it is raised far enough to get past; otherwise he tries and
+; falls back.  Stunned from catching the ledge, he cannot climb at all.
+
+climb_up:       ld      a, (stunned)
+                or      a
+                jp      nz, hangbtn
+                call    clrall
+                ld      (clru), a
+                ld      (clrbtn), a
+                call    above_flags
+                cp      BG_GATE
+                jr      nz, cusucceed
+                ld      a, (facing)
+                or      a
+                jr      nz, cusucceed
+                ld      a, (tilestate)
+                rrca
+                rrca
+                and     0x3f
+                cp      GCLIMBTHRES
+                ld      a, SQ_CLIMBFAIL
+                jp      c, jumpseq
+cusucceed:      ld      a, SQ_CLIMBUP
+                jp      jumpseq
+
+; DoRunjump in CTRL.S: the jump is calibrated so the foot pushes off at the
+; edge.  Where the floor ends within a block of where four more units would
+; put him, he waits for it; close enough -- up to eight units short, two over
+; -- he is moved there and jumps.  No edge in sight, he jumps as he is.
+
+RJCHANGE        equ     4
+RJLOOKAHEAD     equ     1
+RJLEADDIST      equ     14
+RJMAXFUJBAK     equ     8
+RJMAXFUJFWD     equ     2
+
+run_jump:       ld      a, (frame)
+                cp      7
+                ret     c               ; must be in full run
+                ld      hl, (charx)
+                ld      (fosave), hl
+                ld      a, RJCHANGE     ; where he will be
+                call    move_by
+                ld      hl, (charx)
+                call    blockcol_of
+                ld      (rjcol), a
+                xor     a
+                ld      (rjblocks), a
+rjloop:         ld      a, (facing)     ; the next block along
+                or      a
+                ld      a, (rjcol)
+                jr      nz, rjright
+                dec     a
+                dec     a
+rjright:        inc     a
+                ld      (rjcol), a
+                ld      a, (blocky)
+                ld      c, a
+                ld      a, (rjcol)
+                call    tile_at
+                cp      BG_SPIKES
+                jr      z, rjedge
+                call    cmp_space
+                jr      z, rjedge
+                ld      hl, rjblocks
+                inc     (hl)
+                ld      a, (hl)
+                cp      RJLOOKAHEAD + 1
+                jr      c, rjloop
+                ld      hl, (fosave)    ; no edge in sight: jump anyway
+                ld      (charx), hl
+                jr      rjgo
+rjedge:         ld      hl, (charx)     ; units to the end of the floor
+                call    dist_hl
+                ld      b, a
+                ld      a, (rjblocks)
+                add     a, a
+                ld      c, a
+                add     a, a
+                add     a, a
+                sub     c               ; fourteen a block
+                add     a, b
+                sub     RJLEADDIST
+                ld      hl, (fosave)
+                ld      (charx), hl
+                cp      -RJMAXFUJBAK
+                jr      nc, rjfudge     ; move back a little and jump
+                cp      RJMAXFUJFWD
+                jr      c, rjfudge      ; move forward a little and jump
+                cp      0x80
+                ret     c               ; still too far: wait for the next frame
+                ld      a, -3           ; too late: he will miss the edge, but
+rjfudge:        add     a, RJCHANGE     ; let it look good
+                call    move_by
+rjgo:           call    clrall
+                ld      (clru), a
+                ld      a, SQ_RUNJUMP
+                jp      jumpseq
+
+; STARTFALL in CTRL.S: the fall is chosen by the frame he went over the edge
+; in -- out of a step, a run, a standing or a running jump, a drop from a
+; ledge or a fighting stance -- and each carries him on at its own speed.
+; Out: A = the sequence.
+
+fall_seq:       ld      a, (frame)
+                cp      9               ; run-12
+                ld      b, SQ_STEPFALL
+                jr      z, fsgot
+                cp      13              ; run-16
+                ld      b, SQ_STEPFALL2
+                jr      z, fsgot
+                cp      26              ; standjump-19
+                ld      b, SQ_JUMPFALL
+                jr      z, fsgot
+                cp      44              ; runjump-11
+                ld      b, SQ_RJUMPFALL
+                jr      z, fsgot
+                cp      81
+                jr      c, fsfight
+                cp      86
+                jr      nc, fsfight
+                ld      a, 5            ; a hang dropped from
+                call    move_by
+                ld      a, SQ_STEPFALL2
+                ret
+fsfight:        cp      150
+                jr      c, fsstep
+                cp      180
+                jp      c, fightfall_seq ; from a fighting stance
+fsstep:         ld      b, SQ_STEPFALL
+fsgot:          ld      a, b
+                ret
+
+fosave:         dw      0
+rjcol:          db      0
+rjblocks:       db      0
+stunned:        db      0
 
 ; ---------------------------------------------------------------- frames
 ;
@@ -4770,6 +4969,7 @@ boxcol:         db      0               ; the two of them together: rubbed out
 boxtop:         db      0               ; as one, and shown as one
 boxw:           db      0
 boxh:           db      0
+xvel:           db      0               ; CharXVel: along, in a free fall
 CHRECLEN        equ     $ - chrec
 oprec:          ds      CHRECLEN
 OP              equ     oprec - chrec
