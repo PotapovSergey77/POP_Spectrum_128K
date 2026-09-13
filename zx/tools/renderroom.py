@@ -32,6 +32,20 @@ IMAGES = os.path.join(os.path.dirname(__file__), '..', '..',
                       '01 POP Source', 'Images')
 
 
+
+def shifted(img, n, keep):
+    """The image n pixels to the right within its own bytes, as bg_shift has
+    it: clear pixels in on the left, or kept ones for a mask."""
+    w = img.width * 7
+    data = bytearray()
+    for r in range(img.height):
+        v = 0
+        for c, b in enumerate(img.row(r)):
+            v |= (b & 0x7f) << (7 * c)
+        v = (v << n) | ((1 << n) - 1 if keep else 0)
+        data += bytes((v >> (7 * c)) & 0x7f for c in range(img.width))
+    return popimg.Image(img.index, img.width, img.height, bytes(data))
+
 class Room:
     def __init__(self, bgset='DUN', edges=True):
         self.tab1 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB1.' + bgset))
@@ -41,7 +55,7 @@ class Room:
         self.missing = set()
         self.filtered = {} if edges else None
 
-    def draw(self, imgnum, xco, yco, op):
+    def draw(self, imgnum, xco, yco, op, shift=0):
         """setbgimg: bit 7 of the image number picks BGTAB2, index is bits 0-6."""
         if not imgnum:
             return
@@ -50,6 +64,8 @@ class Room:
         if img is None:
             self.missing.add(imgnum)
             return
+        if shift:
+            img = shifted(img, shift, op in (AND, MASK))
         # Masks must keep their exact bits, so only painted pieces get a
         # replacement fill.
         if self.filtered is not None and op in (ORA, STA):
@@ -326,6 +342,15 @@ class Room:
         # the pixel, so stamping it instead puts the tile's art back exactly
         # as drawn and takes the neighbour's B section out of the balusters.
         op = STA if (x >= bg.archtop2 or x == bg.posts) else ORA
+        # A flask in an odd column goes five pixels back, a byte less and two
+        # pixels on, so that its bubbles keep to one colour cell: flask_ma.
+        # And every bottle stands two pixels lower, clear of its bubbles' cell.
+        if x == bg.flask:
+            odd = st['xco'] // 4 & 1
+            self.draw(img, st['xco'] + bg.frontx[x] - odd,
+                      st['Ay'] + bg.fronty[x] + 2,
+                      op, 2 * odd)
+            return
         self.draw(img, st['xco'] + bg.frontx[x], st['Ay'] + bg.fronty[x], op)
 
     # -- room assembly ----------------------------------------------------
@@ -617,10 +642,12 @@ class Cover(Room):
         self.mask = [bytearray(WIDTH_BYTES) for _ in range(HEIGHT)]
         self.recording = False
 
-    def draw(self, imgnum, xco, yco, op):
+    def draw(self, imgnum, xco, yco, op, shift=0):
         if self.recording and imgnum:
             table = self.tab2 if imgnum & 0x80 else self.tab1
             img = table.get(imgnum & 0x7f)
+            if img is not None and shift:
+                img = shifted(img, shift, op in (AND, MASK))
             if img is not None:
                 top = yco - img.height + 1
                 for r in range(img.height):
@@ -637,7 +664,7 @@ class Cover(Room):
                         # sets, and an STA the whole of its rectangle
                         out[x] |= 0x7f if op == STA else (
                             ~b & 0x7f if op in (AND, MASK) else b)
-        return Room.draw(self, imgnum, xco, yco, op)
+        return Room.draw(self, imgnum, xco, yco, op, shift)
 
     def floorpiece(self, st, half):
         """

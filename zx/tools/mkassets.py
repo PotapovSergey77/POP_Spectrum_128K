@@ -829,15 +829,10 @@ def main(argv):
     w, h, bullet = sprite_bytes(t2.get(0x88 & 0x7f), 0)
     assert (w, h) == (1, 4), (w, h)
     # The Apple draws it in every other pixel, which its colour fills in; in
-    # one colour here those are stripes, so each row is filled across from
-    # its first pixel to its last.
-    def solid(b):
-        if not b:
-            return 0
-        hi = 7 - (b.bit_length() - 1)
-        lo = 7 - ((b & -b).bit_length() - 1)
-        return sum(0x80 >> i for i in range(hi, lo + 1))
-    bullet = bytes(solid(b) for b in bullet)
+    # one colour here those are stripes.  So the bullet is drawn solid, and
+    # taller with sharper corners, as the user asked: seven rows, pointing the
+    # same way from the same column, down to the foot of the screen.
+    bullet = bytes([0x40, 0x60, 0x70, 0x78, 0x70, 0x60, 0x40])
     open(os.path.join(binout, 'bullet.bin'), 'wb').write(
         bullet + bytes(rev[b] for b in bullet))
 

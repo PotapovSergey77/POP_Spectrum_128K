@@ -1282,6 +1282,43 @@ firstguard:     ld      a, (enemyalert)
                 call    jumpseq
                 jp      step_seq
 
+; flashon and flashoff in TOPCTRL.S: the frame in which he has been hurt --
+; ChgKidStr negative -- goes to the screen red all over, and the one after it
+; is itself again.  The border goes red with it.  In the control module,
+; so with the canvas bank in, which is where the shown screen may be.
+
+INK_HURT        equ     0x12            ; red on red
+
+hurt_flash:     ld      hl, hurton
+                ld      a, (hl)
+                or      a
+                jr      z, hfcheck
+                ld      (hl), 0
+                call    shown_attrs
+hfcheck:        ld      a, (kidstr)
+                ld      hl, lastkidstr
+                cp      (hl)
+                ld      (hl), a
+                ret     nc
+                ld      a, 1
+                ld      (hurton), a
+                ld      (lightning), a
+                ld      a, 2
+                ld      (lightcolor), a
+                ld      a, (scrsel + 1)
+                or      0x58
+                ld      h, a
+                ld      l, 0
+                ld      d, h
+                ld      e, 1
+                ld      bc, 767
+                ld      (hl), INK_HURT
+                ldir
+                ret
+
+hurton:         db      0
+lastkidstr:     db      0
+
 mpc6:
                 org     mfix6
 
@@ -2343,8 +2380,8 @@ lscol:          db      0
 ; the Apple's whole screen gone to one colour for a frame; the border here.
 ; The upside down potion, 4, is not done: the screen cannot turn over.
 
-WHITE           equ     7
-ORANGE          equ     6
+RED             equ     2
+GREEN           equ     4
 
 potion_effect:  ld      a, (charid)
                 or      a
@@ -2357,9 +2394,9 @@ potion_effect:  ld      a, (charid)
                 ld      a, SONG_SWORD
                 ld      c, 25
                 call    cue_song
-                ld      a, 1            ; the sword: three white flashes
+                ld      a, 1            ; the sword: three green flashes
                 ld      (gotsword), a
-                ld      bc, WHITE * 256 + 3
+                ld      bc, GREEN * 256 + 3
                 jr      peflash
 penotsword:     dec     a
                 cp      1
@@ -2372,7 +2409,7 @@ penotsword:     dec     a
                 ld      a, SONG_SHORTPOT
                 ld      c, 25
                 call    cue_song
-                ld      bc, ORANGE * 256 + 2
+                ld      bc, RED * 256 + 2
                 jr      peflash
 pe2:            cp      2
                 jr      nz, pe3
@@ -2385,7 +2422,7 @@ pe2full:        ld      (kidstr), a
                 ld      a, SONG_POTION
                 ld      c, 25
                 call    cue_song
-                ld      bc, ORANGE * 256 + 5
+                ld      bc, RED * 256 + 5
                 jr      peflash
 pe3:            cp      3
                 jr      nz, pe5
@@ -2411,8 +2448,18 @@ peflash:        ld      a, b
                 ret
 
 ; DRAWFLASKA and SETUPFLASK: the bubbles over the bottle, a frame of them for
-; the low five bits of its state, two pixels in -- three and four rows higher
-; for a mystery potion, four rows higher for the tall one.
+; the low five bits of its state, two bytes in and two pixels on -- three for
+; the tall bottles past the boost, whose bubbles are also four rows higher.
+;
+; Blocks are 28 pixels and colour cells 8, so a flask in an odd column stands
+; four pixels further into its cells than one in an even column, and its
+; bubbles cross from one cell into the next.  There the whole flask, bottle
+; and bubbles, goes five pixels to the left -- a byte back and two pixels on
+; -- and every flask then has its bubbles in a single cell, which is the one
+; its colour goes in; flask_front moves the bottle the same way.  And a tall
+; bottle's bubbles go another four rows up, into one cell row.  The bottle
+; itself stands two pixels lower, every one of them, so that its top is in
+; the cell row under the bubbles' and takes none of their colour.
 
 flask_ma:       ld      a, (state)
                 and     0x1f
@@ -2427,66 +2474,57 @@ flask_ma:       ld      a, (state)
                 ret     z               ; $b2: nothing to lay
                 dec     a
                 ld      c, a            ; C = which bubble, 0 to 2
-                ld      b, 0            ; B = the offset's images: 2 or 3
+                ld      hl, BUBBLES + 256 * BUBMASK
                 ld      e, 0            ; E = how much higher
                 ld      a, (state)
                 and     0xe0
                 jr      z, fmcont       ; empty
                 cp      0x40
                 jr      c, fmcont       ; refresh
-                jr      z, fmtall       ; boost
-                ld      b, 3            ; a mystery: one pixel further in
-fmtall:         ld      e, 4
+                ld      e, 8            ; the tall bottle
+                jr      z, fmcont       ; boost
+                ld      hl, BUBBLES + 3 + 256 * (BUBMASK + 1)
 fmcont:         ld      a, (ay)
                 sub     14
                 sub     e
                 ld      (yco), a
-                ld      a, (xco)
-                add     a, 2
+                ld      b, 2            ; B = bytes in
+                ld      a, (blockcol)
+                rra
+                jr      nc, fmx
+                dec     b               ; odd: a byte less, two pixels on
+fmx:            ld      a, (xco)
+                add     a, b
                 ld      (xco), a
-                ld      a, b
-                or      a
-                ld      a, BUBMASK
-                jr      z, fm2
-                inc     a
-fm2:            push    bc
+                push    bc
+                push    hl
+                call    fm_shift
+                ld      a, h
                 ld      c, BG_AND
                 call    bglay
+                pop     hl
                 pop     bc
-                ld      a, BUBBLES
-                add     a, b
+                push    bc
+                call    fm_shift
+                ld      a, l
                 add     a, c
                 ld      c, BG_ORA
                 call    bglay
+                pop     bc
                 ld      a, (xco)
-                sub     2
+                sub     b
                 ld      (xco), a
+                ret
+
+fm_shift:       ld      a, (blockcol)
+                and     1
+                add     a, a
+                ld      (bgshift), a
                 ret
 
 ; bubble in GAMEBG.S, as which of the three drawn ones: $b2 is -1.
 
 bubble:         db      -1, 0, 1, 2, 1, 0, 2, 1, 0
-
-; drawfrnt: a flask of potion 2, 3 or 4 is the taller bottle.  In: A = the
-; front piece, with the block in hand.  Out: A = the one to draw.
-
-flask_front:    ld      c, a
-                ld      a, (objid)
-                cp      BG_FLASK
-                ld      a, c
-                ret     nz
-                ld      a, (state)
-                and     0xe0
-                cp      0xa0
-                ld      a, c
-                ret     z
-                ld      a, (state)
-                and     0xe0
-                cp      0x40
-                ld      a, c
-                ret     c
-                ld      a, (bgtables + T_SPECIALFLASK)
-                ret
 
 ; ANIMFLASK and GETFLASKFRAME in MOVER.S: out of sight it comes off the list;
 ; otherwise the bubbles go round frames one to eight, every frame.
@@ -2533,13 +2571,17 @@ maxkidstr:      db      3               ; MaxKidStr: initmaxstr in TOPCTRL.S
 ; one behind.  A bullet is eight pixels on from the one before, as KidStrX
 ; and KidStrOFF place them, which on a Spectrum is a byte each.
 
-METERY          equ     188             ; YCO 191, four rows up
+METERTOP        equ     184             ; the meters' character row
+METERY          equ     185             ; the bullet's top row, down to the
+BULLETH         equ     7               ; foot of the screen, seven tall
 INK_KIDMETER    equ     0x42            ; bright red, as on the Apple
 INK_OPPMETER    equ     0x41            ; and his opponent's bright blue
 MAXKIDMETER     equ     10              ; maxmaxstr: the most he can have
 MAXOPPMETER     equ     4               ; the most a guard of this level has
 
-show_meters:    ld      hl, lightning   ; a flash is the border, a frame at a
+show_meters:    call    page_canvas
+                call    hurt_flash
+                ld      hl, lightning   ; a flash is the border, a frame at a
                 ld      a, (hl)         ; time, for as many as it says
                 or      a
                 jr      z, smdark
@@ -2575,7 +2617,7 @@ smwt:           call    page_canvas     ; bank 7, in case it is the one shown
                 jr      z, smopp
                 ld      a, (oppstr)
                 ld      c, a
-smopp:          ld      hl, bullet + 4
+smopp:          ld      hl, bullet + BULLETH
                 ld      b, MAXOPPMETER
                 ld      de, 0xff1f      ; from the right, a byte back each time
                 call    meter
@@ -2583,9 +2625,9 @@ smopp:          ld      hl, bullet + 4
                 ld      (oppdrawn), a
                 ret
 
-; HL = the bullet's four rows, B = how many places, C = how many are lit,
+; HL = the bullet's rows, B = how many places, C = how many are lit,
 ; E = the first column and D the step to the next; (mmink) their colour.  A
-; place is a whole character cell -- the four rows over the bullet kept black
+; place is a whole character cell -- the rows round the bullet kept black
 ; as well, so that the colour takes nothing of the wall above it.  A place not
 ; lit is black up to (mmdrawn) places; past that it is put back from the room,
 ; in the room's colour, if it was lit the time before, and is otherwise left.
@@ -2622,7 +2664,7 @@ mmroom:         ld      a, (oppdrawn)   ; the room, if there was a bullet
                 jp      c, mmnext
                 ld      a, 2
 mmmode:         ld      (mmwhat), a
-                ld      a, METERY - 4
+                ld      a, METERTOP
 mmrow:          push    af
                 ld      e, a
                 sub     METERY          ; C = the bullet's row there, if any
@@ -2657,9 +2699,9 @@ mmscr:          ld      a, (mmfirst)
                 xor     a
                 jr      mmput
 mmbul:          ld      a, c
-                cp      4
+                cp      BULLETH
                 ld      a, 0
-                jr      nc, mmput       ; above the bullet
+                jr      nc, mmput       ; over or under the bullet
                 push    hl
                 ld      hl, (mmimg)
                 ld      b, 0
@@ -2673,7 +2715,7 @@ mmput:          ld      e, a
                 ld      (hl), e
                 pop     af
                 inc     a
-                cp      METERY + 4
+                cp      METERTOP + 8
                 jr      c, mmrow
                 ld      a, (mmfirst)    ; and the cell's colour
                 add     a, 0xe0

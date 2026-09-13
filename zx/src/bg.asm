@@ -192,6 +192,7 @@ bgdk1:          ld      a, b
                 pop     hl
                 ld      de, imgbuf
                 ldir
+                call    bg_shift
 
                 call    page_target
 
@@ -386,6 +387,10 @@ canvasrow:      ld      l, a
 ; Set the piece up and lay it: A = image, (xco)/(yco) already set, C = the op.
 
 bglay:          ld      (imgnum), a
+                ld      a, (bgshift)    ; a shift is for this piece alone
+                ld      (bgsh), a
+                xor     a
+                ld      (bgshift), a
                 ld      a, c
                 ld      (bgop), a
                 jp      bgdraw
@@ -978,6 +983,88 @@ blockthr:       db      0
 gatebot:        db      0
 dxonly:         db      0               ; the door's top slat, and no more
 
+; A flask in an odd column: see flask_front.
+
+fr_dx:          call    tab_frontx
+                ld      c, a
+                ld      a, (frxfix)
+                neg
+                add     a, c
+                ret
+
+frxfix:         db      0
+frydy:          db      0
+
+
+; drawfrnt: a flask of potion 2, 3 or 4 is the taller bottle.  In: A = the
+; front piece, with the block in hand.  Out: A = the one to draw.
+
+flask_front:    ld      c, a
+                xor     a
+                ld      (frxfix), a
+                ld      (frydy), a
+                ld      a, (objid)
+                cp      BG_FLASK
+                ld      a, c
+                ret     nz
+                ld      a, 2            ; and two pixels lower, clear of the
+                ld      (frydy), a      ; cell its bubbles colour: flask_ma
+                ld      a, (blockcol)   ; odd: a byte back and two pixels on,
+                and     1               ; as flask_ma has it
+                ld      (frxfix), a
+                add     a, a
+                ld      (bgshift), a
+                ld      a, (state)
+                and     0xe0
+                cp      0xa0
+                ld      a, c
+                ret     z
+                ld      a, (state)
+                and     0xe0
+                cp      0x40
+                ld      a, c
+                ret     c
+                ld      a, (bgtables + T_SPECIALFLASK)
+                ret
+
+
+; The rows of the piece that land, in imgbuf, moved (bgshift) pixels to the
+; right within their own bytes -- seven pixels in bits 7 to 1 of each -- with
+; clear pixels coming in on the left, or kept ones for a mask, and whatever
+; goes off the right of the last byte lost.
+
+bg_shift:       ld      a, (bgsh)
+                or      a
+                ret     z
+                ld      c, a
+bshpass:        ld      hl, imgbuf
+                ld      a, (bgn)
+                ld      d, a
+bshrow:         ld      a, (imgw)
+                ld      b, a
+                ld      a, (bgop)
+                cp      BG_AND
+                scf
+                jr      z, bshbyte      ; a mask keeps what comes in
+                or      a
+bshbyte:        ld      a, (hl)
+                rra                     ; the pixel coming in at the top, and
+                ld      e, a            ; the last one down at bit 0
+                and     0xfe
+                ld      (hl), a
+                ld      a, e
+                rra                     ; which is the carry into the next
+                inc     hl
+                djnz    bshbyte
+                dec     d
+                jr      nz, bshrow
+                dec     c
+                jr      nz, bshpass
+                ret
+
+bgshift:        db      0               ; asked for, for the next bglay
+bgsh:           db      0               ; and taken by it
+
 ; drawfrnt: what goes over the characters.  Stamped rather than ORed for the
 ; posts and the arches, so the neighbour's B section does not show through.
 
@@ -989,13 +1076,15 @@ draw_front:     call    page_bg
                 ret     z
                 ld      (frimg), a
                 ld      a, (objid)
-                call    tab_frontx
+                call    fr_dx
                 ld      c, a
                 ld      a, (xco)
                 add     a, c
                 ld      (xco), a
                 ld      a, (objid)
                 call    tab_fronty
+                ld      hl, frydy
+                add     a, (hl)
                 call    bgay
                 ld      c, BG_ORA
                 ld      a, (objid)
@@ -1023,7 +1112,7 @@ dfgo:           push    bc              ; C is the opacity and bgentry uses it
                 ld      (recfront), a
                 call    page_bg         ; put the column back for the next one
                 ld      a, (objid)
-                call    tab_frontx
+                call    fr_dx
                 ld      c, a
                 ld      a, (xco)
                 sub     c

@@ -1225,13 +1225,7 @@ tkwipe:         ld      (redh), a
                 xor     a
                 ld      (rqprio), a
 
-                call    page_canvas     ; and a flask's colour goes with it
-                ld      a, (scrsel + 1)
-                or      a
-                ld      hl, SCREEN + 6144
-                jr      z, tkattr
-                ld      hl, 0xC000 + 6144
-tkattr:         call    set_attrs_at
+                call    shown_attrs     ; and a flask's colour goes with it
 
                 ld      a, 1            ; RemoveObj: the press is spent
                 ld      (clrbtn), a
@@ -2952,12 +2946,22 @@ sacskip:        inc     c
                 jp      nz, sanext
                 ret
 
-; And the colour of a flask's potion where its bubbles rise: red for the two
-; that give strength, green for weightlessness, blue for the rest.  SETUPFLASK
-; puts them two bytes into the block and two pixels on -- three for the tall
-; bottles past the boost -- and FRAMEADV.S's three pictures of them use
-; pixels one to five across, on the six rows from 20 over Ay: cell row 5 of
-; the block row, and row 4 as well for a bottle four rows taller.
+; And the colour of a flask's potion in the one cell its bubbles keep to: red
+; for the two that give strength, green for weightlessness, blue for the
+; rest.  flask_ma puts them in cell row 5 of the block row, 4 for a tall
+; bottle, and in the cell that starts at room pixel 28 col + 16 -- + 12 in
+; an odd column, where the flask is five pixels further back.
+
+; The colours of the screen that is shown, worked out again.
+
+shown_attrs:    call    page_canvas     ; bank 7, in case it is that one
+                ld      a, (scrsel + 1)
+                or      a
+                ld      hl, SCREEN + 6144
+                jp      z, set_attrs_at
+                ld      hl, 0xC000 + 6144
+                jp      set_attrs_at
+
 
 INK_POTRED      equ     0x42
 INK_POTGREEN    equ     0x44
@@ -2979,57 +2983,54 @@ fatile:         ld      a, (hl)
                 rlca
                 and     7
                 jr      z, faout        ; empty: no bubbles
-                ld      de, INK_POTRED * 256 + 17
+                ld      de, INK_POTRED * 256 + 5
                 cp      2
                 jr      c, faink        ; refresh: the short bottle
-                ld      e, 17 - 64      ; bit 6 of E: a row higher too
+                ld      e, 4
                 jr      z, faink
-                ld      de, INK_POTGREEN * 256 + 18 - 64
+                ld      d, INK_POTGREEN
                 cp      3
                 jr      z, faink
                 ld      d, INK_POTBLUE
-faink:          ld      a, d
-                ld      (fainkc), a
-                ld      a, c            ; x = 28 col + 17: three cells a
-                add     a, a            ; column, and (4 col + 17) / 8 more
+faink:          ld      a, b            ; eight cell rows a block row
                 add     a, a
-                ld      d, a
-                ld      a, e
-                and     0x3f
-                add     a, d
-                push    af
+                add     a, a
+                add     a, a
+                add     a, e
+                ld      l, a            ; thirty two cells to the row
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                ld      a, c            ; (28 col + 16 or 12) / 8, less the
+                add     a, a            ; camera
+                add     a, a
+                bit     0, c
+                jr      z, faeven
+                sub     4
+faeven:         add     a, 16
                 rrca
                 rrca
                 rrca
                 and     0x1f
-                ld      d, a            ; D, and the last, four pixels on
-                pop     af
-                add     a, 4
-                rrca
-                rrca
-                rrca
-                and     0x1f
-                sub     d
-                inc     a
-                ld      (facols), a
-                ld      a, c
-                add     a, a
                 add     a, c
-                add     a, d
-                ld      d, a            ; D = the first cell column
-                ld      a, b            ; eight cell rows a block row, and five
-                add     a, a            ; down it
-                add     a, a
-                add     a, a
-                add     a, 5
-                bit     6, e
-                jr      nz, fatall
-                call    fa_row
-                jr      faout
-fatall:         dec     a
-                call    fa_row
-                inc     a
-                call    fa_row
+                add     a, c
+                add     a, c
+                ld      e, a
+                ld      a, (cam)
+                ld      b, a
+                ld      a, e
+                sub     b
+                cp      32
+                jr      nc, faout       ; not in the view
+                ld      c, a
+                ld      b, 0
+                add     hl, bc
+                ld      bc, (atbase)
+                add     hl, bc
+                ld      (hl), d
 faout:          pop     bc
                 pop     hl
 fanext:         inc     hl
@@ -3043,44 +3044,6 @@ fanext:         inc     hl
                 cp      3
                 jr      c, fatile
                 ret
-
-; A = the cell row, D = the first cell column of the room, (facols) of them.
-
-fa_row:         push    af
-                ld      l, a            ; thirty two cells to the row
-                ld      h, 0
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl
-                ld      bc, (atbase)
-                add     hl, bc
-                ld      a, (facols)
-                ld      b, a
-                ld      a, (cam)
-                ld      c, a
-                ld      a, d
-                sub     c               ; the column in the view
-farc:           cp      32
-                jr      nc, faskip
-                push    hl
-                push    af
-                add     a, l
-                ld      l, a
-                jr      nc, fac
-                inc     h
-fac:            ld      a, (fainkc)
-                ld      (hl), a
-                pop     af
-                pop     hl
-faskip:         inc     a
-                djnz    farc
-                pop     af
-                ret
-
-fainkc:         db      0
-facols:         db      0
 
 ; When he has died and stopped moving, the death song: heroic if he fell in a
 ; fight.  CharLife goes past nought so it is asked for once.
