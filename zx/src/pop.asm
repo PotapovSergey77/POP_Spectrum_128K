@@ -5556,7 +5556,15 @@ stubbank:       push    bc
                 ld      a, ISRPAGE
                 ld      i, a
                 im      2
-                call    page_art
+                ld      a, POP_START    ; the titles, before the game begins
+                or      a               ; -- a tape started elsewhere, for a
+                call    nz, intro       ; test, goes straight in
+                call    page_art        ; and they are gone from the art bank:
+                ld      hl, 0xC000 + 2  ; the room is composed into a bank of
+                ld      de, 0xC000 + 3  ; noughts, past the signature and up
+                ld      bc, 0x4000 - 2 - ISRSTUBLEN - 1 ; to the interrupt's
+                ld      (hl), 0         ; way in
+                ldir
                 call    newroom         ; and the room is composed, not loaded
                 call    readlinks
                 call    set_attrs
@@ -5653,6 +5661,8 @@ badload:        ld      a, 2
 isrbanks:       db      BANK_SPR1, BANK_SPR2, BANK_SPR3, BANK_BG, BANK_ART
                 db      BANK_CANVAS
 revsrc:         incbin  "revtab.bin"
+
+                include "intro.asm"
 
 initend:
 

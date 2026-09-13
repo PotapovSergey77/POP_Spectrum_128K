@@ -88,7 +88,25 @@ def boot(path):
             entry = banks[0]['entry'] if banks else addr
     cpu.pc = entry
     release(cpu)
+    skip_intro(cpu, path)
     return cpu
+
+
+def skip_intro(cpu, path):
+    """
+    The title screens run half a minute of interrupts before the game: every
+    check wants the game, so the intro returns at once -- unless POP_INTRO is
+    set, to look at the titles themselves.
+    """
+    if os.environ.get('POP_INTRO'):
+        return
+    for sym in (os.path.splitext(path)[0] + '.sym.json',
+                os.path.join(os.path.dirname(path), 'sym.json')):
+        if os.path.exists(sym):
+            at = json.load(open(sym)).get('intro')
+            if at is not None:
+                cpu.mem[at] = 0xC9          # RET
+            return
 
 
 STUB = 4

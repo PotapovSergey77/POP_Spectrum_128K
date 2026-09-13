@@ -35,6 +35,7 @@ import bgexport
 import popframe
 import popimg
 import cpcsound
+import titlescr
 import popseq
 import poplevel
 import renderroom
@@ -508,7 +509,13 @@ def main(argv):
     # mask and both floorpiece masks are all made when a room is entered.
     # Only the signature goes, so a bank that did not arrive still says so.
     art = b''
-    open(os.path.join(binout, 'bank_art.bin'), 'wb').write(SIG_ART)
+    # The art bank is empty until the first room is built, and the title
+    # screens are shown before that: they travel in it, packed, after the
+    # signature, and are gone once the room goes over them.
+    intro_at, intro = titlescr.build(binout)
+    assert len(SIG_ART) + len(intro) <= BANK_SIZE - 12, 'the title screens do not fit the art bank'
+    open(os.path.join(binout, 'bank_art.bin'), 'wb').write(SIG_ART + intro)
+    print('заставка   %d байт, в банке свободно %d' % (len(intro), BANK_SIZE - 12 - len(SIG_ART) - len(intro)))
     open(os.path.join(binout, 'floorband.bin'), 'wb').write(bytes(floorband))
 
     # RDBLOCK's handler wants a column for coordinates outside the room too,
@@ -764,6 +771,8 @@ def main(argv):
            'sfxmap      equ %d' % sfxmap_at,
            'sfxtab      equ %d' % sfxtab_at,
            'sfxdata     equ %d' % sfxdata_at]
+    for name, off in intro_at:
+        inc.append('T_%-9s equ %d' % (name.upper(), PAGE_WINDOW + len(SIG_ART) + off))
     for k, v in bgat.items():
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
     inc.append('flames      equ %d' % (PAGE_WINDOW + flames_at))
