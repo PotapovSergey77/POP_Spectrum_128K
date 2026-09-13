@@ -1505,6 +1505,122 @@ ca_read:        ld      b, a
                 ld      a, b
                 jp      tile_at
 
+; ---------------------------------------------------------------- meters
+;
+; UPDATEMETERS in GAMEBG.S: the kid's strength at the bottom left, a bullet a
+; point up to his most, and his opponent's at the bottom right, mirrored.  The
+; last one flashes.  They go straight onto the screen that is shown, after
+; everything else has gone to it this frame, the way POP adds them last: the
+; working copy never has them, so nothing that is put back from it can leave
+; one behind.  A bullet is eight pixels on from the one before, as KidStrX
+; and KidStrOFF place them, which on a Spectrum is a byte each.
+
+METERY          equ     188             ; YCO 191, four rows up
+MAXKIDMETER     equ     3               ; MaxKidStr: initmaxstr in TOPCTRL.S
+MAXOPPMETER     equ     4               ; the most a guard of this level has
+
+show_meters:    call    page_canvas     ; bank 7, in case it is the one shown
+                ld      hl, mflash      ; PAGE, which POP flips every frame
+                inc     (hl)
+                ld      hl, bullet
+                ld      a, (kidstr)
+                ld      c, a
+                ld      b, MAXKIDMETER
+                ld      de, 0x0100      ; from the left, a byte on each time
+                call    meter
+                ld      a, (gdhere)
+                or      a
+                jr      z, smgone
+                ld      a, (oppstr)
+                or      a
+                jr      z, smgone
+                ld      c, a
+                ld      a, 1
+                ld      (oppshown), a
+                ld      hl, bullet + 4
+                ld      b, MAXOPPMETER
+                ld      de, 0xff1f      ; from the right, a byte back each time
+                jr      meter
+
+smgone:         ld      a, (oppshown)   ; the room back where it was, once
+                or      a
+                ret     z
+                xor     a
+                ld      (oppshown), a
+                ld      a, METERY
+smrest:         push    af
+                ld      e, 32 - MAXOPPMETER
+                call    scraddr
+                push    hl
+                ld      de, work - SCREEN
+                add     hl, de
+                pop     de
+                ld      a, (scrsel + 1)
+                or      d
+                ld      d, a
+                ld      bc, MAXOPPMETER
+                ldir
+                pop     af
+                inc     a
+                cp      METERY + 4
+                jr      c, smrest
+                ret
+
+; HL = the bullet's four rows, B = how many places, C = how many are lit,
+; E = the first column and D the step to the next.
+
+meter:          ld      (mtimg), hl
+                ld      (mtfirst), de
+                ld      a, b
+                ld      (mtslots), a
+                ld      a, c
+                cp      1
+                jr      nz, mtlitn
+                ld      a, (mflash)     ; down to one: it flashes
+                rra
+                jr      nc, mtlitn
+                ld      c, 0
+mtlitn:          ld      a, METERY
+mtline:          push    af
+                ld      de, (mtfirst)
+                call    scraddr
+                ld      a, (scrsel + 1)
+                or      h
+                ld      h, a
+                ld      de, (mtimg)
+                ld      a, (de)
+                ld      d, a            ; D = this row of a bullet
+                ld      a, (mtslots)
+                ld      b, a
+                ld      e, c
+mtplace:         xor     a               ; lit, or black
+                inc     e
+                dec     e
+                jr      z, mtlay
+                dec     e
+                ld      a, d
+mtlay:          ld      (hl), a
+                ld      a, (mtstep)
+                add     a, l
+                ld      l, a
+                djnz    mtplace
+                ld      hl, (mtimg)
+                inc     hl
+                ld      (mtimg), hl
+                pop     af
+                inc     a
+                cp      METERY + 4
+                jr      c, mtline
+                ret
+
+mtimg:          dw      0
+mtfirst:          db      0
+mtstep:         db      0
+mtslots:        db      0
+mflash:         db      0
+oppshown:       db      0
+bullet:         incbin  "bullet.bin"
+
 ; ---------------------------------------------------------------- state
 
 gdhere:         db      0               ; a guard in this room: ShadFace <> 86

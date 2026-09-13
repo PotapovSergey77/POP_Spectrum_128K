@@ -152,6 +152,8 @@ mainrun:        ld      a, (FRAMES)
 
                 call    page_art
                 call    show_rect
+                call    show_meters     ; over whatever went to the screen
+                call    page_art
                 call    keep_rect
 
                 call    camera

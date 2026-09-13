@@ -56,6 +56,13 @@ def run(tap, sym, pin, keys, upto):
     return out
 
 
+def meter(sym, y, c):
+    """The strength meters stand on the screen, not in the room: they do
+    not move with the view and are left out of the comparison."""
+    return (sym['METERY'] <= y < sym['METERY'] + 4
+            and (c < sym['MAXKIDMETER'] or c >= 32 - sym['MAXOPPMETER']))
+
+
 def main(argv):
     if len(argv) < 2:
         print(__doc__)
@@ -71,7 +78,8 @@ def main(argv):
             if n < 6:                           # the first frames are startup
                 continue
             d = [(y, c) for y in range(192) for c in range(32 - cam)
-                 if a[zxscreen.bitmap_offset(c, y)]
+                 if not meter(sym, y, c) and not meter(sym, y, c + cam)
+                 and a[zxscreen.bitmap_offset(c, y)]
                  != b[zxscreen.bitmap_offset(c + cam, y)]]
             if d:
                 bad += 1
