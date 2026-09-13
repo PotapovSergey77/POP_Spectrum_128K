@@ -26,7 +26,7 @@ import sys
 import runtap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SENTINEL = 0x0038
+SENTINEL = 0x0010
 ROWS, WIDTH = 45, 35
 BG_SPACE = 0
 

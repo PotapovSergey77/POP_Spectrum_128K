@@ -27,6 +27,9 @@ for _i in range(256):
     PARITY[_i] = PF if not _n & 1 else 0
 
 
+# What the 48K ROM's handler at 0x38 costs, counting and scanning the keys.
+ROM_INT_TSTATES = 1500
+
 # T-states between interrupts on a 128K -- 228 to the line, 311 lines.
 FRAME_TSTATES = 70908
 
@@ -41,6 +44,7 @@ class Z80:
         self.pc = self.sp = 0
         self.iff1 = self.iff2 = 0
         self.im = 0
+        self.i = 0
         self.halted = False
         self.frames = 0
         self.next_tick = FRAME_TSTATES      # when the interrupt next comes
@@ -256,6 +260,16 @@ class Z80:
 
     def step(self):
         self._acc = 0
+        if self.pc == 0x0038 and self.im == 2:
+            # IM 2 handlers call the ROM's own at 0x38 for the frame count
+            # and the keyboard, and there is no ROM here: the count, the
+            # time a keyboard scan takes, and back with interrupts on.
+            self.tick_frames()
+            self.cycles += ROM_INT_TSTATES
+            self.iff1 = self.iff2 = 1
+            self.pc = self.pop()
+            self.interrupt_due()
+            return
         if self.slow == 1.0:
             self._step()
         else:                                       # contended memory,
@@ -263,10 +277,20 @@ class Z80:
             self._step()                            # instruction a little
             if not self.halted_now:                 # longer than the book
                 self.cycles = c + int((self.cycles - c) * self.slow + 0.5)
+        self.interrupt_due()
+
+    def interrupt_due(self):
         while self.cycles >= self.next_tick:        # the interrupt: the ROM
-            if self.iff1:                           # counts a frame
-                self.tick_frames()
-            self.next_tick += FRAME_TSTATES
+            self.next_tick += FRAME_TSTATES         # counts a frame
+            if not self.iff1:
+                continue
+            if self.im == 2:                        # or the program's own
+                self.iff1 = self.iff2 = 0           # handler runs, through
+                self.push(self.pc)                  # the vector the floating
+                self.pc = self.rw((self.i << 8) | 0xFF)     # bus reads
+                self.cycles += 19
+                return
+            self.tick_frames()
 
     def _step(self):
         self.halted_now = False
@@ -608,6 +632,11 @@ class Z80:
             self.im = [0, 0, 1, 2][y & 3]
             return
         if z == 7:                                      # ld i,a and friends
+            if op == 0x47:
+                self.i = self.a
+            elif op == 0x57:
+                self.a = self.i
+                self.f = (self.f & CF) | self.sz(self.a) | (PF if self.iff2 else 0)
             return
         raise NotImplementedError('ED %02X at %04X' % (op, self.pc - 2))
 

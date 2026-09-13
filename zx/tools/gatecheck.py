@@ -26,7 +26,7 @@ import runtap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEVEL = os.path.join(HERE, '..', '..', '01 POP Source', 'Levels', 'LEVEL1')
-SENTINEL = 0x0038
+SENTINEL = 0x0010
 GMAXVAL = 188
 PRESSPLATE, UPRESSPLATE, GATE, EXIT = 6, 15, 4, 16
 EMAXVAL = 172

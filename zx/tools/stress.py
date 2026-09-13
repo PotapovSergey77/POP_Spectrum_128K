@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ZX = os.path.join(HERE, '..')
 FRAME = 70908
 SLOT = 3 * FRAME
-SENTINEL = 0x0038
+SENTINEL = 0x0010
 FRAMES = 23672
 
 # name, room, row, column, keys held on game frame n, frames, frames to settle

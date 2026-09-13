@@ -67,6 +67,11 @@ def boot(path):
     banks = json.load(open(manifest)) if os.path.exists(manifest) else []
     cpu = z80.Z80()
     cpu.mem[0x5B5C] = 0x00          # BANKM, as 128 BASIC leaves it
+    # The two bytes of the 48K ROM that the program's IM 2 vector leans on:
+    # the run of 0xFF it points I into, and the DI at 0x0000 that the JR at
+    # 0xFFFF takes as its displacement.
+    cpu.mem[0x3900:0x3C00] = bytes([0xFF]) * 0x300
+    cpu.mem[0x0000] = 0xF3
     blocks = code_blocks(path)
     # Somewhere for the stubs to return to, below the program the way CLEAR
     # leaves it: a fixed address of its own would be inside the program as

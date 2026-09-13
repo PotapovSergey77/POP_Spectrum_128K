@@ -1642,6 +1642,10 @@ sfxdone:        pop     hl
 sfx_play:       cp      SFXCOUNT
                 ret     nc
                 ld      c, a
+                ld      a, i            ; P/V: were interrupts on?
+                push    af
+                di                      ; the handler ticks what this sets up
+                ld      a, c
                 add     a, a
                 add     a, c
                 ld      e, a
@@ -1655,7 +1659,7 @@ sfx_play:       cp      SFXCOUNT
                 ld      a, (sfxprio)
                 cp      (hl)
                 jr      z, sfxtake
-                ret     nc              ; the one playing matters more
+                jr      nc, sfxback     ; the one playing matters more
 sfxtake:        ld      a, (hl)
                 ld      (sfxprio), a
                 inc     hl
@@ -1669,34 +1673,57 @@ sfxtake:        ld      a, (hl)
                 ld      hl, sfxdata
                 add     hl, bc
                 ld      (sfxend), hl
-                ld      a, (FRAMES)     ; its ticks count from now, not from
-                ld      (sfxlast), a    ; the last frame, which may be long
-                ld      a, 1            ; gone: a room's build
+                ld      a, 1
                 ld      (sfxtimer), a
-                jp      sfx_quiet
+                call    sfx_quiet
+sfxback:        pop     af
+                ret     po
+                ei
+                ret
 
-; Once a frame, at the top of it: as many ticks as the interrupts say have
-; gone by -- three a frame.
+; The program's own interrupt, IM 2, fifty times a second as the CPC's is.
+; I points into the 48K ROM's long run of 0xFF, so whatever the bus holds the
+; vector is 0xFFFF: the top byte of whichever bank is paged, where start puts
+; a JR -- whose displacement is the DI at 0x0000, back to 0xFFF4 -- and a jump
+; here.  The ROM's own handler still counts the frames and reads the keys;
+; then a tick of the sound, with the effects' bank paged in and the one that
+; was put back, without touching nowbank, which the interrupted code owns.
 
-sfx_frame:      ld      a, (FRAMES)
-                ld      hl, sfxlast
-                ld      b, (hl)
-                ld      (hl), a
-                sub     b
-                ret     z
-                ld      b, a
-                cp      FRAME_WAIT + 2  ; a long frame -- a room's build --
-                jr      c, sfxnlong     ; holds a tune up rather than skip
-                ld      b, FRAME_WAIT   ; its notes
-sfxnlong:       ld      a, (sfxtimer)
+ISRPAGE         equ     0x3A            ; 0x39FF to 0x3B00 is all 0xFF
+
+isr:            push    af
+                push    bc
+                push    de
+                push    hl
+                call    0x0038          ; FRAMES and the keyboard; it enables
+                di                      ; interrupts, which wait for the end
+                ld      a, (sfxtimer)
                 or      a
-                ret     z
-                call    page_pixels     ; the data is in the canvas's bank
-sfxticks:       push    bc
+                jr      z, isrout
+                ld      a, (pgbits + 1) ; the port as it stands, the sounds'
+                or      BANK_CVS        ; bank in the window
+                ld      bc, PAGEPORT
+                out     (c), a
                 call    sfx_tick
+                ld      a, (pgbits + 1) ; and the bank that was there
+                ld      hl, nowbank
+                or      (hl)
+                ld      bc, PAGEPORT
+                out     (c), a
+isrout:         pop     hl
+                pop     de
                 pop     bc
-                djnz    sfxticks
-                jp      page_art
+                pop     af
+                ei
+                ret
+
+; What start writes at the top of every bank: a jump to the handler at 0xFFF4
+; and the JR at 0xFFFF.
+
+isrstub:        jp      isr
+                ds      8
+                db      0x18
+ISRSTUBLEN      equ     12
 
 ; One tick: the wait counted down, and when it is out the commands up to the
 ; next wait.  Past its end an effect starts again from its start.
@@ -1808,7 +1835,6 @@ sfxptr:         dw      0
 sfxtimer:       db      0
 sfxacc:         db      0
 sfxprio:        db      0
-sfxlast:        db      0
 
 ; addlowersound in SUBS.S: a gate going down creaks only where it is seen.
 

@@ -23,7 +23,7 @@ import runtap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEVEL = os.path.join(HERE, '..', '..', '01 POP Source', 'Levels', 'LEVEL1')
-SENTINEL = 0x0038               # somewhere the game never runs
+SENTINEL = 0x0010               # somewhere the game never runs
 
 
 def host(level, n):

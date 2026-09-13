@@ -155,7 +155,6 @@ mainrun:        ld      a, (FRAMES)
                 call    page_art
                 call    show_rect
                 call    show_meters     ; over whatever went to the screen
-                call    sfx_frame       ; and the sound goes on
                 call    page_art
                 call    keep_rect
 
@@ -5506,7 +5505,6 @@ hiend:
 
 start:          di
                 ld      sp, stack
-                im      1
 
                 ld      hl, revsrc      ; the bit reversal table, out to where
                 ld      de, REVTAB      ; it lives from now on
@@ -5531,6 +5529,24 @@ start:          di
                 ld      de, RBAT1
                 ld      bc, RB1LEN
                 ldir
+
+                ld      hl, isrbanks    ; the interrupt's way in, at the top
+                ld      b, 6            ; of every bank that is ever paged
+stubbank:       push    bc
+                ld      a, (hl)
+                inc     hl
+                push    hl
+                call    pageset
+                ld      hl, isrstub
+                ld      de, 0x10000 - ISRSTUBLEN
+                ld      bc, ISRSTUBLEN
+                ldir
+                pop     hl
+                pop     bc
+                djnz    stubbank
+                ld      a, ISRPAGE
+                ld      i, a
+                im      2
                 call    page_art
                 call    newroom         ; and the room is composed, not loaded
                 call    readlinks
@@ -5609,6 +5625,8 @@ badload:        ld      a, 2
                 out     (254), a
                 jr      badload
 
+isrbanks:       db      BANK_SPR1, BANK_SPR2, BANK_SPR3, BANK_BG, BANK_ART
+                db      BANK_CANVAS
 revsrc:         incbin  "revtab.bin"
 
 initend:

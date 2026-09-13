@@ -18,7 +18,7 @@ import sys
 
 import runtap
 
-SENTINEL = 0x0038
+SENTINEL = 0x0010
 FRAMES = [1, 5, 9, 13, 17, 30, 45, 60, 80, 100, 107, 120, 135, 150, 160, 170,
           185, 200, 217, 230]
 # charx and the view's left byte: cut at the left, whole, cut at the right

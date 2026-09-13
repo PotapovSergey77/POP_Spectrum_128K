@@ -21,7 +21,7 @@ import runtap
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLOCK = 3500000
 FRAME = 70908                           # T between interrupts at 50Hz
-SENTINEL = 0x0038
+SENTINEL = 0x0010
 PHASES = ('compose', 'convert', 'build_fore', 'floormasks', 'maketorches')
 WALK = ['right@1-40']
 
