@@ -149,6 +149,9 @@ _KID = poplevel.Level(os.path.join(
 START_ROW = int(os.environ.get('POP_START_ROW', _KID[1] // 10 if POP_START else 0))
 START_COL = int(os.environ.get('POP_START_COL', _KID[1] % 10 if POP_START else 5))
 START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
+# Level one's drop lands him with his face in the first torch's colours; two
+# POP units back, and he stands in the cell before them.
+START_NUDGE = 4 if POP_START and ROOM[0] == 'LEVEL1' else 0
 
 
 def sprite_bytes(img, mirror, pad=0):
@@ -900,8 +903,8 @@ def main(argv):
             if n in KID_SEQS:
                 f.write('SQ_%-12s equ %d' % (label.upper(), n) + chr(10))
         f.write('START_X     equ %d\n'
-                % popframe.screen_x(popframe.char_x(START_COL)))
-        f.write('START_Y     equ %d\n' % popframe.char_y(START_ROW))
+                % (popframe.screen_x(popframe.char_x(START_COL)) - START_NUDGE))
+        f.write('START_Y    equ %d\n' % popframe.char_y(START_ROW))
         f.write('START_ROW   equ %d\n' % START_ROW)
         f.write('START_FACE  equ %d\n' % START_FACE)
         f.write('POP_START   equ %d\n' % (1 if POP_START else 0))

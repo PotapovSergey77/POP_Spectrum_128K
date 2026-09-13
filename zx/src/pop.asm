@@ -316,10 +316,11 @@ nextrow:        ld      de, ROOM_BYTES - 32
 ; Ours is 24 pixels short of it, so the view slides, a byte at a time.  The
 ; screen is taken in thirds and the whole slide is done while he crosses the
 ; first two of them the way he faces, and by the middle: facing right, a
-; step as he passes 16, 64 and 112 pixels from the left edge of the screen;
-; facing left, the same from the right.  They are that far apart so that
-; the next view can be made between them even running -- some seven frames
-; on the real machine.  The view only ever steps the way he faces, so a
+; step as he passes 44, 78 and 112 pixels from the left edge of the screen --
+; the first past where level one's drop leaves him, so the level opens on
+; the room's own left edge; facing left, 16, 64 and 112 from the right.
+; They are that far apart so that the next view can be made between them
+; even running -- some five frames on the real machine.  The view only ever steps the way he faces, so a
 ; pace to and fro across a step does not set it swinging; when he turns,
 ; it goes back by the same rule.
 ;
@@ -331,7 +332,14 @@ nextrow:        ld      de, ROOM_BYTES - 32
 
 camera:         xor     a               ; nothing waits for the view yet
                 ld      (vwwait), a
-                call    camsched        ; C = where the rule puts the view
+                ld      a, (frame)      ; up the stairs he is turned to face
+                or      a               ; left, and moved: the view stays put
+                ret     z               ; through climbstairs, 217 to 228 and
+                cp      217             ; the blank frames after
+                jr      c, camgo
+                cp      229
+                ret     c
+camgo:          call    camsched        ; C = where the rule puts the view
                 ld      c, a
                 ld      b, 0            ; B = 1: the step ahead is due now
                 ld      a, (facing)
@@ -381,7 +389,7 @@ camhome:        call    camsched
 
 ; A = the camera the rule gives: how many of the three steps, the way he
 ; faces, he has passed.  In the room's pixels, where each step lands for the
-; view it starts from -- 16, 72 and 128 facing right; facing left 264, 208
+; view it starts from -- 44, 86 and 128 facing right; facing left 264, 208
 ; and 152, passed going down, and the first of those is past the byte.
 
 camsched:       ld      hl, camthr + 3
@@ -410,7 +418,7 @@ cs2:            ld      c, a
                 ret
 
 camthr:         db      153, 209, 255   ; facing left: from these on, 1 2 3
-                db      16, 72, 128     ; facing right
+                db      44, 86, 128     ; facing right
 
 ; ---------------------------------------------------------------- a new view
 ;
