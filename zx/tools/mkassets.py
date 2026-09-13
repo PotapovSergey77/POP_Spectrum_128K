@@ -587,6 +587,9 @@ def main(argv):
 
     seq, code, entry = build_sequences()
     used = seq.walk(KID_SEQS)
+    # And the frames the code puts him in that no sequence names: 161, the
+    # block that worked, which CHECKSTRIKE sets over 150.
+    used += [f for f in (161,) if f not in used]
     table, blobs, trims = build_sprites(used)
     # A falling floor is nobody's frame, so it goes one past his own, in the
     # bank the last of the sprites leave half empty.
