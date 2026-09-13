@@ -3601,6 +3601,9 @@ animexit:       ld      a, 1
                 ret     c
                 ld      a, SND_GATEDOWN
                 call    addsound
+                ld      a, SONG_STAIRS
+                ld      c, 15
+                call    cue_song
                 ld      a, 1            ; open for good: the way out of here
                 ld      (exitopen), a
                 jp      stopobj

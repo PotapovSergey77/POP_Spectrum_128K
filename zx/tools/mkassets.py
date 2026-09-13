@@ -34,6 +34,7 @@ import sys
 import bgexport
 import popframe
 import popimg
+import popmusic
 import popseq
 import poplevel
 import renderroom
@@ -712,7 +713,13 @@ def main(argv):
     # last of the sprites leave half empty.
     tables = PAGE_WINDOW + 6912
     assert tables + len(spare) <= 0x10000, 'the canvas bank is full'
-    spr3 = blobs[2] if len(blobs) > 2 else b''
+    # The music goes after the last of the sprites, in the canvas's bank:
+    # it is read only while a song holds the game still.
+    while len(blobs) < 3:
+        blobs.append(b'')
+    songdata = PAGE_WINDOW + len(blobs[2])
+    blobs[2] = bytes(blobs[2]) + popmusic.songs(binout)
+    spr3 = blobs[2]
     canvas = PAGE_WINDOW + len(spr3) + len(SIG_SPR) + 3
     # The two floorpiece masks follow the canvas's pixels in their bank, and
     # the room-build code follows them; the canvas bank keeps the tables.
@@ -737,7 +744,8 @@ def main(argv):
            'swposes     equ %d' % (tables + len(table) + len(code)
                                    + len(entry) + 4 * top),
            'MASKCAN     equ %d' % maskcan,
-           'CANVAS      equ %d' % canvas]
+           'CANVAS      equ %d' % canvas,
+           'songdata    equ %d' % songdata]
     for k, v in bgat.items():
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
     inc.append('flames      equ %d' % (PAGE_WINDOW + flames_at))

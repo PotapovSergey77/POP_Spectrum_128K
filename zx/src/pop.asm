@@ -188,6 +188,8 @@ mainrun:        ld      a, (FRAMES)
                 call    hide_floor
                 call    hide_behind
                 call    hide_guard
+                call    kid_death
+                call    songcues        ; a song cued, and the moment for it
                 call    rq_run          ; and the redrawing, as time allows
                 call    vw_fill         ; and the view ahead, to the very end
                 jp      main
@@ -857,7 +859,10 @@ facejstk:       ld      a, (facing)
                 ld      (clrb), a
                 ret
 
-input_step:     ld      a, (kidstr)     ; PLAYERCTRL: no strength left, no life
+input_step:     ld      a, (charlife)   ; PLAYERCTRL: no strength left, no
+                or      a               ; life -- once
+                jp      p, isalive
+                ld      a, (kidstr)
                 or      a
                 jr      nz, isalive
                 ld      (charlife), a
@@ -1665,7 +1670,14 @@ seqloop:        ld      a, (hl)
                 jp      z, sqeffect
                 cp      SEQ_TAP
                 jp      z, sqtap
-                jp      seqloop         ; die and nextlevel: no data
+                cp      SEQ_FIRSTOP     ; nextlevel: GoneUpstairs
+                jp      nz, seqloop     ; die: no data
+                push    hl
+                ld      a, SONG_UPSTAIRS
+                ld      c, 25
+                call    cue_song
+                pop     hl
+                jp      seqloop
 
 seqframe:       ld      (frame), a
                 ld      (seqptr), hl
@@ -4886,6 +4898,16 @@ dfspill:        db      0
                 ds      64
 stack:
 
+; The guards' programs, AUTO.S: kept here, where there is room for them.
+
+;               strike  0   1   2   3   4   5   6   7   8   9   10  11
+strikeprob:     db      75, 100, 75, 75, 75, 50, 100, 220, 0, 60, 40, 60
+restrikeprob:   db      0, 0, 0, 5, 5, 175, 20, 10, 0, 255, 255, 150
+blockprob:      db      0, 150, 150, 200, 200, 255, 200, 250, 0, 255, 255, 255
+impblockprob:   db      0, 75, 75, 100, 100, 145, 100, 250, 0, 145, 255, 175
+advprob:        db      255, 200, 200, 200, 255, 255, 200, 0, 0, 255, 100, 100
+refractimer:    db      20, 20, 20, 20, 10, 10, 10, 10, 0, 10, 0, 0
+
 cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
@@ -4964,6 +4986,11 @@ start:          di
                 call    page_canvas
                 call    step_seq
                 call    add_guard       ; and whoever keeps the room
+                ld      a, START_ROOM - KIDSTART_SCRN
+                or      a
+                ld      a, SONG_DANGER  ; the level begins: "Danger"
+                ld      c, 25
+                call    z, cue_song
                 call    page_art
                 jp      start2
 

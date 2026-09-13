@@ -568,6 +568,9 @@ shadctrl:       ld      a, (charlife)
                 or      a
                 jr      nz, sccont
                 ld      (charlife), a
+                ld      a, SONG_VICT    ; DEADENEMY
+                ld      c, 25
+                call    cue_song
 sccont:         call    autoctrl
                 jp      ctrl
 
@@ -925,13 +928,6 @@ front2_flags:   call    front_x
                 add     hl, de
                 jp      tile_flags
 
-;               strike  0   1   2   3   4   5   6   7   8   9   10  11
-strikeprob:     db      75, 100, 75, 75, 75, 50, 100, 220, 0, 60, 40, 60
-restrikeprob:   db      0, 0, 0, 5, 5, 175, 20, 10, 0, 255, 255, 150
-blockprob:      db      0, 150, 150, 200, 200, 255, 200, 250, 0, 255, 255, 255
-impblockprob:   db      0, 75, 75, 100, 100, 145, 100, 250, 0, 145, 255, 175
-advprob:        db      255, 200, 200, 200, 255, 255, 200, 0, 0, 255, 100, 100
-refractimer:    db      20, 20, 20, 20, 10, 10, 10, 10, 0, 10, 0, 0
 
 ; ---------------------------------------------------------------- CTRL.S
 ;
@@ -1845,8 +1841,221 @@ aynext:         ld      bc, 0xfffd
                 inc     d
                 ret
 
-aysetup:        db      0x3e, 0x10, 0
+aysetup:        db      0x38, 0x10, 0   ; B and C are the music's
 soundtab:       incbin  "sounds.bin"
+
+;---------------------------------------------------------------- music
+;
+; The songs, as popmusic.py plays them off the disk: for each voice a run of
+; (frames, period, volume) on AY channels B and C.  CUESONG asks for one;
+; SONGCUES plays it when the scene has gone still, and holds the game while it
+; does -- the Apple's speaker left it no choice, and POP made a virtue of it.
+
+SONG_ACCID      equ     1               ; SOUNDNAMES.S
+SONG_HEROIC     equ     2
+SONG_DANGER     equ     3
+SONG_SWORD      equ     4
+SONG_VICT       equ     7
+SONG_STAIRS     equ     8
+SONG_UPSTAIRS   equ     9
+SONG_POTION     equ     11
+SONG_SHORTPOT   equ     12
+
+; CUESONG: A = the song, C = how many frames it may wait for its moment.
+
+cue_song:       ld      (songcue), a
+                ld      a, c
+                ld      (songcount), a
+                ret
+
+; SONGCUES: only while he -- and a guard in the room -- stands still, or lies
+; dead, and nothing is falling or flashing.
+
+songcues:       ld      a, (songcue)
+                or      a
+                ret     z
+                ld      hl, songcount
+                ld      a, (hl)
+                or      a
+                jr      nz, scwait
+                ld      (songcue), a    ; its time has gone
+                ret
+scwait:         dec     (hl)
+                ld      a, (frame)
+                call    still
+                ret     nz
+                ld      a, (gdhere)
+                or      a
+                jr      z, scstill
+                ld      a, (frame + OP)
+                call    still
+                ret     nz
+scstill:        ld      a, (nummob)
+                ld      hl, lightning
+                or      (hl)
+                ret     nz
+                call    page_pixels     ; the songs are in the canvas's bank
+                ld      a, (songcue)
+                add     a, a
+                ld      e, a
+                ld      d, 0
+                ld      hl, songdata
+                add     hl, de
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                ld      a, d
+                or      e
+                jr      z, scdone       ; not carried
+                ld      hl, songdata
+                add     hl, de
+                ld      e, (hl)         ; voice 2's stream, from the record
+                inc     hl
+                ld      d, (hl)
+                dec     hl
+                push    hl
+                add     hl, de
+                ld      (voice2), hl
+                pop     hl
+                inc     hl
+                inc     hl
+                ld      (voice1), hl
+                xor     a
+                ld      (voice1 + 2), a
+                ld      (voice2 + 2), a
+                ld      d, 7            ; tones on, no noise: the AY comes up
+                ld      a, 0x38         ; with both
+                call    ayout
+scplay:         halt                    ; a frame
+                call    page_pixels
+                ld      hl, voice1
+                ld      bc, 0x0209      ; B: period registers 2, 3; C: volume
+                call    vtick
+                push    af
+                ld      hl, voice2
+                ld      bc, 0x040a
+                call    vtick
+                pop     bc
+                jr      nz, scplay
+                ld      a, b
+                or      a
+                jr      nz, scplay
+scdone:         xor     a
+                ld      (songcue), a
+                call    page_canvas     ; clearjoy: nothing pressed meanwhile
+                call    clrall          ; counts -- and clrall is up there
+                jp      page_art
+
+; static? and cold?: A = a frame.  Z when it is standing, crouched, en garde,
+; brandishing the sword -- or dead.
+
+still:          or      a
+                ret     z
+                cp      15
+                ret     z
+                cp      229
+                ret     z
+                cp      109
+                ret     z
+                cp      171
+                ret     z
+                cp      166
+                ret     z
+                cp      185
+                ret     z
+                cp      177
+                ret     z
+                cp      178
+                ret
+
+; HL = a voice: its stream, and the frames its note has left.  B = its period
+; register, C = its volume register.  Out: A and Z when it has finished.
+
+vtick:          ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      a, (hl)
+                or      a
+                jr      z, vtnext
+                dec     (hl)
+                or      1
+                ret
+vtnext:         ld      a, (de)
+                or      a
+                jr      z, vtend
+                dec     a
+                ld      (hl), a
+                inc     de
+                ld      a, (de)
+                push    af
+                inc     de
+                ld      a, (de)
+                inc     de
+                dec     hl
+                ld      (hl), d
+                dec     hl
+                ld      (hl), e
+                ld      e, a            ; volume << 4 | period hi
+                pop     af
+                ld      d, b
+                call    ayout
+                ld      a, e
+                and     15
+                inc     d
+                call    ayout
+                ld      d, c
+                ld      a, e
+                rrca
+                rrca
+                rrca
+                rrca
+                and     15
+                call    ayout
+                or      1
+                ret
+vtend:          ld      d, c            ; silence
+                call    ayout
+                xor     a
+                ret
+
+; Register D = A.
+
+ayout:          push    bc
+                ld      bc, 0xfffd
+                out     (c), d
+                ld      b, 0xbf
+                out     (c), a
+                pop     bc
+                ret
+
+; When he has died and stopped moving, the death song: heroic if he fell in a
+; fight.  CharLife goes past nought so it is asked for once.
+
+kid_death:      ld      a, (charlife)
+                or      a
+                ret     nz
+                ld      a, (frame)
+                cp      185
+                jr      z, kddead
+                cp      177
+                jr      z, kddead
+                cp      178
+                ret     nz
+kddead:         ld      a, 1
+                ld      (charlife), a
+                ld      a, (heroic)
+                or      a
+                ld      a, SONG_ACCID
+                jr      z, kdsong
+                ld      a, SONG_HEROIC
+kdsong:         ld      c, 255
+                jp      cue_song
+
+voice1:         ds      3
+voice2:         ds      3
+songcue:        db      0
+songcount:      db      0
 
 ; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
 
@@ -2201,6 +2410,9 @@ potion_effect:  ld      a, (charid)
                 ret     z
                 inc     a
                 jr      nz, penotsword
+                ld      a, SONG_SWORD
+                ld      c, 25
+                call    cue_song
                 ld      a, 1            ; the sword: three white flashes
                 ld      (gotsword), a
                 ld      bc, WHITE * 256 + 3
@@ -2213,6 +2425,9 @@ penotsword:     dec     a
                 cp      (hl)
                 ret     z
                 inc     (hl)
+                ld      a, SONG_SHORTPOT
+                ld      c, 25
+                call    cue_song
                 ld      bc, ORANGE * 256 + 2
                 jr      peflash
 pe2:            cp      2
@@ -2223,13 +2438,18 @@ pe2:            cp      2
                 inc     a
                 ld      (maxkidstr), a
 pe2full:        ld      (kidstr), a
+                ld      a, SONG_POTION
+                ld      c, 25
+                call    cue_song
                 ld      bc, ORANGE * 256 + 5
                 jr      peflash
 pe3:            cp      3
                 jr      nz, pe5
                 ld      a, 200          ; wtlesstimer
                 ld      (weightless), a
-                ret
+                ld      a, SONG_SHORTPOT
+                ld      c, 25
+                jp      cue_song
 pe5:            cp      5
                 ret     nz
                 ld      a, SND_SPLAT
