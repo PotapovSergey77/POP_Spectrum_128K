@@ -336,7 +336,7 @@ NUMPROGS        equ     12
 ; HL = the byte of GdStart array DE for this room.
 
 gd_field:       ld      a, (roomnum)
-                dec     a
+gd_field_in:    dec     a               ; A = the room
                 ld      l, a
                 ld      h, 0
                 add     hl, de
@@ -344,7 +344,18 @@ gd_field:       ld      a, (roomnum)
                 add     hl, de
                 ret
 
-add_guard:      xor     a
+add_guard:      ld      a, (gdkeep)     ; one who came along is already here
+                or      a
+                jr      z, agfresh
+                xor     a
+                ld      (gdkeep), a
+                ld      hl, newcol + OP ; nothing of him drawn in this room
+                ld      b, 12
+agclr:          ld      (hl), a
+                inc     hl
+                djnz    agclr
+                ret
+agfresh:        xor     a
                 ld      (gdhere), a
                 ld      (offguard), a
                 ld      a, (nowbank)
@@ -532,6 +543,7 @@ do_shad:        call    gd_swap
                 add     hl, de
                 bit     7, h
                 jr      z, dsoff
+                call    enemycoll
                 call    check_floor
                 call    do_fall
 dsoff:          jp      swapchar
@@ -1504,6 +1516,173 @@ ca_read:        ld      b, a
                 ld      c, a
                 ld      a, b
                 jp      tile_at
+
+; CUTCHECK in AUTO.S: the kid is going into room A the way C says -- 0 up,
+; 1 down, 2 left, 3 right.  A live guard en garde close to that side goes
+; with him, unless a live guard is waiting in the new room; anyone else is
+; left behind and written back into his own.
+
+leave_room:     ld      (lrroom), a
+                ld      a, c
+                ld      (lrdir), a
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (charlife + OP)
+                or      a
+                jp      p, update_guard ; dead: left behind
+                ld      a, (charsword + OP)
+                cp      2
+                jp      nz, update_guard
+                ld      a, (nowbank)
+                push    af
+                call    page_bg
+                ld      a, (lrroom)     ; a live guard there already?
+                ld      de, 0
+                call    gd_field_in
+                ld      a, (hl)
+                cp      30
+                jr      nc, lrnonew
+                ld      a, (lrroom)
+                ld      de, GDSEQH
+                call    gd_field_in
+                ld      a, (hl)
+                or      a
+                jp      z, lrleave
+lrnonew:        ld      a, (lrdir)
+                or      a
+                jr      z, lrup
+                dec     a
+                jr      z, lrdown
+                dec     a
+                jr      z, lrleft
+                ld      hl, (charx + OP) ; right: ShadX past ScrnWidth + 25
+                ld      de, -2 * (140 + 25 - SCRNLEFT)
+                add     hl, de
+                bit     7, h
+                jp      nz, lrleave
+                ld      de, -280
+                jr      lrsideways
+lrleft:         ld      hl, (charx + OP) ; left: ShadX under 256 - ScrnWidth - 25
+                ld      de, -2 * (256 - 140 - 25 - SCRNLEFT)
+                add     hl, de
+                bit     7, h
+                jp      z, lrleave
+                ld      de, 280
+lrsideways:     ld      hl, (charx + OP)
+                add     hl, de
+                ld      (charx + OP), hl
+                jr      lrtake
+lrup:           ld      a, (blocky + OP)
+                or      a
+                jp      p, lrleave
+                add     a, 3
+                ld      (blocky + OP), a
+                ld      a, (chary + OP)
+                add     a, 189
+                jr      lrvert
+lrdown:         ld      a, (blocky + OP)
+                cp      3
+                jr      c, lrleave
+                sub     3
+                ld      (blocky + OP), a
+                ld      a, (chary + OP)
+                sub     189
+lrvert:         ld      (chary + OP), a
+lrtake:         ld      de, 0           ; TRANSFERGUARD: out of both rooms'
+                call    gd_field        ; lists, and along with the kid
+                ld      (hl), 0xff
+                ld      a, (lrroom)
+                ld      de, 0
+                call    gd_field_in
+                ld      (hl), 0xff
+                ld      a, 1
+                ld      (gdkeep), a
+                pop     af
+                jp      pageset
+lrleave:        pop     af
+                call    pageset
+                jp      update_guard
+
+lrroom:         db      0
+lrdir:          db      0
+gdkeep:         db      0
+
+; ENEMYCOLL in COLL.S: a guard en garde backing into a wall or a closed gate
+; is put at its edge, and bumps back en garde.
+
+enemycoll:      ld      a, (charact)
+                cp      1
+                ret     nz              ; on the ground
+                ld      a, (charlife)
+                or      a
+                ret     p               ; alive
+                ld      a, (charsword)
+                cp      2
+                ret     c               ; en garde
+                call    base_x          ; GETUNDERFT
+                call    blockcol_of
+                ld      (ecx), a
+                call    ec_read
+                cp      BG_BLOCK
+                jr      z, eccollide
+                cp      BG_PANELWIF
+                jr      z, eccollide
+                cp      BG_GATE
+                jr      nz, ecbehind
+                call    gatebarr
+                jr      c, eccollide
+ecbehind:       ld      a, (facing)     ; facing right, the block behind too
+                or      a
+                ret     z
+                ld      hl, ecx
+                dec     (hl)
+                call    ec_read
+                cp      BG_PANELWIF
+                jr      z, eccollide
+                cp      BG_GATE
+                ret     nz
+                call    gatebarr
+                ret     nc
+eccollide:      call    cd_edges        ; SETUPCHAR and GETEDGES
+                ld      a, (ecx)
+                call    edge140
+                ld      (cbedge), a
+                call    ec_read
+                ld      c, a
+                cp      BG_GATE         ; CHECKCOLL: a gate only while it bars
+                jr      nz, ecbarr
+                call    gatebarr
+                ret     nc
+ecbarr:         ld      a, c
+                call    cmp_barr
+                ret     z
+                ld      (cccode), a
+                ld      a, (facing)     ; DBarr2: the barrier behind him
+                or      a
+                jr      nz, ecright
+                call    leftbar         ; facing left, it is to his right
+                ld      hl, cdright
+                sub     (hl)
+                jr      ecdist
+ecright:        call    rightbar        ; facing right, to his left
+                ld      c, a
+                ld      a, (cdleft)
+                sub     c
+ecdist:         or      a
+                ret     p
+                neg
+                call    move_by
+                ld      a, SQ_BUMPENGBACK
+                call    jumpseq
+                jp      step_seq
+
+ec_read:        ld      a, (blocky)
+                ld      c, a
+                ld      a, (ecx)
+                jp      tile_at
+
+ecx:            db      0
 
 ; ---------------------------------------------------------------- meters
 ;

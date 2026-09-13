@@ -1731,7 +1731,7 @@ nrcall:         or      a
                 ret     z               ; no room that way, and nothing done:
                 push    bc
                 push    af
-                call    update_guard    ; the guard stays behind, written back
+                call    leave_room      ; the guard goes too, or stays behind
                 pop     af
                 pop     bc
                 ld      (roomnum), a    ; putting the block back would take the
