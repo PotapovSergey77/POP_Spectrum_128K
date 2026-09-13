@@ -4200,32 +4200,26 @@ rqdone:         ld      a, (rqn)        ; off the head
                 ldir
                 jp      rqloop
 
-; Carry: a step may begin.  The first of a frame goes whatever the clock
-; says: on the machine a frame's own work ends in its third period more
-; often than not, and waiting for the second drew nothing at all -- no plate
-; went down, no gate went up.  The rest only while the frame is still in its
-; first period.
-;
-; The clock here counts whole periods and a step is one indivisible piece of
-; work of up to fifty six thousand cycles -- a quarter of the slot -- so
-; "not in the last period yet" says nothing about whether the step will fit:
-; the start and the end of a period are further apart than the step is long.
-; While his own work ran into the third period that was safe by accident;
-; the frame got cheaper, the question began to be asked a period earlier,
-; and the second step started with less left than it needed.
+; Carry: a step may begin.  The clock here counts whole periods, and a step is
+; one indivisible piece of work of up to a period -- the exit door's bands run
+; to seventy thousand cycles.  So: any number while the frame is in its first
+; period; a single one begun in the second, which ends inside the third at the
+; latest; none in the third.  When his own work is light that is a whole pass
+; of a gate or the door every frame, which is what shows it moving smoothly,
+; and when it is heavy the queue waits rather than make the frame late.
 
-rqtime:         ld      a, (rqdid)
-                or      a
-                jr      z, rqt1
-                ld      a, (FRAMES)
+rqtime:         ld      a, (FRAMES)
                 ld      hl, frstart
                 sub     (hl)
-                cp      FRAME_WAIT - 1  ; a step is shorter than a period, so
-                ret                     ; one begun before the last still ends
-                                        ; before the frame is due
-rqt1:           inc     a
-                ld      (rqdid), a
-                scf
+                jr      z, rqtyes       ; still the frame's first period
+                cp      FRAME_WAIT - 1
+                ret     nc              ; the last: nothing more
+                ld      hl, rqdid       ; the middle one: a single step, the
+                ld      a, (hl)         ; longest being all but a period, so
+                or      a               ; that it ends before the frame is due
+                ret     nz
+                inc     (hl)
+rqtyes:         scf
                 ret
 
 ; A block that has gone back into the room still has to reach the working

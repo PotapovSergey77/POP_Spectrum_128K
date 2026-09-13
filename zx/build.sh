@@ -64,6 +64,6 @@ assert sym['work'] % 0x800 == 0, 'рабочий буфер не на грани
 print('буферы под загрузчиком %04X..%04X, %d байт'
       % (sym['LOWBUF'], sym['LOWTOP'], sym['LOWTOP'] - sym['LOWBUF']))
 assert sym['LOWTOP'] <= sym['stubs'], 'буферы под загрузчиком налезли на код'
-assert sym['LOWBUF'] >= 23755, 'буферы под загрузчиком залезли в переменные ПЗУ'
+assert sym['LOWSTACK'] >= 23755, 'буферы под загрузчиком залезли в переменные ПЗУ'
 assert work <= sym['HICODE'], 'рабочий буфер налез на код боя'
 PY

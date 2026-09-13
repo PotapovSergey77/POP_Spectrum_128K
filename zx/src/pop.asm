@@ -2816,7 +2816,9 @@ flvw:           db      0               ; the flame's bytes that are in view
 ; the window is simply copied out -- again when the view moves.
 
 set_attrs:      ld      hl, SCREEN + 6144
-set_attrs_at:   ld      (atbase), hl    ; or the other screen's, for a view
+set_attrs_at:   ld      a, 1            ; the meters' colours go with it
+                ld      (meterdirty), a
+                ld      (atbase), hl    ; or the other screen's, for a view
                 ld      d, h            ; being made in it
                 ld      e, l
                 inc     de
@@ -2968,9 +2970,176 @@ dmcol:          db      0
 dmtop:          db      0
 dmw:            db      0
 dmrect:         ds      4
+meterdirty:     db      1               ; something went over the meters
 dmslot:         dw      0
 mbold:          ds      8               ; where each is drawn now
 mbshow:         ds      8               ; and that with where it was
+
+
+; DrawFF in FRAMEADV.S, for every MOB in the room on screen: a loose floor on
+; its way down, laid over the room with its own mask -- the loose floor's A,
+; D and B sections, composed at build time -- its foot on moby and its left
+; edge at mobx Apple bytes, which lands on a byte or four pixels into one.
+; Where they were last frame has been put back already; where they are now
+; is shown next frame together with it, as mbshow.
+
+MOBROWS         equ     FF_H
+
+draw_mobs:      ld      hl, mbold       ; last frame's, to be shown with this
+                ld      de, mbshow
+                ld      bc, 8
+                ldir
+                xor     a
+                ld      (mbold + 2), a  ; and nothing drawn yet this frame
+                ld      (mbold + 6), a
+                ld      a, (nummob)
+                or      a
+                ret     z
+                ld      b, a
+                ld      c, 0
+                ld      hl, mbold       ; a rectangle each: two far apart in
+dmloop:         push    bc              ; one box was most of the screen to
+                push    hl              ; put back, cover and show
+                ld      (dmslot), hl
+                call    mobload
+                call    draw_mob
+                pop     hl
+                ld      de, 4
+                add     hl, de
+                pop     bc
+                inc     c
+                djnz    dmloop
+                ld      hl, mbshow      ; each with where it was, to show
+                ld      de, mbold
+                call    box_two
+                ld      hl, mbshow + 4
+                ld      de, mbold + 4
+                jp      box_two
+
+draw_mob:       ld      a, (mobvel)
+                inc     a
+                ret     z               ; gone
+                ld      a, (mobroom)
+                ld      hl, roomnum
+                cp      (hl)
+                ret     nz
+                ld      a, (mobx)       ; seven pixels an Apple byte
+                ld      l, a
+                ld      h, 0
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                or      a
+                sbc     hl, de
+                ld      a, l
+                and     7
+                ld      de, FF_AT0
+                ld      b, FF_W
+                jr      z, dmshift
+                ld      de, FF_AT4
+                ld      b, FF_W4
+dmshift:        ld      (dmsrc), de
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                ld      a, (cam)
+                ld      c, a
+                ld      a, l
+                sub     c
+                ld      (dmcol), a      ; its first byte on the screen, signed
+                ld      a, b
+                ld      (dmw), a
+                ld      a, (moby)
+                sub     MOBROWS - 1
+                ld      (dmtop), a
+                ld      a, (dmcol)      ; and its rectangle, B wide, the
+                                        ; columns clipped to the screen's
+                bit     7, a
+                jr      z, dmright
+                add     a, b            ; off the left: what is left of it
+                ret     m
+                ret     z
+                ld      b, a
+                xor     a
+dmright:        ld      c, a
+                add     a, b
+                sub     32
+                jr      c, dmfits
+                ld      d, a            ; past the right: that much less
+                ld      a, b
+                sub     d
+                ret     c
+                ret     z
+                ld      b, a
+dmfits:         ld      hl, dmrect
+                ld      (hl), c
+                inc     hl
+                ld      a, (dmtop)
+                ld      (hl), a
+                inc     hl
+                ld      (hl), b
+                inc     hl
+                ld      (hl), MOBROWS
+                call    page_art        ; the room back under it first: after
+                ld      hl, dmrect      ; the view has moved, what the working
+                call    eraseset        ; copy holds there is the old view
+                ld      a, FF_BLOB
+                ld      (curbank), a
+                call    page_frame
+                ld      a, (dmtop)
+                ld      b, MOBROWS
+                ld      c, a            ; C = the row in hand
+dmrow:          push    bc
+                ld      a, c
+                cp      192
+                jr      nc, dmnext      ; off the top or the foot
+                ld      e, 0
+                call    scraddr
+                ld      bc, work - SCREEN
+                add     hl, bc          ; column nought of the working copy
+                ld      a, (dmw)
+                ld      b, a
+                ld      a, (dmcol)
+                ld      c, a
+                ld      de, (dmsrc)
+dmbyte:         ld      a, c
+                cp      32
+                jr      nc, dmskip      ; off either side
+                push    hl
+                add     a, l
+                ld      l, a
+                ld      a, (de)         ; the mask: the room shows through
+                and     (hl)
+                inc     de
+                ex      de, hl
+                or      (hl)            ; and the piece
+                ex      de, hl
+                ld      (hl), a
+                pop     hl
+                dec     de
+dmskip:         inc     de
+                inc     de
+                inc     c
+                djnz    dmbyte
+dmnext:         ld      hl, (dmsrc)     ; a row on
+                ld      a, (dmw)
+                add     a, a
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (dmsrc), hl
+                pop     bc
+                inc     c
+                djnz    dmrow
+
+                ld      hl, (dmslot)    ; and where it is now
+                ld      de, dmrect
+                jp      box_two
 
 
 ; The colours of the screen that is shown, worked out again.
@@ -4319,7 +4488,7 @@ dfm0go:         ld      a, (dfcnt)
                 ret     z
                 ld      b, a
                 exx
-                ld      h, revtab / 256
+                ld      h, REVTAB / 256
                 exx
 dfm0pair:       ld      a, (de)
                 dec     de
@@ -4383,7 +4552,7 @@ dfmcut:         ld      a, (de)
                 dec     de
                 exx
                 ld      l, a
-                ld      h, revtab / 256
+                ld      h, REVTAB / 256
                 ld      l, (hl)
                 ld      h, e
                 ld      b, (hl)
@@ -4396,7 +4565,7 @@ dfmpair:        ld      a, (de)
                 dec     de
                 exx
                 ld      l, a
-                ld      h, revtab / 256
+                ld      h, REVTAB / 256
                 ld      l, (hl)
                 ld      h, d
                 ld      a, (hl)
@@ -4765,6 +4934,8 @@ show_rect:      ld      hl, flipnow     ; the view made behind is ready:
                 xor     a               ; what fell was put down for the view
                 ld      (mbshow + 2), a ; gone: the new one never had it
                 ld      (mbshow + 6), a
+                inc     a               ; and nor had it the meters
+                ld      (meterdirty), a
 shnoflip:
                 ld      a, (fullshow)
                 or      a
@@ -4776,6 +4947,7 @@ shnoflip:
 ; they belong to rather than in a pass of their own: a row is never on screen
 ; without him, and the tear that is left is the room sliding, nothing more.
 
+                ld      (meterdirty), a ; A is not nought here: the meters too
                 xor     a
                 ld      (fullshow), a
                 ld      (dirtyn), a
@@ -4897,7 +5069,13 @@ showgo:         ld      a, (shw)        ; none of him on screen: LDIR would
                 ld      a, (shtop)
                 call    cliprows
                 ret     c
-                call    rowcount
+                ld      a, c            ; down into the meters' row: they
+                add     a, b            ; want putting back over it
+                cp      METERTOP + 1
+                jr      c, shabove
+                ld      a, 1
+                ld      (meterdirty), a
+shabove:        call    rowcount
                 ld      a, (shcol)
                 ld      e, a
                 ld      a, c
@@ -5280,8 +5458,6 @@ dfsrc:          dw      0
 dfcnt:          db      0
 dfspill:        db      0
 
-                ds      64
-stack:
 
 ; The guards' programs, AUTO.S: kept here, where there is room for them.
 
@@ -5304,7 +5480,6 @@ flamemask:      incbin  "flamemask.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
 shiftlo:        incbin  "shiftlo.bin"
-revtab:         incbin  "revtab.bin"
 codeend:
 
 ; ---------------------------------------------------------------- the fight
@@ -5330,6 +5505,11 @@ hiend:
 start:          di
                 ld      sp, stack
                 im      1
+
+                ld      hl, revsrc      ; the bit reversal table, out to where
+                ld      de, REVTAB      ; it lives from now on
+                ld      bc, 256
+                ldir
 
                 xor     a
                 out     (254), a
@@ -5427,6 +5607,8 @@ badload:        ld      a, 2
                 out     (254), a
                 jr      badload
 
+revsrc:         incbin  "revtab.bin"
+
 initend:
 
 ; ---------------------------------------------------------------- a room
@@ -5481,6 +5663,14 @@ RB1LEN          equ     roomend - roomblk
 ; belowrow, and the four cd* are walked ten bytes apart.
 
 LOWBUF          equ     24320 - 490     ; the block ends just under org
+stack           equ     LOWBUF          ; and the stack under that, 64 bytes
+LOWSTACK        equ     stack - 64     ; of it down to here
+
+; 128 BASIC's own variables and the printer buffer at 5B00 are nothing to the
+; 48K ROM the game runs with, and BASIC is gone: a page of RAM for a table
+; that only needs to be on a page of its own, copied there by start.
+
+REVTAB          equ     0x5B00
 
 frontlist       equ     LOWBUF                      ; five bytes an entry, as
 roomids         equ     frontlist + MAXFRONT * 5    ; frontrec writes them
