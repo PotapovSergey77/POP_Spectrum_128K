@@ -1272,7 +1272,7 @@ cskid:          ld      a, (charact)
 stabchar:       ld      a, (charlife)
                 or      a
                 ret     p               ; already dead
-                ld      a, SND_SPLAT
+                ld      a, SND_STABBED  ; the CPC's sound of a blade going in
                 call    addsound
                 ld      a, (charsword)
                 cp      2
@@ -1589,62 +1589,11 @@ strow:          db      0
 
 ; ---------------------------------------------------------------- sound
 ;
-; ADDSOUND and PLAYBACK in SOUND.S, on the AY: A = the sound.  POP plays the
-; frame's sounds one after another once it has drawn it, with the speaker
-; holding up everything else; here the newest simply takes channel A, and
-; nothing waits.  Every register kept.
-
-addsound:       push    af
-                push    bc
-                push    de
-                push    hl
-                cp      SOUNDS
-                jr      nc, asdone
-                add     a, a
-                add     a, a
-                ld      e, a
-                ld      d, 0
-                ld      hl, soundtab
-                add     hl, de
-                ld      d, 0            ; the tone's period
-                call    aynext
-                call    aynext
-                ld      d, 11           ; the envelope's
-                call    aynext
-                call    aynext
-                ld      hl, aysetup     ; tone A on, no noise; A on the
-                ld      d, 7            ; envelope; one decay and silence
-                call    aynext
-                ld      d, 8
-                call    aynext
-                ld      d, 13
-                call    aynext
-asdone:         pop     hl
-                pop     de
-                pop     bc
-                pop     af
-                ret
-
-; Register D gets (HL); both move on.
-
-aynext:         ld      bc, 0xfffd
-                out     (c), d
-                ld      a, (hl)
-                ld      b, 0xbf
-                out     (c), a
-                inc     hl
-                inc     d
-                ret
-
-aysetup:        db      0x38, 0x10, 0   ; B and C are the music's
-soundtab:       incbin  "sounds.bin"
-
-;---------------------------------------------------------------- music
-;
-; The songs, as popmusic.py plays them off the disk: for each voice a run of
-; (frames, period, volume) on AY channels B and C.  CUESONG asks for one;
-; SONGCUES plays it when the scene has gone still, and holds the game while it
-; does -- the Apple's speaker left it no choice, and POP made a virtue of it.
+; The sounds are the CPC release's: its twenty effects -- tunes among them --
+; and its driver, ported from the game at &B15D, one fiftieth of a second to
+; a tick.  One plays at a time; a new one takes over unless it matters less
+; than the one playing, which is how a footstep never breaks into a tune.
+; cpcsound.py has the data and its commands.
 
 SONG_ACCID      equ     1               ; SOUNDNAMES.S
 SONG_HEROIC     equ     2
@@ -1656,160 +1605,210 @@ SONG_UPSTAIRS   equ     9
 SONG_POTION     equ     11
 SONG_SHORTPOT   equ     12
 
-; CUESONG: A = the song.  POP made it wait for a still moment and held the
-; game while it played, the speaker leaving it no choice; the AY plays it
-; under the game instead, from the next frame, over whatever was playing.
-; (C, the frames POP would have let it wait, is not wanted.)
+; ADDSOUND: A = one of POP's sounds.  CUESONG: A = one of its tunes (C, the
+; frames POP would let it wait for a still moment, is not wanted).  Each is
+; played as its CPC effect, if the CPC has one.  Every register kept.
 
-cue_song:       ld      (songcue), a
+addsound:       push    af
+                push    bc
+                push    de
+                push    hl
+                ld      e, a
+                cp      SOUNDS
+                jr      c, sfxmapped
+                jr      sfxdone
+cue_song:       push    af
+                push    bc
+                push    de
+                push    hl
+                cp      SONGS
+                jr      nc, sfxdone
+                add     a, SOUNDS
+                ld      e, a
+sfxmapped:      ld      d, 0
+                ld      hl, sfxmap
+                add     hl, de
+                ld      a, (hl)
+                call    sfx_play
+sfxdone:        pop     hl
+                pop     de
+                pop     bc
+                pop     af
                 ret
 
-; Once a frame, at the top of it: the song cued, if any, begins, and the one
-; playing moves on as many fiftieths as the interrupts say have gone by --
-; three a frame, and many more while a room is being built -- so it keeps its
-; time whatever the frame did.
+; A = the CPC effect.  From its first tick, unless it matters less than the
+; one playing.
 
-music:          ld      a, (FRAMES)
-                ld      hl, mlast
+sfx_play:       cp      SFXCOUNT
+                ret     nc
+                ld      c, a
+                add     a, a
+                add     a, c
+                ld      e, a
+                ld      d, 0
+                ld      hl, sfxtab
+                add     hl, de
+                ld      e, (hl)         ; where it starts
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      a, (sfxprio)
+                cp      (hl)
+                jr      z, sfxtake
+                ret     nc              ; the one playing matters more
+sfxtake:        ld      a, (hl)
+                ld      (sfxprio), a
+                inc     hl
+                ld      c, (hl)         ; and where the next one starts
+                inc     hl
+                ld      b, (hl)
+                ld      hl, sfxdata
+                add     hl, de
+                ld      (sfxptr), hl
+                ld      (sfxstart), hl
+                ld      hl, sfxdata
+                add     hl, bc
+                ld      (sfxend), hl
+                ld      a, (FRAMES)     ; its ticks count from now, not from
+                ld      (sfxlast), a    ; the last frame, which may be long
+                ld      a, 1            ; gone: a room's build
+                ld      (sfxtimer), a
+                jp      sfx_quiet
+
+; Once a frame, at the top of it: as many ticks as the interrupts say have
+; gone by -- three a frame.
+
+sfx_frame:      ld      a, (FRAMES)
+                ld      hl, sfxlast
                 ld      b, (hl)
                 ld      (hl), a
                 sub     b
-                ld      b, a            ; B = fiftieths since last time
-                call    page_pixels     ; the songs are in the canvas's bank
-                ld      a, (songcue)
+                ret     z
+                ld      b, a
+                cp      FRAME_WAIT + 2  ; a long frame -- a room's build --
+                jr      c, sfxnlong     ; holds a tune up rather than skip
+                ld      b, FRAME_WAIT   ; its notes
+sfxnlong:       ld      a, (sfxtimer)
                 or      a
-                jr      z, muplay
-                push    bc
-                add     a, a
-                ld      e, a
-                ld      d, 0
-                ld      hl, songdata
-                add     hl, de
-                ld      e, (hl)
-                inc     hl
-                ld      d, (hl)
-                xor     a
-                ld      (songcue), a
-                ld      (playing), a
-                ld      a, d
-                or      e
-                jr      z, mustart      ; not carried
-                ld      hl, songdata
-                add     hl, de
-                ld      e, (hl)         ; voice 2's stream, from the record
-                inc     hl
-                ld      d, (hl)
-                dec     hl
-                push    hl
-                add     hl, de
-                ld      (voice2), hl
-                pop     hl
-                inc     hl
-                inc     hl
-                ld      (voice1), hl
-                xor     a
-                ld      (voice1 + 2), a
-                ld      (voice2 + 2), a
-                inc     a
-                ld      (playing), a
-                ld      d, 7            ; tones on, no noise: the AY comes up
-                ld      a, 0x38         ; with both
-                call    ayout
-mustart:        pop     bc
-                ld      b, 1            ; a song starts from its start, not
-                                        ; from however long the frame was
-muplay:         ld      a, (playing)
-                or      a
-                jr      z, mudone
-                inc     b
-                dec     b
-                jr      z, mudone
-muloop:         push    bc
-                ld      hl, voice1
-                ld      bc, 0x0209      ; B: period registers 2, 3; C: volume
-                call    vtick
-                push    af
-                ld      hl, voice2
-                ld      bc, 0x040a
-                call    vtick
+                ret     z
+                call    page_pixels     ; the data is in the canvas's bank
+sfxticks:       push    bc
+                call    sfx_tick
                 pop     bc
-                jr      nz, munext
-                ld      a, b
-                or      a
-                jr      nz, munext
-                ld      (playing), a    ; both voices done
-                pop     bc
-                jr      mudone
-munext:         pop     bc
-                djnz    muloop
-mudone:         jp      page_art
+                djnz    sfxticks
+                jp      page_art
 
-; HL = a voice: its stream, and the frames its note has left.  B = its period
-; register, C = its volume register.  Out: A and Z when it has finished.
+; One tick: the wait counted down, and when it is out the commands up to the
+; next wait.  Past its end an effect starts again from its start.
 
-vtick:          ld      e, (hl)
-                inc     hl
-                ld      d, (hl)
-                inc     hl
+sfx_tick:       ld      hl, sfxtimer
                 ld      a, (hl)
                 or      a
-                jr      z, vtnext
+                ret     z
                 dec     (hl)
-                or      1
-                ret
-vtnext:         ld      a, (de)
+                ret     nz
+                inc     (hl)
+                ld      hl, (sfxptr)
+stloop:         ld      de, (sfxend)
+                push    hl
                 or      a
-                jr      z, vtend
-                dec     a
-                ld      (hl), a
-                inc     de
-                ld      a, (de)
-                push    af
-                inc     de
-                ld      a, (de)
-                inc     de
+                sbc     hl, de
+                pop     hl
+                jr      c, stin
+                ld      hl, (sfxstart)
+stin:           ld      a, (hl)
+                inc     hl
+                bit     7, a
+                jr      z, streg
+                and     0x7f
+                jr      nz, stcmd
+                ld      a, (hl)         ; 80 v: the accumulator
+                inc     hl
+                ld      (sfxacc), a
+                jr      stloop
+stcmd:          dec     a
+                jr      nz, stwait
+                ld      b, (hl)         ; 81 r d t: a step towards t
+                inc     hl
+                ld      a, (sfxacc)
+                add     a, (hl)
+                inc     hl
+                cp      (hl)
+                jr      nz, stramp
+                ld      c, a            ; there: on to what follows
+                ld      a, b
+                jr      stwrite
+stramp:         ld      (sfxacc), a     ; not yet: this step, and the same
+                ld      c, a            ; command next tick
+                ld      a, b
+                call    sfx_out
                 dec     hl
-                ld      (hl), d
                 dec     hl
-                ld      (hl), e
-                ld      e, a            ; volume << 4 | period hi
-                pop     af
-                ld      d, b
-                call    ayout
-                ld      a, e
-                and     15
-                inc     d
-                call    ayout
+                dec     hl
+                jr      stsave
+stwait:         ld      a, (hl)         ; 8x n: wait n + 1 ticks, or stop
+                or      a
+                jr      z, ststop
+                inc     a
+                ld      (sfxtimer), a
+                inc     hl
+stsave:         ld      (sfxptr), hl
+                ret
+streg:          ld      c, (hl)         ; r v
+                cp      11
+                jr      nz, stwrite
+                inc     hl              ; 11 lo 12 hi: the envelope period,
+                inc     hl              ; halved
+                ld      b, (hl)
+                srl     b
+                rr      c
+                push    bc
+                call    sfx_out
+                pop     bc
+                ld      a, 12
+                ld      c, b
+stwrite:        call    sfx_out
+                inc     hl
+                jr      stloop
+ststop:         xor     a
+                ld      (sfxtimer), a
+                ld      (sfxprio), a
+
+; The three volumes to nought.
+
+sfx_quiet:      ld      a, 8
+                call    sfx_zero
+                ld      a, 9
+                call    sfx_zero
+                ld      a, 10
+sfx_zero:       ld      c, 0
+
+; Register A = C.  The mixer's top two bits are the I/O ports', left as inputs.
+
+sfx_out:        cp      7
+                jr      nz, sfxo1
+                res     6, c
+                res     7, c
+sfxo1:          push    bc
+                push    de
                 ld      d, c
-                ld      a, e
-                rrca
-                rrca
-                rrca
-                rrca
-                and     15
-                call    ayout
-                or      1
-                ret
-vtend:          ld      d, c            ; silence
-                call    ayout
-                xor     a
-                ret
-
-; Register D = A.
-
-ayout:          push    bc
                 ld      bc, 0xfffd
-                out     (c), d
-                ld      b, 0xbf
                 out     (c), a
+                ld      b, 0xbf
+                out     (c), d
+                pop     de
                 pop     bc
                 ret
 
-voice1:         ds      3
-voice2:         ds      3
-songcue:        db      0
-playing:        db      0
-mlast:          db      0
+sfxmap:         incbin  "sfxmap.bin"
+sfxtab:         incbin  "sfxtab.bin"
+sfxstart:       dw      0
+sfxend:         dw      0
+sfxptr:         dw      0
+sfxtimer:       db      0
+sfxacc:         db      0
+sfxprio:        db      0
+sfxlast:        db      0
 
 ; addlowersound in SUBS.S: a gate going down creaks only where it is seen.
 
@@ -1919,8 +1918,8 @@ trig_spikes:    call    spk_at
 tsready:        ld      a, 1
                 ld      (trdirec), a
                 call    addtrob
-                ld      a, SND_GATEDOWN ; "TEMP" in MOVER.S, and the sound
-                call    addsound        ; spikes make ever since
+                ld      a, SND_SPIKES   ; the CPC's, for spikes springing
+                call    addsound
                 ld      a, SPIKEWIPE
                 ld      (redh), a
                 jp      redplate

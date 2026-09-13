@@ -3641,6 +3641,8 @@ animgate:       ld      a, 1
                 cp      GMAXVAL
                 ld      a, SND_RAISINGGATE
                 jp      c, addsound
+                ld      a, SND_GATETOP  ; the CPC's, all the way up
+                call    addsound
                 ld      a, (trdirec)    ; at the top: jam, or wait and fall
                 cp      2
                 jr      c, agwait
@@ -3699,7 +3701,7 @@ animexit:       ld      a, 1
                 ld      (trobst), a
                 cp      EMAXVAL
                 ret     c
-                ld      a, SND_GATEDOWN
+                ld      a, SND_GATETOP  ; the CPC's, all the way up
                 call    addsound
                 ld      a, SONG_STAIRS
                 ld      c, 15

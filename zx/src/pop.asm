@@ -155,7 +155,7 @@ mainrun:        ld      a, (FRAMES)
                 call    page_art
                 call    show_rect
                 call    show_meters     ; over whatever went to the screen
-                call    music           ; and the song goes on
+                call    sfx_frame       ; and the sound goes on
                 call    page_art
                 call    keep_rect
 
@@ -1236,6 +1236,8 @@ tkwipe:         ld      (redh), a
                 call    page_canvas     ; trobat and redplate paged the level
                 ld      a, (takeid)     ; in, and jumpseq and step_seq after
                 cp      BG_SWORD        ; it read the sequences from here
+                ld      a, SND_DRINK    ; the CPC's, drinking
+                call    nz, addsound
                 ld      a, SQ_DRINKPOTION
                 jr      nz, tkseq
                 ld      a, 0xff         ; the sword is potion -1

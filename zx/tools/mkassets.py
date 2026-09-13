@@ -34,7 +34,7 @@ import sys
 import bgexport
 import popframe
 import popimg
-import popmusic
+import cpcsound
 import popseq
 import poplevel
 import renderroom
@@ -251,40 +251,24 @@ def lay_frame(table, banks, trims, n, frame):
                           | len(banks[-1])).to_bytes(2, 'little')
     banks[-1] += data
 
-# name, pitch, dur -- the TONE calls in SOUND.S, by sound number.  Those
-# that jump to another routine have its numbers; GotKey and FlashMsg play
-# two tones twice over, and have the first of them.
-SOUNDS = [('PlateDown', 70, 4), ('PlateUp', 90, 4), ('GateDown', 70, 4),
-          ('SpecialKey1', 15, 50), ('SpecialKey2', 40, 50),
-          ('Splat', 1000, 3), ('MirrorCrack', 1000, 3),
-          ('LooseCrash', 1000, 3), ('GotKey', 500, 15), ('Footstep', 35, 3),
-          ('RaisingExit', 40, 6), ('RaisingGate', 20, 2),
-          ('LoweringGate', 7, 8), ('SmackWall', 1000, 3),
-          ('Impaled', 1000, 3), ('GateSlam', 1000, 3),
-          ('FlashMsg', 500, 15), ('SwordClash1', 15, 50),
-          ('SwordClash2', 15, 50), ('JawsClash', 10, 50)]
-APPLE_HZ = 1022727
-AY_CLOCK = 1750000                      # the 128K's
-
-
-def tone_cycles(pitch):
-    """One half period of TONE, in 6502 cycles."""
-    lo, hi = pitch & 0xff, pitch >> 8
-    if not hi:
-        return 9 * lo + 22
-    return hi * (9 * lo + 10) + 12
-
-
-def sound_table():
-    out = bytearray()
-    for name, pitch, dur in SOUNDS:
-        t = tone_cycles(pitch)
-        freq = APPLE_HZ / (2.0 * t)
-        period = max(1, min(4095, int(round(AY_CLOCK / (16.0 * freq)))))
-        secs = dur * t / float(APPLE_HZ)
-        env = max(1, min(65535, int(round(secs * AY_CLOCK / 256.0))))
-        out += period.to_bytes(2, 'little') + env.to_bytes(2, 'little')
-    return bytes(out)
+# SOUNDNAMES.S's sounds, by number, and after them the moments the CPC
+# release has a sound for that the Apple's has not.  Each is played as the
+# CPC effect of the same moment -- see cpcsound.py -- or not at all.
+SOUNDS = ['PlateDown', 'PlateUp', 'GateDown', 'SpecialKey1', 'SpecialKey2',
+          'Splat', 'MirrorCrack', 'LooseCrash', 'GotKey', 'Footstep',
+          'RaisingExit', 'RaisingGate', 'LoweringGate', 'SmackWall',
+          'Impaled', 'GateSlam', 'FlashMsg', 'SwordClash1', 'SwordClash2',
+          'JawsClash',
+          'GateTop', 'Spikes', 'Stabbed', 'DoorShut', 'Drink', 'Slicer']
+NONE = 0xff
+CPC_FOR_SOUND = {'PlateDown': 2, 'GateDown': 0, 'LooseCrash': 1,
+                 'Footstep': 11, 'RaisingExit': 17, 'RaisingGate': 13,
+                 'LoweringGate': 13, 'GateSlam': 0, 'SwordClash1': 7,
+                 'SwordClash2': 7, 'GateTop': 14, 'Spikes': 6, 'Stabbed': 8,
+                 'DoorShut': 3, 'Drink': 15, 'Slicer': 5}
+# SOUNDNAMES.S's game music, by number, to the CPC's tunes.
+CPC_FOR_SONG = {1: 10, 2: 10, 3: 4, 4: 9, 7: 9, 9: 19, 11: 16, 12: 16}
+SONGS = 13
 
 
 def sword_table():
@@ -721,12 +705,14 @@ def main(argv):
     # last of the sprites leave half empty.
     tables = PAGE_WINDOW + 6912
     assert tables + len(spare) <= 0x10000, 'the canvas bank is full'
-    # The music goes after the last of the sprites, in the canvas's bank:
-    # it is read only while a song holds the game still.
+    # The sound effects' data goes after the last of the sprites, in the
+    # canvas's bank, where it is read a tick at a time.
     while len(blobs) < 3:
         blobs.append(b'')
-    songdata = PAGE_WINDOW + len(blobs[2])
-    blobs[2] = bytes(blobs[2]) + popmusic.songs(binout)
+    sfxtab, sfxdata = cpcsound.build(binout)
+    open(os.path.join(binout, 'sfxtab.bin'), 'wb').write(sfxtab)
+    sfxdata_at = PAGE_WINDOW + len(blobs[2])
+    blobs[2] = bytes(blobs[2]) + sfxdata
     spr3 = blobs[2]
     canvas = PAGE_WINDOW + len(spr3) + len(SIG_SPR) + 3
     # The two floorpiece masks follow the canvas's pixels in their bank, and
@@ -753,7 +739,7 @@ def main(argv):
                                    + len(entry) + 4 * top),
            'MASKCAN     equ %d' % maskcan,
            'CANVAS      equ %d' % canvas,
-           'songdata    equ %d' % songdata]
+           'sfxdata     equ %d' % sfxdata_at]
     for k, v in bgat.items():
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
     inc.append('flames      equ %d' % (PAGE_WINDOW + flames_at))
@@ -822,13 +808,12 @@ def main(argv):
         rev[b] = r
     open(os.path.join(binout, 'revtab.bin'), 'wb').write(bytes(rev))
 
-    # SOUND.S's sounds, for the AY.  Each is TONE: a speaker toggled `dur`
-    # times, `pitch` counts of a loop apart -- nine cycles a count, the two
-    # loops' own overhead on top, at 1.023 MHz.  On the AY that is channel
-    # A's tone at the square wave's pitch, and its length a single decay of
-    # the envelope, which can be as short as the Apple's clicks: a frame of
-    # constant tone is twenty times a footstep.
-    open(os.path.join(binout, 'sounds.bin'), 'wb').write(sound_table())
+    # The sounds: which CPC effect each of POP's sounds and tunes is, and
+    # the effects' table, which is looked at when one is asked for.  Their
+    # data goes into a bank, below.
+    sfxmap = bytes(CPC_FOR_SOUND.get(n, NONE) for n in SOUNDS)
+    sfxmap += bytes(CPC_FOR_SONG.get(n, NONE) for n in range(SONGS))
+    open(os.path.join(binout, 'sfxmap.bin'), 'wb').write(sfxmap)
 
     # The strength meters' bullet, image $88 of the second dungeon table as
     # GAMEBG.S names it: four rows of one byte, and the same turned about for
@@ -914,9 +899,11 @@ def main(argv):
         f.write('KIDSTART_SCRN equ %d\n' % level.kid_start[0])
         # And a tape for the fight can start him with the sword already his.
         f.write('START_SWORD equ %d\n' % int(os.environ.get('POP_GOTSWORD', 0)))
-        for n, (name, pitch, dur) in enumerate(SOUNDS):
+        for n, name in enumerate(SOUNDS):
             f.write('SND_%-12s equ %d\n' % (name.upper(), n))
         f.write('SOUNDS      equ %d\n' % len(SOUNDS))
+        f.write('SONGS       equ %d\n' % SONGS)
+        f.write('SFXCOUNT    equ %d\n' % cpcsound.COUNT)
 
     print('bank_art    %d байт' % len(art))
     for i, b in enumerate(blobs):
