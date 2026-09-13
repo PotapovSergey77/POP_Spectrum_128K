@@ -1080,10 +1080,7 @@ hangbtn:        ld      a, (btn)
                 ld      a, SQ_HANGSTRAIGHT
                 jp      jumpseq
 
-hangdrop:       call    clrall
-                ld      (clrd), a
-                ld      a, SQ_HANGDROP
-                jp      jumpseq
+hangdrop:       jp      hang_release    ; in the fixed code: see there
 
 ; ------------------------------------------------------------------ crouching
 
@@ -1224,7 +1221,10 @@ tkwipe:         ld      (redh), a
                 call    redplate
                 xor     a
                 ld      (rqprio), a
-
+                call    ao_masks        ; and its floor masks, a flask's not
+                                        ; being a floor's
+                call    unfront         ; and the bottle is not in front of
+                                        ; him any more
                 call    shown_attrs     ; and a flask's colour goes with it,
                 ld      a, (vwcam)      ; from a view being made as well
                 inc     a
@@ -3980,6 +3980,7 @@ start_fall:     ld      a, (frame)      ; the frame the fall replaces
 sfpatchx:       ld      a, -1
                 jp      move_by
 
+
 ; CMPWALL: Z when the block is a wall to him -- a solid block, or facing left
 ; a panel's wall side.
 
@@ -5564,16 +5565,32 @@ stubbank:       push    bc
                 ld      (oldw), a       ; nothing to erase on the first pass
                 call    camhome         ; and the view where he is, not adrift
                 call    page_canvas
+                ld      a, START_FACE
+                ld      (facing), a
+                ld      a, POP_START    ; STARTKID's level one: he drops in
+                or      a               ; out of the gate, which slams
                 ld      a, SQ_STAND
-                call    jumpseq
+                jr      z, stseq
+                ld      a, 5            ; pushpp on the plate at screen 5,
+                ld      (trscrn), a     ; block 2 -- the gate by the way in
+                ld      a, 2
+                ld      (trloc), a
+                call    trobat
+                call    pushpp
+                call    page_canvas
+                ld      a, SQ_STEPFALL
+stseq:          call    jumpseq
                 call    page_canvas
                 call    step_seq
                 call    add_guard       ; and whoever keeps the room
                 ld      a, START_ROOM - KIDSTART_SCRN
                 or      a
-                ld      a, SONG_DANGER  ; the level begins: "Danger"
-                ld      c, 25
-                call    z, cue_song
+                ld      a, SONG_DANGER  ; the level begins: "Danger", CUESONG
+                jr      nz, stnosong    ; waiting 25 frames for the gate and
+                ld      (songpend), a   ; the drop
+                ld      a, 25 * FRAME_WAIT
+                ld      (songwait), a
+stnosong:
                 call    page_art
                 jp      start2
 

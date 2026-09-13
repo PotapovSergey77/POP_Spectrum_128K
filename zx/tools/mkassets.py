@@ -138,8 +138,17 @@ SIG_ART, SIG_SPR = bytes([0x5A, 0xA5]), bytes([0xA5, 0x5A])
 # that begins somewhere else, which is the only honest way to reach a far
 # room in a test -- putting him there by hand skips everything nextroom
 # does and the game goes off the rails a frame or two later.
-START_ROW = int(os.environ.get('POP_START_ROW', 0))
-START_COL = int(os.environ.get('POP_START_COL', 5))
+#
+# Without them it is POP's start: KidStartBlock, facing KidStartFace, and for
+# level one STARTKID's special start -- he drops in and the gate slams.
+POP_START = not any(k in os.environ
+                    for k in ('POP_START_ROOM', 'POP_START_ROW', 'POP_START_COL'))
+_KID = poplevel.Level(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', '..',
+    '01 POP Source', 'Levels', ROOM[0])).kid_start
+START_ROW = int(os.environ.get('POP_START_ROW', _KID[1] // 10 if POP_START else 0))
+START_COL = int(os.environ.get('POP_START_COL', _KID[1] % 10 if POP_START else 5))
+START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 
 
 def sprite_bytes(img, mirror, pad=0):
@@ -261,7 +270,7 @@ SOUNDS = ['PlateDown', 'PlateUp', 'GateDown', 'SpecialKey1', 'SpecialKey2',
           'JawsClash',
           'GateTop', 'Spikes', 'Stabbed', 'DoorShut', 'Drink', 'Slicer']
 NONE = 0xff
-CPC_FOR_SOUND = {'PlateDown': 2, 'GateDown': 0, 'LooseCrash': 1,
+CPC_FOR_SOUND = {'PlateDown': 2, 'LooseCrash': 1,
                  'Footstep': 11, 'RaisingExit': 17, 'RaisingGate': 13,
                  'LoweringGate': 13, 'GateSlam': 0, 'SwordClash1': 7,
                  'SwordClash2': 7, 'GateTop': 14, 'Spikes': 6, 'Stabbed': 8,
@@ -708,14 +717,18 @@ def main(argv):
     # last of the sprites leave half empty.
     tables = PAGE_WINDOW + 6912
     assert tables + len(spare) <= 0x10000, 'the canvas bank is full'
-    # The sound effects' data goes after the last of the sprites, in the
-    # canvas's bank, where it is read a tick at a time.
+    # The sounds go after the last of the sprites, in the canvas's bank:
+    # which CPC effect each of POP's sounds and tunes is, the effects' table
+    # and their data, read with that bank paged in for a moment.
     while len(blobs) < 3:
         blobs.append(b'')
     sfxtab, sfxdata = cpcsound.build(binout)
-    open(os.path.join(binout, 'sfxtab.bin'), 'wb').write(sfxtab)
-    sfxdata_at = PAGE_WINDOW + len(blobs[2])
-    blobs[2] = bytes(blobs[2]) + sfxdata
+    sfxmap = bytes(CPC_FOR_SOUND.get(n, NONE) for n in SOUNDS)
+    sfxmap += bytes(CPC_FOR_SONG.get(n, NONE) for n in range(SONGS))
+    sfxmap_at = PAGE_WINDOW + len(blobs[2])
+    sfxtab_at = sfxmap_at + len(sfxmap)
+    sfxdata_at = sfxtab_at + len(sfxtab)
+    blobs[2] = bytes(blobs[2]) + sfxmap + sfxtab + sfxdata
     spr3 = blobs[2]
     canvas = PAGE_WINDOW + len(spr3) + len(SIG_SPR) + 3
     # The two floorpiece masks follow the canvas's pixels in their bank, and
@@ -742,6 +755,8 @@ def main(argv):
                                    + len(entry) + 4 * top),
            'MASKCAN     equ %d' % maskcan,
            'CANVAS      equ %d' % canvas,
+           'sfxmap      equ %d' % sfxmap_at,
+           'sfxtab      equ %d' % sfxtab_at,
            'sfxdata     equ %d' % sfxdata_at]
     for k, v in bgat.items():
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
@@ -810,13 +825,6 @@ def main(argv):
                 r |= 0x80 >> i
         rev[b] = r
     open(os.path.join(binout, 'revtab.bin'), 'wb').write(bytes(rev))
-
-    # The sounds: which CPC effect each of POP's sounds and tunes is, and
-    # the effects' table, which is looked at when one is asked for.  Their
-    # data goes into a bank, below.
-    sfxmap = bytes(CPC_FOR_SOUND.get(n, NONE) for n in SOUNDS)
-    sfxmap += bytes(CPC_FOR_SONG.get(n, NONE) for n in range(SONGS))
-    open(os.path.join(binout, 'sfxmap.bin'), 'wb').write(sfxmap)
 
     # The strength meters' bullet, image $88 of the second dungeon table as
     # GAMEBG.S names it: four rows of one byte, and the same turned about for
@@ -892,6 +900,8 @@ def main(argv):
                 % popframe.screen_x(popframe.char_x(START_COL)))
         f.write('START_Y     equ %d\n' % popframe.char_y(START_ROW))
         f.write('START_ROW   equ %d\n' % START_ROW)
+        f.write('START_FACE  equ %d\n' % START_FACE)
+        f.write('POP_START   equ %d\n' % (1 if POP_START else 0))
         f.write('BLOCKOF_BIAS equ %d\n' % BLOCKOF_BIAS)
         f.write('BLOCKOF_LEN equ %d\n' % BLOCKOF_LEN)
         f.write('ANGLE_PX    equ %d\n' % angle_px)

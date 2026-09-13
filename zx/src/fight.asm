@@ -1587,6 +1587,82 @@ stairs_crop:    ld      a, (strow)
 stcol:          db      0
 strow:          db      0
 
+; :drop in CTRL.S.  Open behind him and nothing underfoot, he falls; else he
+; drops the half storey, first pushed seven back off a wall he hangs against.
+
+hang_release:   call    clrall
+                ld      (clrd), a
+                call    behind_flags
+                call    cmp_space
+                jr      nz, hdrop
+                call    under_flags
+                call    cmp_space
+                ld      a, SQ_HANGFALL
+                jp      z, jumpseq
+hdrop:          call    under_flags
+                cp      BLK_BLOCK
+                jr      z, hsheer
+                ld      b, a
+                ld      a, (facing)     ; facing right: clear
+                or      a
+                jr      nz, hclear
+                ld      a, b
+                cp      BG_PANELWOF
+                jr      z, hsheer
+                cp      BG_PANELWIF
+                jr      nz, hclear
+hsheer:         ld      a, -7
+                call    move_by
+hclear:         ld      a, SQ_HANGDROP
+                jp      jumpseq
+
+; A thing taken off block (blockcol, blockrow): its front piece -- the bottle
+; -- comes off the front list, height nought, so nothing is laid back over
+; him where it stood.  Its entry is the one whose column is the block's and
+; whose foot is within the block's floor line.
+
+unfront:        call    trrowcol        ; the redraws moved blockcol on
+                ld      a, (nfront)
+                or      a
+                ret     z
+                ld      b, a
+                ld      a, (blockcol)
+                add     a, a
+                add     a, a
+                ld      c, a            ; C = the block's own byte column
+                ld      a, (blockrow)
+                inc     a
+                ld      e, a
+                ld      d, 0
+                ld      hl, blockbot
+                add     hl, de
+                ld      d, (hl)         ; D = its floor line
+                ld      hl, frontlist
+ufloop:         ld      a, (hl)
+                sub     c
+                cp      4
+                jr      nc, ufnext
+                inc     hl
+                ld      a, d
+                sub     (hl)
+                dec     hl
+                cp      9
+                jr      nc, ufnext
+                push    hl
+                inc     hl
+                inc     hl
+                inc     hl
+                inc     hl
+                ld      (hl), 0
+                pop     hl
+ufnext:         inc     hl
+                inc     hl
+                inc     hl
+                inc     hl
+                inc     hl
+                djnz    ufloop
+                ret
+
 ; ---------------------------------------------------------------- sound
 ;
 ; The sounds are the CPC release's: its twenty effects -- tunes among them --
@@ -1615,7 +1691,7 @@ addsound:       push    af
                 push    hl
                 ld      e, a
                 cp      SOUNDS
-                jr      c, sfxmapped
+                jr      c, sfxgo
                 jr      sfxdone
 cue_song:       push    af
                 push    bc
@@ -1625,11 +1701,21 @@ cue_song:       push    af
                 jr      nc, sfxdone
                 add     a, SOUNDS
                 ld      e, a
-sfxmapped:      ld      d, 0
+sfxgo:          ld      a, (inisr)      ; the handler ticks what this sets up:
+                or      a               ; not while it is half done -- and not
+                jr      nz, sfxg1       ; LD A,I, whose flag an interrupt
+                di                      ; arriving on it clears, and left the
+sfxg1:          call    page_sfx        ; game halted with them off for good
+                ld      d, 0
                 ld      hl, sfxmap
                 add     hl, de
                 ld      a, (hl)
                 call    sfx_play
+                call    page_back
+                ld      a, (inisr)
+                or      a
+                jr      nz, sfxdone
+                ei
 sfxdone:        pop     hl
                 pop     de
                 pop     bc
@@ -1637,15 +1723,11 @@ sfxdone:        pop     hl
                 ret
 
 ; A = the CPC effect.  From its first tick, unless it matters less than the
-; one playing.
+; one playing.  With the sounds' bank in and interrupts off.
 
 sfx_play:       cp      SFXCOUNT
                 ret     nc
                 ld      c, a
-                ld      a, i            ; P/V: were interrupts on?
-                push    af
-                di                      ; the handler ticks what this sets up
-                ld      a, c
                 add     a, a
                 add     a, c
                 ld      e, a
@@ -1659,8 +1741,10 @@ sfx_play:       cp      SFXCOUNT
                 ld      a, (sfxprio)
                 cp      (hl)
                 jr      z, sfxtake
-                jr      nc, sfxback     ; the one playing matters more
-sfxtake:        ld      a, (hl)
+                ret     nc              ; the one playing matters more
+sfxtake:        ld      a, c
+                ld      (sfxcur), a
+                ld      a, (hl)
                 ld      (sfxprio), a
                 inc     hl
                 ld      c, (hl)         ; and where the next one starts
@@ -1675,10 +1759,21 @@ sfxtake:        ld      a, (hl)
                 ld      (sfxend), hl
                 ld      a, 1
                 ld      (sfxtimer), a
-                call    sfx_quiet
-sfxback:        pop     af
-                ret     po
-                ei
+                jp      sfx_quiet
+
+; The sounds' bank in the window, and back: straight to the port, leaving
+; nowbank to whoever the handler interrupted.
+
+page_sfx:       ld      a, (pgbits + 1)
+                or      BANK_CVS
+                jr      pgout
+page_back:      ld      a, (pgbits + 1)
+                ld      hl, nowbank
+                or      (hl)
+pgout:          push    bc
+                ld      bc, PAGEPORT
+                out     (c), a
+                pop     bc
                 ret
 
 ; The program's own interrupt, IM 2, fifty times a second as the CPC's is.
@@ -1697,20 +1792,28 @@ isr:            push    af
                 push    hl
                 call    0x0038          ; FRAMES and the keyboard; it enables
                 di                      ; interrupts, which wait for the end
-                ld      a, (sfxtimer)
+                ld      a, 1
+                ld      (inisr), a
+                ld      a, (songwait)   ; a tune waiting its time
+                or      a
+                jr      z, isrnow
+                dec     a
+                ld      (songwait), a
+                jr      nz, isrnow
+                ld      a, (songpend)
+                call    cue_song
+isrnow:         ld      a, (sfxtimer)
                 or      a
                 jr      z, isrout
-                ld      a, (pgbits + 1) ; the port as it stands, the sounds'
-                or      BANK_CVS        ; bank in the window
-                ld      bc, PAGEPORT
-                out     (c), a
+                call    page_sfx
                 call    sfx_tick
-                ld      a, (pgbits + 1) ; and the bank that was there
-                ld      hl, nowbank
-                or      (hl)
-                ld      bc, PAGEPORT
-                out     (c), a
-isrout:         pop     hl
+                ld      a, (sfxcur)     ; the CPC's frame handler stops effect
+                cp      11              ; 11 a fraction of a tick after it has
+                call    z, ststop       ; started: a click, not a hiss
+                call    page_back
+isrout:         xor     a
+                ld      (inisr), a
+                pop     hl
                 pop     de
                 pop     bc
                 pop     af
@@ -1719,6 +1822,9 @@ isrout:         pop     hl
 
 ; What start writes at the top of every bank: a jump to the handler at 0xFFF4
 ; and the JR at 0xFFFF.
+
+songwait:       db      0               ; interrupts until songpend is cued
+songpend:       db      0
 
 isrstub:        jp      isr
                 ds      8
@@ -1827,8 +1933,8 @@ sfxo1:          push    bc
                 pop     bc
                 ret
 
-sfxmap:         incbin  "sfxmap.bin"
-sfxtab:         incbin  "sfxtab.bin"
+inisr:          db      0
+sfxcur:         db      0xff
 sfxstart:       dw      0
 sfxend:         dw      0
 sfxptr:         dw      0
@@ -1839,7 +1945,18 @@ sfxprio:        db      0
 ; addlowersound in SUBS.S: a gate going down creaks only where it is seen.
 
 lowersound:     call    onscreen
+                jr      z, lsseen
+                ld      a, (links)      ; or hung in column nine of the room
+                ld      hl, trscrn      ; to the left, whose bars are the ones
+                cp      (hl)            ; at this room's left edge
                 ret     nz
+                call    trrowcol
+                ld      a, (blockcol)
+                cp      9
+                ret     nz
+lsseen:         ld      a, (trobst)     ; and only as the bars move: a unit a
+                and     3               ; frame, drawn a pixel in four, slower
+                ret     nz              ; than they go up
                 ld      a, SND_LOWERINGGATE
                 jp      addsound
 
@@ -2503,7 +2620,18 @@ show_meters:    call    page_canvas
                 jr      z, smdark
                 dec     (hl)
                 ld      a, (lightcolor)
+                cp      GREEN           ; the sword's: the whole ground green
+                call    z, green_attrs
 smdark:         out     (254), a
+                ld      a, (lightning)  ; the flash over, the colours back
+                or      a
+                jr      nz, smgreen
+                ld      hl, greenon
+                or      (hl)
+                jr      z, smgreen
+                ld      (hl), 0
+                call    shown_attrs
+smgreen:
                 ld      hl, weightless  ; and weightlessness wears off
                 ld      a, (hl)
                 or      a
@@ -2591,6 +2719,32 @@ smopp:          ld      hl, bullet + BULLETH
                 ld      a, (mmlast)
                 ld      (oppdrawn), a
                 ret
+
+; The screen shown with green in place of its black ground, ink kept.  A is
+; kept, for the border.
+
+green_attrs:    push    af
+                ld      a, 1
+                ld      (greenon), a
+                call    page_canvas
+                ld      a, (scrsel + 1)
+                or      0x58
+                ld      h, a
+                ld      l, 0
+                ld      bc, 768
+galoop:         ld      a, (hl)
+                and     0xc7
+                or      GREEN * 8
+                ld      (hl), a
+                inc     hl
+                dec     bc
+                ld      a, b
+                or      c
+                jr      nz, galoop
+                pop     af
+                ret
+
+greenon:        db      0
 
 ; HL = the bullet's rows, B = how many places, C = how many are lit,
 ; E = the first column and D the step to the next; (mmink) their colour.  A

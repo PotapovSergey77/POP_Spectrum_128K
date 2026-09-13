@@ -38,6 +38,7 @@ open('build/bin/bank_spare.bin', 'wb').write(spare + mod)
 print('управление %04X..%04X, %d байт в банке 7, свободно там %d'
       % (sym['MODORG'], sym['modend'], len(mod), 0x10000 - sym['modend']))
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'
+assert sym['modend'] <= 0x10000 - 12 and sym['modend'] > sym['MODORG'], 'the control code does not fit under the interrupt stub'
 PY
 python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin
 python - <<'PY'

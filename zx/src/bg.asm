@@ -3568,7 +3568,7 @@ aoplain:        call    redplate
                 ret     z               ; block on its right
                 xor     a
                 ld      (mskwant), a
-                call    onscreen
+ao_masks:       call    onscreen
                 ret     nz
                 call    trrowcol
                 call    rq_mask
