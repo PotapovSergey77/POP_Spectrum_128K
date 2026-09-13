@@ -67,7 +67,8 @@ KID_SEQS = (list(range(1, 51))
                90,                       # guardengarde
                91,                       # pickupsword
                92, 93,                   # resheathe, fastsheathe
-               81, 82, 83, 104])         # fightfall, efightfall, patchfall
+               81, 82, 83, 104,          # fightfall, efightfall, patchfall
+               78])                      # drinkpotion
 
 CHAR_ANCHOR = 21
 ALT_FRAMES = 40                 # ALTSET1: frames 150 to 189
@@ -708,6 +709,8 @@ def main(argv):
         inc.append('FLCELLS%d    equ %d' % (i, cells))
     for n, o in bgoffs:
         inc.append('T_%-9s equ %d' % (n.upper(), o))
+    inc.append('BUBBLES     equ %d' % (0x80 | bgexport.BUBBLES))
+    inc.append('BUBMASK     equ %d' % (0x80 | bgexport.BUBMASK))
     for n in ('space', 'floor', 'posts', 'gate', 'panelwif', 'pillartop',
               'loose', 'panelwof', 'block', 'spikes', 'archtop1', 'archtop2',
               'torch', 'dpressplate', 'pressplate', 'upressplate',

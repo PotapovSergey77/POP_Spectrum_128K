@@ -1693,6 +1693,181 @@ ec_read:        ld      a, (blocky)
 ecx:            db      0
 kidkeys:        ds      8
 
+; ---------------------------------------------------------------- potions
+;
+; POTIONEFFECT in MISC.S, on the effect in the sequence the kid drinks in.
+; lastpotion is what RemoveObj left: -1 the sword, 1 a refresh of one point,
+; 2 one more point for good, 3 weightlessness, 5 poison.  The lightning is
+; the Apple's whole screen gone to one colour for a frame; the border here.
+; The upside down potion, 4, is not done: the screen cannot turn over.
+
+WHITE           equ     7
+ORANGE          equ     6
+
+potion_effect:  ld      a, (charid)
+                or      a
+                ret     nz
+                ld      a, (lastpotion)
+                or      a
+                ret     z
+                inc     a
+                jr      nz, penotsword
+                ld      a, 1            ; the sword: three white flashes
+                ld      (gotsword), a
+                ld      bc, WHITE * 256 + 3
+                jr      peflash
+penotsword:     dec     a
+                cp      1
+                jr      nz, pe2
+                ld      a, (maxkidstr)  ; a point back, if one is missing
+                ld      hl, kidstr
+                cp      (hl)
+                ret     z
+                inc     (hl)
+                ld      bc, ORANGE * 256 + 2
+                jr      peflash
+pe2:            cp      2
+                jr      nz, pe3
+                ld      a, (maxkidstr)  ; BOOSTMETER, then RECHARGEMETER
+                cp      MAXKIDMETER
+                jr      nc, pe2full
+                inc     a
+                ld      (maxkidstr), a
+pe2full:        ld      (kidstr), a
+                ld      bc, ORANGE * 256 + 5
+                jr      peflash
+pe3:            cp      3
+                jr      nz, pe5
+                ld      a, 200          ; wtlesstimer
+                ld      (weightless), a
+                ret
+pe5:            cp      5
+                ret     nz
+                ld      hl, kidstr      ; yecch: a point off
+                ld      a, (hl)
+                or      a
+                ret     z
+                dec     (hl)
+                ret
+peflash:        ld      a, b
+                ld      (lightcolor), a
+                ld      a, c
+                ld      (lightning), a
+                ret
+
+; DRAWFLASKA and SETUPFLASK: the bubbles over the bottle, a frame of them for
+; the low five bits of its state, two pixels in -- three and four rows higher
+; for a mystery potion, four rows higher for the tall one.
+
+flask_ma:       ld      a, (state)
+                and     0x1f
+                cp      9               ; bubbLast
+                ret     nc              ; past it: frame nought, the blank one
+                ld      e, a
+                ld      d, 0
+                ld      hl, bubble
+                add     hl, de
+                ld      a, (hl)
+                inc     a
+                ret     z               ; $b2: nothing to lay
+                dec     a
+                ld      c, a            ; C = which bubble, 0 to 2
+                ld      b, 0            ; B = the offset's images: 2 or 3
+                ld      e, 0            ; E = how much higher
+                ld      a, (state)
+                and     0xe0
+                jr      z, fmcont       ; empty
+                cp      0x40
+                jr      c, fmcont       ; refresh
+                jr      z, fmtall       ; boost
+                ld      b, 3            ; a mystery: one pixel further in
+fmtall:         ld      e, 4
+fmcont:         ld      a, (ay)
+                sub     14
+                sub     e
+                ld      (yco), a
+                ld      a, (xco)
+                add     a, 2
+                ld      (xco), a
+                ld      a, b
+                or      a
+                ld      a, BUBMASK
+                jr      z, fm2
+                inc     a
+fm2:            push    bc
+                ld      c, BG_AND
+                call    bglay
+                pop     bc
+                ld      a, BUBBLES
+                add     a, b
+                add     a, c
+                ld      c, BG_ORA
+                call    bglay
+                ld      a, (xco)
+                sub     2
+                ld      (xco), a
+                ret
+
+; bubble in GAMEBG.S, as which of the three drawn ones: $b2 is -1.
+
+bubble:         db      -1, 0, 1, 2, 1, 0, 2, 1, 0
+
+; drawfrnt: a flask of potion 2, 3 or 4 is the taller bottle.  In: A = the
+; front piece, with the block in hand.  Out: A = the one to draw.
+
+flask_front:    ld      c, a
+                ld      a, (objid)
+                cp      BG_FLASK
+                ld      a, c
+                ret     nz
+                ld      a, (state)
+                and     0xe0
+                cp      0xa0
+                ld      a, c
+                ret     z
+                ld      a, (state)
+                and     0xe0
+                cp      0x40
+                ld      a, c
+                ret     c
+                ld      a, (bgtables + T_SPECIALFLASK)
+                ret
+
+; ANIMFLASK and GETFLASKFRAME in MOVER.S: out of sight it comes off the list;
+; otherwise the bubbles go round frames one to eight, every frame.
+
+FLASKWIPE       equ     32              ; the second band up: the bubbles are
+                                        ; seventeen to twenty nine rows above
+                                        ; the floor line
+
+aoflask:        call    onscreen
+                jp      nz, stopobj
+                ld      a, (trobst)
+                ld      b, a
+                and     0x1f
+                inc     a
+                cp      9
+                jr      c, afframe
+                ld      a, 1
+afframe:        ld      c, a
+                ld      a, b
+                and     0xe0
+                or      c
+                ld      (trobst), a
+                ld      a, 1
+                ld      (redwant), a
+                ld      (rqstart), a
+                ld      a, FLASKWIPE
+                ld      (redh), a
+                jp      aodone
+
+lastpotion:     db      0
+takeid:         db      0
+lightning:      db      0
+lightcolor:     db      0
+weightless:     db      0
+maxkidstr:      db      3               ; MaxKidStr: initmaxstr in TOPCTRL.S
+
 ; ---------------------------------------------------------------- meters
 ;
 ; UPDATEMETERS in GAMEBG.S: the kid's strength at the bottom left, a bullet a
@@ -1704,16 +1879,29 @@ kidkeys:        ds      8
 ; and KidStrOFF place them, which on a Spectrum is a byte each.
 
 METERY          equ     188             ; YCO 191, four rows up
-MAXKIDMETER     equ     3               ; MaxKidStr: initmaxstr in TOPCTRL.S
+MAXKIDMETER     equ     10              ; maxmaxstr: the most he can have
 MAXOPPMETER     equ     4               ; the most a guard of this level has
 
-show_meters:    call    page_canvas     ; bank 7, in case it is the one shown
+show_meters:    ld      hl, lightning   ; a flash is the border, a frame at a
+                ld      a, (hl)         ; time, for as many as it says
+                or      a
+                jr      z, smdark
+                dec     (hl)
+                ld      a, (lightcolor)
+smdark:         out     (254), a
+                ld      hl, weightless  ; and weightlessness wears off
+                ld      a, (hl)
+                or      a
+                jr      z, smwt
+                dec     (hl)
+smwt:           call    page_canvas     ; bank 7, in case it is the one shown
                 ld      hl, mflash      ; PAGE, which POP flips every frame
                 inc     (hl)
                 ld      hl, bullet
                 ld      a, (kidstr)
                 ld      c, a
-                ld      b, MAXKIDMETER
+                ld      a, (maxkidstr)
+                ld      b, a
                 ld      de, 0x0100      ; from the left, a byte on each time
                 call    meter
                 ld      a, (gdhere)

@@ -118,9 +118,39 @@ def offsets(names):
 REV = [int('{:08b}'.format(b)[::-1], 2) for b in range(256)]
 
 
-def image_table(path):
+# SETUPFLASK in GAMEBG.S lays the bubbles with an OFFSET of two pixels, or
+# three for a mystery potion, and stamps them: the seven pixels from there on
+# are the bubble's, the rest of the two bytes stay as they were.  bgdraw has
+# no offsets, so each bubble goes in shifted already, with a mask that clears
+# its seven pixels, at the end of the second table: BUBBLES and BUBMASK.
+BUBBLE_IMAGES = (0x2f, 0x30, 0x31)      # $af, $b0, $b1; $b2 is blank
+BUBBLES, BUBMASK = 52, 58               # off 2 first, then off 3
+
+
+def flask_images(t):
+    out = {}
+    for k, off in enumerate((2, 3)):
+        for j, n in enumerate(BUBBLE_IMAGES):
+            img = t.get(n)
+            data = bytearray()
+            for line in img.pixels():
+                px = [0] * off + list(line[:7])
+                px += [0] * (14 - len(px))
+                data += bytes(sum(px[b * 7 + i] << i for i in range(7))
+                              for b in (0, 1))
+            out[BUBBLES + 3 * k + j] = popimg.Image(0, 2, img.height,
+                                                    bytes(data))
+        px = [0 if off <= i < off + 7 else 1 for i in range(14)]
+        row = bytes(sum(px[b * 7 + i] << i for i in range(7)) for b in (0, 1))
+        out[BUBMASK + k] = popimg.Image(0, 2, 8, row * 8)
+    return out
+
+
+def image_table(path, extra=False):
     """count, count 2-byte offsets, then the records -- bottom row first."""
     t = popimg.Table(path)
+    if extra:
+        t.images.update(flask_images(t))
     top = max(t.images) if t.images else 0
     body = bytearray()
     where = [0] * (top + 1)
@@ -163,12 +193,25 @@ def guards_fixed(level):
     return bytes(level)
 
 
+def flasks_set(level):
+    """
+    GETINITOBJ in FRAMEADV.S, as the level is loaded: a flask's spec is its
+    potion number, and the game keeps that in the top three bits so the low
+    five can count the bubbles.
+    """
+    level = bytearray(level)
+    for i in range(720):
+        if level[i] & 0x1f == 10:               # flask
+            level[720 + i] = (level[720 + i] << 5) & 0xff
+    return bytes(level)
+
+
 def build(level_path):
     """(blob, {name: offset}) -- everything the background bank carries."""
     tables = piece_tables()
     t1 = image_table(os.path.join(IMAGES, 'IMG.BGTAB1.DUN'))
-    t2 = image_table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'))
-    level = guards_fixed(open(level_path, 'rb').read())
+    t2 = image_table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'), True)
+    level = flasks_set(guards_fixed(open(level_path, 'rb').read()))
 
     blob = bytearray()
     at = {}

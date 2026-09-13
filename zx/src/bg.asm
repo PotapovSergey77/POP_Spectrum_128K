@@ -638,7 +638,11 @@ damain:         ld      a, (objid)
                 ld      hl, bgtables + T_LOOSEA
                 call    bgentry
                 jr      dago
-danotloose:     cp      BG_SWORD        ; drawsworda: its own picture, and
+danotloose:     cp      BG_FLASK        ; the bottle, and drawflaska's bubbles
+                jr      nz, danotflask  ; over it
+                call    dapiece
+                jp      flask_ma
+danotflask:     cp      BG_SWORD        ; drawsworda: its own picture, and
                 jr      nz, dapiece     ; piecea has none for it
                 call    sword_gleam
                 jr      dago
@@ -974,6 +978,7 @@ dxonly:         db      0               ; the door's top slat, and no more
 draw_front:     call    page_bg
                 ld      a, (objid)
                 call    tab_fronti
+                call    flask_front
                 or      a
                 ret     z
                 ld      (frimg), a
@@ -3352,6 +3357,8 @@ animobj:        xor     a               ; nothing wants redrawing yet -- and
                 jr      z, aoexit
                 cp      BG_SWORD
                 jp      z, aosword
+                cp      BG_FLASK
+                jp      z, aoflask
                 cp      BG_SPACE
                 jr      z, aodone       ; the floor that was here has gone
                 jp      stopobj         ; none of these: off the list
@@ -3426,7 +3433,14 @@ aonotg:         cp      BG_EXIT
 aonostart:      xor     a
                 ld      (rqstart), a
                 ret
-aonotx:         cp      BG_PRESSPLATE   ; a plate coming back up goes first too
+aonotx:         cp      BG_FLASK        ; the bubbles: the block's own band
+                jr      nz, aonotf      ; they are in, and only that
+                call    onscreen
+                ret     nz
+                call    trrowcol
+                call    rq_block
+                jr      aonostart
+aonotf:         cp      BG_PRESSPLATE   ; a plate coming back up goes first too
                 jr      z, aoprio
                 cp      BG_UPRESSPLATE
                 jr      z, aoprio

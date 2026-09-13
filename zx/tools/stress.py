@@ -43,6 +43,11 @@ SCENES = [
     # down, then armed he draws, strikes and is struck at.
     ('a guard cuts him down', 3, 1, 2,
      lambda n: ['right'] if 5 <= n <= 40 else [], 60, 8),
+    # A flask's bubbles are a redraw every frame; he turns, stoops to it and
+    # drinks it.
+    ('a flask bubbles', 5, 2, 2,
+     lambda n: ['right'] if 2 <= n <= 3 else
+     (['space'] if n in (10, 14, 18) else []), 50, 8),
     ('the sword fight', 3, 1, 2,
      lambda n: ['right'] if 2 <= n <= 3 else
      (['space'] if n % 6 == 0 else []), 110, 8, {'POP_GOTSWORD': '1'}),

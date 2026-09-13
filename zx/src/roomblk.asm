@@ -25,6 +25,8 @@ mtc:            ld      a, (mtrow)
                 and     0x1f
                 cp      BG_SWORD
                 jp      z, mtsword
+                cp      BG_FLASK
+                jp      z, mtflask
                 cp      BG_TORCH
                 jp      nz, mtnext
                 ld      a, (mtcol)
@@ -118,6 +120,28 @@ mtsword:        ld      de, roomids
                 call    trobat
                 ld      a, r
                 and     0x1f
+                ld      (trobst), a
+                call    trobsave
+                ld      a, 1
+                ld      (trdirec), a
+                call    addtrob
+                jp      mtnext
+
+; TRIGFLASK: a flask on the list, its bubbles from a random frame.
+
+mtflask:        ld      de, roomids
+                or      a
+                sbc     hl, de
+                ld      a, l
+                ld      (trloc), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+                call    trobat
+                ld      a, r
+                and     7
+                ld      c, a
+                ld      a, (trobst)
+                or      c
                 ld      (trobst), a
                 call    trobsave
                 ld      a, 1

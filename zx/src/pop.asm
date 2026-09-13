@@ -98,6 +98,8 @@ GCLIMBTHRES     equ     6               ; a gate held from above: CTRL.S
 JUMP_BACK_THRES equ     6
 ACCEL_G         equ     3               ; SUBS.S GRAVITY
 TERM_VEL        equ     33
+WTLESS_G        equ     1               ; SUBS.S, weightless
+WTLESS_TERM     equ     4
 FLOOR_HEIGHT    equ     15              ; GAMEEQ.S, the thickness of a floor
 ; The room runs from block 0 to block 9, and a character on block b has his
 ; anchor between 28b+2 and 28b+29 -- so the room is 280 pixels wide and his
@@ -1170,9 +1172,13 @@ sword_at:       push    af
                 ld      c, a
                 pop     af
                 call    tile_at
+                cp      BG_FLASK        ; a flask is picked up the same way
+                jr      z, swyes
                 sub     BG_SWORD
                 sub     1
                 sbc     a, a
+                ret
+swyes:          or      a
                 ret
 
 mpc0:
@@ -1192,6 +1198,14 @@ take_sword:     ld      a, (roomnum)
                 add     a, l
                 ld      (trloc), a
 
+                call    trobat          ; which it is: the sword, or a flask
+                ld      (takeid), a     ; whose potion is the top three bits
+                ld      a, (trobst)
+                rlca
+                rlca
+                rlca
+                and     7
+                ld      (lastpotion), a
                 call    trobat          ; and it is floor from now on
                 ld      a, BG_FLOOR
                 call    trobtype
@@ -1199,19 +1213,31 @@ take_sword:     ld      a, (roomnum)
                 ld      (trobst), a
                 call    trobsave
 
-                ld      a, SWORDWIPE    ; the space it stood in, redrawn at
-                ld      (redh), a       ; once, as RemoveObj marks it: at the
+                ld      a, (takeid)     ; the space it stood in, redrawn at
+                cp      BG_SWORD        ; once, as RemoveObj marks it: at the
+                ld      a, SWORDWIPE    ; a flask's bubbles are a band higher
+                jr      z, tkwipe
+                ld      a, FLASKWIPE
+tkwipe:         ld      (redh), a
                 ld      a, 1            ; back of the queue it lay there on
                 ld      (rqprio), a     ; the floor while he held it
                 call    redplate
                 xor     a
                 ld      (rqprio), a
 
+                ld      a, 1            ; RemoveObj: the press is spent
+                ld      (clrbtn), a
+                call    page_canvas     ; trobat and redplate paged the level
+                ld      a, (takeid)     ; in, and jumpseq and step_seq after
+                cp      BG_SWORD        ; it read the sequences from here
+                ld      a, SQ_DRINKPOTION
+                jr      nz, tkseq
+                ld      a, 0xff         ; the sword is potion -1
+                ld      (lastpotion), a
                 ld      a, 1
                 ld      (gotsword), a
-                call    page_canvas     ; trobat and redplate paged the level
-                ld      a, SQ_PICKUPSWORD ; in, and jumpseq and step_seq after
-                call    jumpseq         ; it read the sequences from here
+                ld      a, SQ_PICKUPSWORD
+tkseq:          call    jumpseq
                 ld      a, 1            ; NZ: the crouch is spent on this
                 or      a
                 ret
@@ -1625,13 +1651,13 @@ seqloop:        ld      a, (hl)
                 cp      SEQ_SETFALL
                 jp      z, sqsetfall
                 cp      SEQ_IFWTLESS
-                jp      z, sqskip2
+                jp      z, sqwtless
                 cp      SEQ_JARU
                 jp      z, sqjaru
                 cp      SEQ_JARD
                 jp      z, sqjard
                 cp      SEQ_EFFECT
-                jp      z, sqskip1
+                jp      z, sqeffect
                 cp      SEQ_TAP
                 jp      z, sqtap
                 jp      seqloop         ; die and nextlevel: no data
@@ -1714,7 +1740,25 @@ sqtap:          ld      a, (hl)
                 ld      (alertguard), a
                 jp      seqloop
 
-sqskip2:        inc     hl              ; ifwtless: never weightless here
+; ifwtless: a goto while he is weightless, two bytes skipped otherwise.
+
+sqwtless:       ld      a, (weightless)
+                or      a
+                jp      nz, sqgoto
+                jr      sqskip2
+
+; effect 1: POTIONEFFECT, whatever he has just drunk.
+
+sqeffect:       ld      a, (hl)
+                inc     hl
+                dec     a
+                jp      nz, seqloop
+                push    hl
+                call    potion_effect
+                pop     hl
+                jp      seqloop
+
+sqskip2:        inc     hl
 sqskip1:        inc     hl
                 jp      seqloop
 
@@ -3261,11 +3305,17 @@ cfstep:         ld      a, SQ_STEPFALL
 do_fall:        ld      a, (charact)
                 cp      4               ; only a free fall has weight: the
                 ret     nz              ; four frames of stepfall carry their
-                ld      a, (yvel)       ; own chy, and climbing none at all
-                add     a, ACCEL_G
-                cp      TERM_VEL + 1
+                ld      bc, ACCEL_G + 256 * (TERM_VEL + 1) ; own chy
+                ld      a, (weightless)
+                or      a
+                jr      z, dfgrav
+                ld      bc, WTLESS_G + 256 * (WTLESS_TERM + 1)
+dfgrav:         ld      a, (yvel)
+                add     a, c
+                cp      b
                 jr      c, fallvel
-                ld      a, TERM_VEL
+                ld      a, b
+                dec     a
 fallvel:        ld      (yvel), a
                 ld      b, a
                 ld      a, (chary)

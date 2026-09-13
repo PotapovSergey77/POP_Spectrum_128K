@@ -314,6 +314,9 @@ class Room:
     def draw_front(self, st):
         x = st['objid']
         img = bg.fronti[x]
+        # drawfrnt: potions two to four stand in the taller bottle.
+        if x == bg.flask and 0x40 <= st['state'] & 0xe0 != 0xa0:
+            img = bg.specialflask
         if not img:
             return
         # The balusters are ORed on in the original, so whatever the tile to
@@ -333,6 +336,11 @@ class Room:
                for b, sp in zip(types, specs)]
         ids = [g[0] for g in got]
         specs = [g[1] for g in got]
+        # GETINITOBJ: a flask carries its potion in the top three bits.  Its
+        # bubbles count in the low five from nought, and bubble nought is the
+        # blank one, so a room as it is first built shows none.
+        specs = [(sp << 5) & 0xff if i == bg.flask else sp
+                 for i, sp in zip(ids, specs)]
         prev, sprev = self._prev_screen(level, scrnum)
 
         for row in (2, 1, 0):
