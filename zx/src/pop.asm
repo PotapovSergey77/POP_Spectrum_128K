@@ -3315,8 +3315,7 @@ cfspace:        call    cmp_space       ; solid: he stays where he is
                 xor     a
                 ld      (yvel), a
                 ld      (charsword), a  ; so that he can grab on
-                call    fall_seq        ; which fall it is
-                jp      jumpseq
+                jp      start_fall
 
 ; GRAVITY and ADDFALL, then the floor plane test of `falling`.  stepfall
 ; carries its own chy for the first four frames and gravity only takes over
@@ -3634,6 +3633,51 @@ fsstep:         ld      b, SQ_STEPFALL
 fsgot:          ld      a, b
                 ret
 
+; The rest of STARTFALL: a frame into the fall straight away, so that next
+; frame's control finds him falling and not in the frame he left the floor in;
+; then, where that has put him into a wall, out of it -- or, falling at a
+; wall ahead, a unit back from it (CDpatch), or out of a running jump too
+; close to the edge, down the wall in the patch fall.
+
+start_fall:     ld      a, (frame)      ; the frame the fall replaces
+                ld      (sfframe), a
+                call    fall_seq
+                call    jumpseq
+                call    step_seq        ; advance one frame into the fall
+                call    under_flags
+                call    cmp_wall
+                jp      z, inside_block
+                call    front_flags
+                call    cmp_wall
+                ret     nz
+                ld      a, (sfframe)
+                cp      44              ; running jump?
+                jr      nz, sfpatchx
+                call    get_dist
+                cp      6
+                jr      nc, sfpatchx
+                ld      a, SQ_PATCHFALL
+                call    jumpseq
+                jp      step_seq
+sfpatchx:       ld      a, -1
+                jp      move_by
+
+; CMPWALL: Z when the block is a wall to him -- a solid block, or facing left
+; a panel's wall side.
+
+cmp_wall:       cp      BLK_BLOCK
+                ret     z
+                ld      b, a
+                ld      a, (facing)
+                or      a
+                ld      a, b
+                ret     nz
+                cp      BG_PANELWIF
+                ret     z
+                cp      BG_PANELWOF
+                ret
+
+sfframe:        db      0
 fosave:         dw      0
 rjcol:          db      0
 rjblocks:       db      0

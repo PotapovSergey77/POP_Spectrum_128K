@@ -2699,12 +2699,19 @@ cprow1:         ld      a, b
 cploose:        cp      BG_LOOSE
                 ret     nz
 
-; BREAKLOOSE: it only starts once, and then animfloor has it.
+; BREAKLOOSE: it only starts once, and then animfloor has it -- though a floor
+; still wiggling from a jar gives way all the same, and one marked as required
+; (reqmask, bit 5 of its type) never does.
 
-breakloose:     ld      a, (trobst)
+breakloose:     ld      hl, (blueptr)
+                ld      a, (hl)
+                and     0x20
+                ret     nz              ; blocked below
+                ld      a, (trobst)
                 or      a
-                ret     nz
-                ld      a, 1
+                jr      z, blok
+                ret     p               ; already triggered
+blok:           ld      a, 1
                 ld      (trobst), a
                 call    trobsave
                 xor     a               ; down
