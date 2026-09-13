@@ -101,7 +101,6 @@ def play(tape, script, frames, settle):
     fill = sym.get('vw_fill', -1)
     works = []
     began = None
-    sang = set()                        # frames a song held still
     for n in range(1, frames + settle):
         runtap.release(cpu)
         for k in (script(n) if n < frames else []):
@@ -120,8 +119,6 @@ def play(tape, script, frames, settle):
                 began = now
             if p == fill:
                 filling = True
-            if p == sym.get('scplay'):
-                sang.add(n)
             cpu.step()
             if not (lo <= p < hi) and not filling:
                 work += cpu.cycles - t
@@ -130,9 +127,6 @@ def play(tape, script, frames, settle):
             first = False
         if n < frames:
             works.append((n, work, periods))
-    # A song holds the game for seconds, as POP's did: not a late frame.
-    works = [(n, w, p) for n, w, p in works
-             if n not in sang and n - 1 not in sang]
     live = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
     call(cpu, sym['roombuild'])
     fresh = bytes(cpu.mem[sym['room']:sym['room'] + 6720])

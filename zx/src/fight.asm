@@ -1861,41 +1861,30 @@ SONG_UPSTAIRS   equ     9
 SONG_POTION     equ     11
 SONG_SHORTPOT   equ     12
 
-; CUESONG: A = the song, C = how many frames it may wait for its moment.
+; CUESONG: A = the song.  POP made it wait for a still moment and held the
+; game while it played, the speaker leaving it no choice; the AY plays it
+; under the game instead, from the next frame, over whatever was playing.
+; (C, the frames POP would have let it wait, is not wanted.)
 
 cue_song:       ld      (songcue), a
-                ld      a, c
-                ld      (songcount), a
                 ret
 
-; SONGCUES: only while he -- and a guard in the room -- stands still, or lies
-; dead, and nothing is falling or flashing.
+; Once a frame, at the top of it: the song cued, if any, begins, and the one
+; playing moves on as many fiftieths as the interrupts say have gone by --
+; three a frame, and many more while a room is being built -- so it keeps its
+; time whatever the frame did.
 
-songcues:       ld      a, (songcue)
-                or      a
-                ret     z
-                ld      hl, songcount
-                ld      a, (hl)
-                or      a
-                jr      nz, scwait
-                ld      (songcue), a    ; its time has gone
-                ret
-scwait:         dec     (hl)
-                ld      a, (frame)
-                call    still
-                ret     nz
-                ld      a, (gdhere)
-                or      a
-                jr      z, scstill
-                ld      a, (frame + OP)
-                call    still
-                ret     nz
-scstill:        ld      a, (nummob)
-                ld      hl, lightning
-                or      (hl)
-                ret     nz
+music:          ld      a, (FRAMES)
+                ld      hl, mlast
+                ld      b, (hl)
+                ld      (hl), a
+                sub     b
+                ld      b, a            ; B = fiftieths since last time
                 call    page_pixels     ; the songs are in the canvas's bank
                 ld      a, (songcue)
+                or      a
+                jr      z, muplay
+                push    bc
                 add     a, a
                 ld      e, a
                 ld      d, 0
@@ -1904,9 +1893,12 @@ scstill:        ld      a, (nummob)
                 ld      e, (hl)
                 inc     hl
                 ld      d, (hl)
+                xor     a
+                ld      (songcue), a
+                ld      (playing), a
                 ld      a, d
                 or      e
-                jr      z, scdone       ; not carried
+                jr      z, mustart      ; not carried
                 ld      hl, songdata
                 add     hl, de
                 ld      e, (hl)         ; voice 2's stream, from the record
@@ -1923,11 +1915,21 @@ scstill:        ld      a, (nummob)
                 xor     a
                 ld      (voice1 + 2), a
                 ld      (voice2 + 2), a
+                inc     a
+                ld      (playing), a
                 ld      d, 7            ; tones on, no noise: the AY comes up
                 ld      a, 0x38         ; with both
                 call    ayout
-scplay:         halt                    ; a frame
-                call    page_pixels
+mustart:        pop     bc
+                ld      b, 1            ; a song starts from its start, not
+                                        ; from however long the frame was
+muplay:         ld      a, (playing)
+                or      a
+                jr      z, mudone
+                inc     b
+                dec     b
+                jr      z, mudone
+muloop:         push    bc
                 ld      hl, voice1
                 ld      bc, 0x0209      ; B: period registers 2, 3; C: volume
                 call    vtick
@@ -1936,37 +1938,16 @@ scplay:         halt                    ; a frame
                 ld      bc, 0x040a
                 call    vtick
                 pop     bc
-                jr      nz, scplay
+                jr      nz, munext
                 ld      a, b
                 or      a
-                jr      nz, scplay
-scdone:         xor     a
-                ld      (songcue), a
-                call    page_canvas     ; clearjoy: nothing pressed meanwhile
-                call    clrall          ; counts -- and clrall is up there
-                jp      page_art
-
-; static? and cold?: A = a frame.  Z when it is standing, crouched, en garde,
-; brandishing the sword -- or dead.
-
-still:          or      a
-                ret     z
-                cp      15
-                ret     z
-                cp      229
-                ret     z
-                cp      109
-                ret     z
-                cp      171
-                ret     z
-                cp      166
-                ret     z
-                cp      185
-                ret     z
-                cp      177
-                ret     z
-                cp      178
-                ret
+                jr      nz, munext
+                ld      (playing), a    ; both voices done
+                pop     bc
+                jr      mudone
+munext:         pop     bc
+                djnz    muloop
+mudone:         jp      page_art
 
 ; HL = a voice: its stream, and the frames its note has left.  B = its period
 ; register, C = its volume register.  Out: A and Z when it has finished.
@@ -2055,7 +2036,8 @@ kdsong:         ld      c, 255
 voice1:         ds      3
 voice2:         ds      3
 songcue:        db      0
-songcount:      db      0
+playing:        db      0
+mlast:          db      0
 
 ; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
 

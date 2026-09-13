@@ -155,6 +155,7 @@ mainrun:        ld      a, (FRAMES)
                 call    page_art
                 call    show_rect
                 call    show_meters     ; over whatever went to the screen
+                call    music           ; and the song goes on
                 call    page_art
                 call    keep_rect
 
@@ -189,7 +190,6 @@ mainrun:        ld      a, (FRAMES)
                 call    hide_behind
                 call    hide_guard
                 call    kid_death
-                call    songcues        ; a song cued, and the moment for it
                 call    rq_run          ; and the redrawing, as time allows
                 call    vw_fill         ; and the view ahead, to the very end
                 jp      main
