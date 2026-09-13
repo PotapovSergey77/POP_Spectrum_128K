@@ -2010,49 +2010,11 @@ ayout:          push    bc
                 pop     bc
                 ret
 
-; When he has died and stopped moving, the death song: heroic if he fell in a
-; fight.  CharLife goes past nought so it is asked for once.
-
-kid_death:      ld      a, (charlife)
-                or      a
-                ret     nz
-                ld      a, (frame)
-                cp      185
-                jr      z, kddead
-                cp      177
-                jr      z, kddead
-                cp      178
-                ret     nz
-kddead:         ld      a, 1
-                ld      (charlife), a
-                ld      a, (heroic)
-                or      a
-                ld      a, SONG_ACCID
-                jr      z, kdsong
-                ld      a, SONG_HEROIC
-kdsong:         ld      c, 255
-                jp      cue_song
-
 voice1:         ds      3
 voice2:         ds      3
 songcue:        db      0
 playing:        db      0
 mlast:          db      0
-
-; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
-
-addsfx:         ld      a, (frame)
-                cp      167             ; blocked strike
-                ld      a, SND_SWORDCLASH1
-                jp      z, addsound
-                ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      a, (frame + OP)
-                cp      167
-                ret     nz
-                ld      a, SND_SWORDCLASH2
-                jp      addsound
 
 ; addlowersound in SUBS.S: a gate going down creaks only where it is seen.
 
@@ -2572,6 +2534,8 @@ maxkidstr:      db      3               ; MaxKidStr: initmaxstr in TOPCTRL.S
 ; and KidStrOFF place them, which on a Spectrum is a byte each.
 
 METERY          equ     188             ; YCO 191, four rows up
+INK_KIDMETER    equ     0x42            ; bright red, as on the Apple
+INK_OPPMETER    equ     0x41            ; and his opponent's bright blue
 MAXKIDMETER     equ     10              ; maxmaxstr: the most he can have
 MAXOPPMETER     equ     4               ; the most a guard of this level has
 
@@ -2590,6 +2554,10 @@ smdark:         out     (254), a
 smwt:           call    page_canvas     ; bank 7, in case it is the one shown
                 ld      hl, mflash      ; PAGE, which POP flips every frame
                 inc     (hl)
+                ld      a, INK_KIDMETER
+                ld      (mmink), a
+                ld      a, 10           ; his, every place drawn
+                ld      (mmdrawn), a
                 ld      hl, bullet
                 ld      a, (kidstr)
                 ld      c, a
@@ -2597,97 +2565,151 @@ smwt:           call    page_canvas     ; bank 7, in case it is the one shown
                 ld      b, a
                 ld      de, 0x0100      ; from the left, a byte on each time
                 call    meter
+                ld      a, INK_OPPMETER
+                ld      (mmink), a
+                xor     a               ; his opponent's: a place spent is
+                ld      (mmdrawn), a    ; the room again, once
+                ld      c, 0
                 ld      a, (gdhere)
                 or      a
-                jr      z, smgone
+                jr      z, smopp
                 ld      a, (oppstr)
-                or      a
-                jr      z, smgone
                 ld      c, a
-                ld      a, 1
-                ld      (oppshown), a
-                ld      hl, bullet + 4
+smopp:          ld      hl, bullet + 4
                 ld      b, MAXOPPMETER
                 ld      de, 0xff1f      ; from the right, a byte back each time
-                jr      meter
-
-smgone:         ld      a, (oppshown)   ; the room back where it was, once
-                or      a
-                ret     z
-                xor     a
-                ld      (oppshown), a
-                ld      a, METERY
-smrest:         push    af
-                ld      e, 32 - MAXOPPMETER
-                call    scraddr
-                push    hl
-                ld      de, work - SCREEN
-                add     hl, de
-                pop     de
-                ld      a, (scrsel + 1)
-                or      d
-                ld      d, a
-                ld      bc, MAXOPPMETER
-                ldir
-                pop     af
-                inc     a
-                cp      METERY + 4
-                jr      c, smrest
+                call    meter
+                ld      a, (mmlast)
+                ld      (oppdrawn), a
                 ret
 
 ; HL = the bullet's four rows, B = how many places, C = how many are lit,
-; E = the first column and D the step to the next.
+; E = the first column and D the step to the next; (mmink) their colour.  A
+; place is a whole character cell -- the four rows over the bullet kept black
+; as well, so that the colour takes nothing of the wall above it.  A place not
+; lit is black up to (mmdrawn) places; past that it is put back from the room,
+; in the room's colour, if it was lit the time before, and is otherwise left.
 
-meter:          ld      (mtimg), hl
-                ld      (mtfirst), de
-                ld      a, b
-                ld      (mtslots), a
+meter:          ld      (mmimg), hl
+                ld      (mmfirst), de
                 ld      a, c
                 cp      1
-                jr      nz, mtlitn
+                jr      nz, mmlitn
                 ld      a, (mflash)     ; down to one: it flashes
                 rra
-                jr      nc, mtlitn
+                jr      nc, mmlitn
                 ld      c, 0
-mtlitn:          ld      a, METERY
-mtline:          push    af
-                ld      de, (mtfirst)
+mmlitn:         ld      a, c
+                ld      (mmlast), a
+                ld      (mmlit), a
+                xor     a
+                ld      (mmidx), a
+mmplace:        push    bc
+                ld      hl, mmidx
+                ld      a, (mmlit)
+                cp      (hl)
+                ld      a, 0            ; lit
+                jr      z, mmoff
+                jr      nc, mmmode
+mmoff:          ld      a, (mmdrawn)
+                cp      (hl)
+                ld      a, 1            ; black
+                jr      z, mmroom
+                jr      nc, mmmode
+mmroom:         ld      a, (oppdrawn)   ; the room, if there was a bullet
+                cp      (hl)
+                jp      z, mmnext
+                jp      c, mmnext
+                ld      a, 2
+mmmode:         ld      (mmwhat), a
+                ld      a, METERY - 4
+mmrow:          push    af
+                ld      e, a
+                sub     METERY          ; C = the bullet's row there, if any
+                ld      c, a
+                ld      a, (mmwhat)
+                cp      2
+                jr      nz, mmscr
+                ld      a, e            ; the room's byte, from the art bank
+                call    roomwin
+                ld      a, (mmfirst)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                call    page_art
+                ld      a, (hl)
+                ld      (mmbyte), a
+                call    page_canvas
+                pop     af
+                push    af
+                ld      e, a
+mmscr:          ld      a, (mmfirst)
+                ld      d, a
+                ld      a, e
+                ld      e, d
                 call    scraddr
+                ld      a, (mmwhat)
+                or      a
+                jr      z, mmbul
+                cp      2
+                ld      a, (mmbyte)
+                jr      z, mmput
+                xor     a
+                jr      mmput
+mmbul:          ld      a, c
+                cp      4
+                ld      a, 0
+                jr      nc, mmput       ; above the bullet
+                push    hl
+                ld      hl, (mmimg)
+                ld      b, 0
+                add     hl, bc
+                ld      a, (hl)
+                pop     hl
+mmput:          ld      e, a
                 ld      a, (scrsel + 1)
                 or      h
                 ld      h, a
-                ld      de, (mtimg)
-                ld      a, (de)
-                ld      d, a            ; D = this row of a bullet
-                ld      a, (mtslots)
-                ld      b, a
-                ld      e, c
-mtplace:         xor     a               ; lit, or black
-                inc     e
-                dec     e
-                jr      z, mtlay
-                dec     e
-                ld      a, d
-mtlay:          ld      (hl), a
-                ld      a, (mtstep)
-                add     a, l
-                ld      l, a
-                djnz    mtplace
-                ld      hl, (mtimg)
-                inc     hl
-                ld      (mtimg), hl
+                ld      (hl), e
                 pop     af
                 inc     a
                 cp      METERY + 4
-                jr      c, mtline
+                jr      c, mmrow
+                ld      a, (mmfirst)    ; and the cell's colour
+                add     a, 0xe0
+                ld      l, a
+                ld      a, (scrsel + 1)
+                or      0x5a
+                ld      h, a
+                ld      a, (mmwhat)
+                cp      2
+                ld      a, INK_ROOM
+                jr      z, mmink1
+                ld      a, (mmink)
+mmink1:         ld      (hl), a
+mmnext:         ld      hl, mmfirst
+                ld      a, (mmstep)
+                add     a, (hl)
+                ld      (hl), a
+                ld      hl, mmidx
+                inc     (hl)
+                pop     bc
+                dec     b
+                jp      nz, mmplace
                 ret
 
-mtimg:          dw      0
-mtfirst:          db      0
-mtstep:         db      0
-mtslots:        db      0
+mmimg:          dw      0
+mmfirst:        db      0
+mmstep:         db      0
+mmlit:          db      0
+mmlast:         db      0
+mmidx:          db      0
+mmwhat:         db      0               ; 0 lit, 1 black, 2 the room
+mmbyte:         db      0
+mmink:          db      0
+mmdrawn:        db      0
+oppdrawn:       db      0
 mflash:         db      0
-oppshown:       db      0
 bullet:         incbin  "bullet.bin"
 
 ; ---------------------------------------------------------------- state

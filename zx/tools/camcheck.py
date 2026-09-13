@@ -59,7 +59,7 @@ def run(tap, sym, pin, keys, upto):
 def meter(sym, y, c):
     """The strength meters stand on the screen, not in the room: they do
     not move with the view and are left out of the comparison."""
-    return (sym['METERY'] <= y < sym['METERY'] + 4
+    return (sym['METERY'] - 4 <= y < sym['METERY'] + 4
             and (c < sym['MAXKIDMETER'] or c >= 32 - sym['MAXOPPMETER']))
 
 
