@@ -175,6 +175,7 @@ mainrun:        ld      a, (FRAMES)
                 call    page_canvas
                 call    checkstrike
                 call    checkstab
+                call    addsfx
                 call    cutguard
                 call    page_art
                 call    nextroom        ; before anything reads his row again
@@ -1740,6 +1741,14 @@ sqtap:          ld      a, (hl)
                 inc     hl
                 cp      3
                 jp      nc, seqloop
+                cp      1               ; a footstep, or the smack of a wall
+                push    af
+                ld      a, SND_FOOTSTEP
+                call    z, addsound
+                pop     af
+                cp      2
+                ld      a, SND_SMACKWALL
+                call    z, addsound
                 ld      a, 1
                 ld      (alertguard), a
                 jp      seqloop
@@ -2016,7 +2025,9 @@ clagain:        call    ccread
 clspace:        call    cmp_space
                 jr      nz, groundbump
 
-airbump:        ld      a, -4           ; four back off the wall
+airbump:        ld      a, SND_SMACKWALL ; BumpSound
+                call    addsound
+                ld      a, -4           ; four back off the wall
                 call    addcharx
                 ld      a, (charact)
                 cp      4               ; falling already: that is all
@@ -3364,6 +3375,10 @@ hit_floor:      call    floor_plane
                 ld      b, SQ_SOFTLAND
                 cp      OOFVEL
                 jr      c, hfsoft
+                push    af              ; anything harder is a splat
+                ld      a, SND_SPLAT
+                call    addsound
+                pop     af
                 cp      DEATHVEL
                 jr      nc, hfhard
                 ld      a, (charid)     ; guards cannot survive two storeys

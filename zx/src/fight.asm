@@ -1391,6 +1391,8 @@ cskid:          ld      a, (charact)
 stabchar:       ld      a, (charlife)
                 or      a
                 ret     p               ; already dead
+                ld      a, SND_SPLAT
+                call    addsound
                 ld      a, (charsword)
                 cp      2
                 jr      nz, scdefenceless
@@ -1794,6 +1796,80 @@ stairs_crop:    ld      a, (strow)
 stcol:          db      0
 strow:          db      0
 
+; ---------------------------------------------------------------- sound
+;
+; ADDSOUND and PLAYBACK in SOUND.S, on the AY: A = the sound.  POP plays the
+; frame's sounds one after another once it has drawn it, with the speaker
+; holding up everything else; here the newest simply takes channel A, and
+; nothing waits.  Every register kept.
+
+addsound:       push    af
+                push    bc
+                push    de
+                push    hl
+                cp      SOUNDS
+                jr      nc, asdone
+                add     a, a
+                add     a, a
+                ld      e, a
+                ld      d, 0
+                ld      hl, soundtab
+                add     hl, de
+                ld      d, 0            ; the tone's period
+                call    aynext
+                call    aynext
+                ld      d, 11           ; the envelope's
+                call    aynext
+                call    aynext
+                ld      hl, aysetup     ; tone A on, no noise; A on the
+                ld      d, 7            ; envelope; one decay and silence
+                call    aynext
+                ld      d, 8
+                call    aynext
+                ld      d, 13
+                call    aynext
+asdone:         pop     hl
+                pop     de
+                pop     bc
+                pop     af
+                ret
+
+; Register D gets (HL); both move on.
+
+aynext:         ld      bc, 0xfffd
+                out     (c), d
+                ld      a, (hl)
+                ld      b, 0xbf
+                out     (c), a
+                inc     hl
+                inc     d
+                ret
+
+aysetup:        db      0x3e, 0x10, 0
+soundtab:       incbin  "sounds.bin"
+
+; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
+
+addsfx:         ld      a, (frame)
+                cp      167             ; blocked strike
+                ld      a, SND_SWORDCLASH1
+                jp      z, addsound
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (frame + OP)
+                cp      167
+                ret     nz
+                ld      a, SND_SWORDCLASH2
+                jp      addsound
+
+; addlowersound in SUBS.S: a gate going down creaks only where it is seen.
+
+lowersound:     call    onscreen
+                ret     nz
+                ld      a, SND_LOWERINGGATE
+                jp      addsound
+
 ; ---------------------------------------------------------------- spikes
 ;
 ; The state of a spikes block, as MOVER.S keeps it: 0 in the floor, 1 to 4
@@ -1895,6 +1971,8 @@ trig_spikes:    call    spk_at
 tsready:        ld      a, 1
                 ld      (trdirec), a
                 call    addtrob
+                ld      a, SND_GATEDOWN ; "TEMP" in MOVER.S, and the sound
+                call    addsound        ; spikes make ever since
                 ld      a, SPIKEWIPE
                 ld      (redh), a
                 jp      redplate
@@ -2069,6 +2147,8 @@ doimpale:       ld      (lscol), a
                 ld      a, SPIKEWIPE
                 ld      (redh), a
                 call    redplate
+                ld      a, SND_IMPALED
+                call    addsound
                 call    page_canvas     ; move_by is in the canvas bank
                 call    floor_plane
                 ld      (chary), a
@@ -2152,6 +2232,8 @@ pe3:            cp      3
                 ret
 pe5:            cp      5
                 ret     nz
+                ld      a, SND_SPLAT
+                call    addsound
                 ld      hl, kidstr      ; yecch: a point off
                 ld      a, (hl)
                 or      a

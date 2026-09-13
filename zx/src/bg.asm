@@ -3072,7 +3072,9 @@ mobknock:       call    mobtrob         ; that floor is space now
 ; It lands: the row it hit is shaken, it crumbles where it stopped, and what
 ; it landed on becomes rubble.
 
-mobcrash:       ld      a, (mobroom)
+mobcrash:       ld      a, SND_LOOSECRASH
+                call    addsound
+                ld      a, (mobroom)
                 ld      (trscrn), a
                 ld      a, (moblevel)
                 ld      (slrow2), a
@@ -3190,6 +3192,8 @@ pushpp:         ld      (pptype), a
                 ld      a, 1
                 ld      (trdirec), a
                 call    addtrob
+                ld      a, SND_PLATEDOWN
+                call    addsound
                 call    trobsave        ; so the copy shows it pushed down
                 ld      a, PLATEWIPE
                 ld      (redh), a
@@ -3535,7 +3539,8 @@ animgate:       ld      a, 1
                 jr      z, agdown
                 ld      a, (trobst)     ; going up
                 cp      GMAXVAL
-                ret     c
+                ld      a, SND_RAISINGGATE
+                jp      c, addsound
                 ld      a, (trdirec)    ; at the top: jam, or wait and fall
                 cp      2
                 jr      c, agwait
@@ -3550,7 +3555,12 @@ agwait:         ld      a, GATETIMER
 
 agdown:         ld      a, (trobst)     ; all the way down is the end of it
                 or      a
-                ret     nz
+                jr      z, agshut
+                cp      GMAXVAL         ; waiting at the top makes no noise
+                ret     nc
+                jp      lowersound
+agshut:         ld      a, SND_GATEDOWN
+                call    addsound
                 jp      stopobj
 
 agfast:         ld      a, (trdirec)    ; trdirec is an index into gatevel
@@ -3569,6 +3579,8 @@ agf1:           ld      l, a
                 ret     nc
                 xor     a               ; it hit the floor
                 ld      (trobst), a
+                ld      a, SND_GATESLAM
+                call    addsound
                 jp      stopobj
 
 ; The exit door only ever opens, and stops when it is all the way up.
@@ -3580,11 +3592,15 @@ animexit:       ld      a, 1
                 ld      a, (trdirec)
                 and     0x80
                 ret     nz
+                ld      a, SND_RAISINGEXIT
+                call    addsound
                 ld      a, (trobst)
                 add     a, EXITINC
                 ld      (trobst), a
                 cp      EMAXVAL
                 ret     c
+                ld      a, SND_GATEDOWN
+                call    addsound
                 ld      a, 1            ; open for good: the way out of here
                 ld      (exitopen), a
                 jp      stopobj
@@ -3606,6 +3622,8 @@ animplate:      ld      a, (trdirec)
                 pop     af
                 cp      2
                 ret     nc              ; the count stops at one
+                ld      a, SND_PLATEUP
+                call    addsound
                 ld      a, 1            ; and only now does it look different
                 ld      (redwant), a
                 ld      a, PLATEWIPE
