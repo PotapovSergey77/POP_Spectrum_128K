@@ -142,12 +142,33 @@ def image_table(path):
     return bytes(head) + bytes(body)
 
 
+GDINFO = 2048 + 71              # GdStartBlock in INFO, EQ.S
+
+
+def guards_fixed(level):
+    """
+    The level's guards, as ADDGUARD can use them.  GdStartX and GdStartSeq
+    are 255 in these blueprints wherever a guard stands, which puts him off
+    the right of the screen and on a sequence address in the Apple's memory
+    that means nothing here: he is put on his block the way the kid is put
+    on his, and starts fresh -- SeqH 0 is ADDGUARD's own code for that.
+    """
+    level = bytearray(level)
+    for s in range(24):
+        block = level[GDINFO + s]
+        if block < 30:
+            if level[GDINFO + 48 + s] == 255:
+                level[GDINFO + 48 + s] = 14 * (block % 10) + 72
+            level[GDINFO + 120 + s] = 0
+    return bytes(level)
+
+
 def build(level_path):
     """(blob, {name: offset}) -- everything the background bank carries."""
     tables = piece_tables()
     t1 = image_table(os.path.join(IMAGES, 'IMG.BGTAB1.DUN'))
     t2 = image_table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'))
-    level = open(level_path, 'rb').read()
+    level = guards_fixed(open(level_path, 'rb').read())
 
     blob = bytearray()
     at = {}

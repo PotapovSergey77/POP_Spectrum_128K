@@ -70,6 +70,7 @@ KID_SEQS = (list(range(1, 51))
                81, 82, 83, 104])         # fightfall, efightfall, patchfall
 
 CHAR_ANCHOR = 21
+ALT_FRAMES = 40                 # ALTSET1: frames 150 to 189
 
 # A block is drawn at room x = 28*b, so it runs 28*b to 28*b + 27 -- but the
 # block a character is ON is not simply the one
@@ -138,7 +139,7 @@ START_ROW = int(os.environ.get('POP_START_ROW', 0))
 START_COL = int(os.environ.get('POP_START_COL', 5))
 
 
-def sprite_bytes(img, mirror):
+def sprite_bytes(img, mirror, pad=0):
     """
     One frame as rows of bytes, eight pixels to the byte, the figure's ink
     set and the room showing through the rest.
@@ -150,7 +151,7 @@ def sprite_bytes(img, mirror):
     shifted zeroes out.  The Apple stored its pictures the same way, which
     is how the whole of Prince of Persia fitted in the same 128K.
     """
-    rows = [list(line) for line in img.pixels()]
+    rows = [[0] * pad + list(line) for line in img.pixels()]
     if mirror:
         rows = [list(reversed(r)) for r in rows]
     width = (len(rows[0]) + 7) // 8
@@ -213,36 +214,39 @@ def build_sprites(frames_used):
     top = max(frames_used) + 1
     table, banks, trims = bytearray(top * 6), [bytearray()], {}
     for n in frames_used:
-        if n not in frames:
-            continue            # frame 0 is "nothing to draw"
-        img = popframe.image(frames[n])
-        apple_bytes = (img.px_width + 6) // 7
-        width, height, data = sprite_bytes(img, 0)
-        cut, below, width, height, data = trim_frame(width, height, data)
-        trims[n] = below
-        if len(banks[-1]) + len(data) > BANK_SIZE - 2:
-            banks.append(bytearray())   # this one will not fit: start the next
-        e = n * 6
-        # The foot has to land where the logic says it does.  GETBASEX puts
-        # it at CharX + Fdx - footmark, applied the way he faces, and the
-        # footmark counts in from the LEFT edge of the image -- so facing
-        # left the image's left edge goes at CharX - Fdx, and facing right,
-        # where it is mirrored inside its buffer, at CharX + Fdx less the
-        # buffer's width.  Both then have the foot in the same place, which
-        # one constant for the two of them could never manage.
-        #
-        # The box cut off the left moves both of them along by what it took:
-        # facing left the stored edge now stands `cut` bytes further in, and
-        # facing right, where the row is reversed inside a buffer that is
-        # narrower by as much, the far edge is `cut + width` from the anchor.
-        dx = 2 * frames[n].dx
-        table[e:e + 4] = bytes([width, height, (-dx + cut * 8) & 0xff,
-                                (dx - (cut + width) * 8) & 0xff])
-        table[e + 4:e + 6] = (((len(banks) - 1) << BANK_SHIFT)
-                              | len(banks[-1])).to_bytes(2, 'little')
-        banks[-1] += data
-    return bytes(table), [bytes(b) for b in banks], trims
+        if n in frames:             # frame 0 is "nothing to draw"
+            lay_frame(table, banks, trims, n, frames[n])
+    return table, banks, trims
 
+
+
+def lay_frame(table, banks, trims, n, frame):
+    """One frame's record at index n of the table, its pixels in the banks."""
+    img = popframe.image(frame)
+    width, height, data = sprite_bytes(img, 0)
+    cut, below, width, height, data = trim_frame(width, height, data)
+    trims[n] = below
+    if len(banks[-1]) + len(data) > BANK_SIZE - 2:
+        banks.append(bytearray())   # this one will not fit: start the next
+    e = n * 6
+    # The foot has to land where the logic says it does.  GETBASEX puts
+    # it at CharX + Fdx - footmark, applied the way he faces, and the
+    # footmark counts in from the LEFT edge of the image -- so facing
+    # left the image's left edge goes at CharX - Fdx, and facing right,
+    # where it is mirrored inside its buffer, at CharX + Fdx less the
+    # buffer's width.  Both then have the foot in the same place, which
+    # one constant for the two of them could never manage.
+    #
+    # The box cut off the left moves both of them along by what it took:
+    # facing left the stored edge now stands `cut` bytes further in, and
+    # facing right, where the row is reversed inside a buffer that is
+    # narrower by as much, the far edge is `cut + width` from the anchor.
+    dx = 2 * frame.dx
+    table[e:e + 4] = bytes([width, height, (-dx + cut * 8) & 0xff,
+                            (dx - (cut + width) * 8) & 0xff])
+    table[e + 4:e + 6] = (((len(banks) - 1) << BANK_SHIFT)
+                          | len(banks[-1])).to_bytes(2, 'little')
+    banks[-1] += data
 
 def sword_table():
     """SWORDTAB in FRAMEDEF.S: (image in chtable3, dx, dy) for swords 1 on."""
@@ -555,6 +559,19 @@ def main(argv):
     blobs[-1] += ff_data
     assert len(blobs[-1]) <= BANK_SIZE - 2, 'the falling floor does not fit'
 
+    # The guard's own frames, after it: USEALTSETS in CTRLSUBS.S draws a
+    # guard's 150 to 189 out of ALTSET1 -- chtable4, himself with the sword
+    # in the other hand -- and his falling 102 to 106 as 172 to 176.  The
+    # rest of what he does he does in the kid's frames.  Index ALT_BASE + n
+    # - 150 is ALTSET1's frame n, in every table indexed by frame.
+    alt_base = len(table) // 6
+    alt = popframe.load_altset1()
+    table += bytes(6 * ALT_FRAMES)
+    for i in range(ALT_FRAMES):
+        f = alt.get(150 + i)
+        if f is not None and f.index:
+            lay_frame(table, blobs, trims, alt_base + i, f)
+
     # SETUPSWORD in CTRLSUBS.S: the sword in his hand is not in his picture
     # but a picture of its own out of chtable3, laid over him at SWORDTAB's
     # offset from his anchor -- dx the way he faces, dy down from FCharY.
@@ -565,27 +582,39 @@ def main(argv):
     swtab = sword_table()
     t3 = popimg.Table(os.path.join(popframe.IMAGES, popframe.TABLES[2]))
     frl = popframe.load()
+    logic = dict((n, frl[n]) for n in used if n in frl)
+    logic.update((alt_base + i, alt[150 + i]) for i in range(ALT_FRAMES)
+                 if 150 + i in alt)
     fswd = bytearray(len(table) // 6)
     poses = bytearray()
-    for n in sorted(used):
-        f = frl.get(n)
-        if f is None or not f.sword & 0x3f:
+    sword_at = {}
+    for n in sorted(logic):
+        f = logic[n]
+        if not f.sword & 0x3f:
             continue
         im, sdx, sdy = swtab[(f.sword & 0x3f) - 1]
         if not im:
             continue                    # image 0: SETUPSWORD draws nothing
-        w, h, data = sprite_bytes(t3.get(im), 0)
-        cut, below, w, h, data = trim_frame(w, h, data)
-        if not h:
-            continue
-        if len(blobs[-1]) + len(data) > BANK_SIZE - 2:
-            blobs.append(b'')
-        at = ((len(blobs) - 1) << BANK_SHIFT) | len(blobs[-1])
-        blobs[-1] += data
         # SETUPCHAR doubles his Fdx into FCharX, which is in pixels already,
         # and ADDFCHARX then adds the sword's dx to that as it stands: the
         # sword's is in pixels, his in 140 wide units.
         total = 2 * f.dx + sdx
+        # An odd one would want the blitter's odd shifts, and those tables
+        # are two kilobytes of the fixed map for nothing else: the picture is
+        # stored a pixel along instead, and lands on exactly the same pixels.
+        pad = total & 1
+        total += pad
+        w, h, data = sprite_bytes(t3.get(im), 0, pad)
+        cut, below, w, h, data = trim_frame(w, h, data)
+        if not h:
+            continue
+        if (im, pad) not in sword_at:   # one copy of a picture, however
+            if len(blobs[-1]) + len(data) > BANK_SIZE - 2:  # many hold it
+                blobs.append(b'')
+            sword_at[im, pad] = (((len(blobs) - 1) << BANK_SHIFT)
+                                 | len(blobs[-1]))
+            blobs[-1] += data
+        at = sword_at[im, pad]
         left, right = -total + cut * 8, total - (cut + w) * 8
         dy = f.dy + sdy - below
         assert all(-128 <= v < 128 for v in (left, right, dy)), n
@@ -605,7 +634,7 @@ def main(argv):
     # All three are indexed by frame like the frame table, so they ride in
     # the canvas bank with it: 687 bytes the fixed half of the map needs for
     # code.
-    fr = popframe.load()
+    fr = logic
     top = len(table) // 6
     fcheck = bytearray(top)
     fdx = bytearray(top)
@@ -682,7 +711,7 @@ def main(argv):
     for n in ('space', 'floor', 'posts', 'gate', 'panelwif', 'pillartop',
               'loose', 'panelwof', 'block', 'spikes', 'archtop1', 'archtop2',
               'torch', 'dpressplate', 'pressplate', 'upressplate',
-              'rubble', 'sword', 'flask'):
+              'rubble', 'sword', 'flask', 'slicer'):
         inc.append('BG_%-8s equ %d' % (n.upper(), getattr(renderroom.bg, n)))
     inc.append('BG_EXIT     equ %d' % renderroom.bg.exit_)
     inc.append('BG_NUMBLOX  equ %d' % renderroom.bg.numblox)
@@ -714,12 +743,17 @@ def main(argv):
     # mask wants ones shifted in at both ends and gets them for nothing: it
     # is the data's complement, so the zeroes the shift brings in complement
     # to exactly the ones it needs, and there are no fill tables any more.
-    hi = bytearray(8 * 256)
-    lo = bytearray(8 * 256)
-    for sh in range(8):
+    #
+    # Every coordinate a picture is placed at is even -- CharX moves two
+    # pixels to POP's unit and the swords are stored to match -- so only the
+    # shifts of two, four and six need tables, and the shift of none needs
+    # none at all: its loops simply lay the bytes down.
+    hi = bytearray(3 * 256)
+    lo = bytearray(3 * 256)
+    for i, sh in enumerate((2, 4, 6)):
         for b in range(256):
-            hi[sh * 256 + b] = b >> sh
-            lo[sh * 256 + b] = (b << (8 - sh)) & 0xff if sh else 0
+            hi[i * 256 + b] = b >> sh
+            lo[i * 256 + b] = (b << (8 - sh)) & 0xff
     open(os.path.join(binout, 'shifthi.bin'), 'wb').write(bytes(hi))
     open(os.path.join(binout, 'shiftlo.bin'), 'wb').write(bytes(lo))
 
@@ -766,6 +800,7 @@ def main(argv):
         f.write('F_CHECK     equ %d' % 0x40 + chr(10))
         f.write('F_FOOTMARK  equ %d' % 0x1f + chr(10))
         f.write('FF_FRAME    equ %d' % ff_frame + chr(10))
+        f.write('ALT_BASE    equ %d' % alt_base + chr(10))
         f.write('FF_W        equ %d' % ff_w + chr(10))
         f.write('FF_H        equ %d' % FF_ROWS + chr(10))
 
@@ -786,6 +821,8 @@ def main(argv):
         # gets no stairs, wherever a test tape starts.
         f.write('START_ROOM  equ %d\n' % int(os.environ.get('POP_START_ROOM', level.kid_start[0])))
         f.write('KIDSTART_SCRN equ %d\n' % level.kid_start[0])
+        # And a tape for the fight can start him with the sword already his.
+        f.write('START_SWORD equ %d\n' % int(os.environ.get('POP_GOTSWORD', 0)))
 
     print('bank_art    %d байт' % len(art))
     for i, b in enumerate(blobs):

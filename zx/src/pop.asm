@@ -115,10 +115,11 @@ X_MAX           equ     320
 ; start itself runs from where the working copy goes: see the end.
 
 start2:         call    repaint
-                call    draw_prince
+                call    draw_chars
                 call    page_art
                 call    hide_floor
                 call    hide_behind
+                call    hide_guard
                 ld      a, (FRAMES)
                 ld      (frstart), a
                 ei
@@ -154,27 +155,35 @@ mainrun:        ld      a, (FRAMES)
                 call    keep_rect
 
                 call    camera
-                call    erase_prince
                 call    rq_shows        ; blocks redrawn last frame, to show
                 call    page_canvas     ; the sequences live there, and
+                call    checkalert      ; EnemyAlert, before either moves
                 call    input_step      ; everything down to here starts one
                 call    step_seq
+                call    firstguard
                 call    check_barr
                 call    check_floor
                 call    do_fall
+                call    page_canvas
+                call    do_shad         ; and the guard after him
+                call    page_canvas
+                call    checkstrike
+                call    checkstab
+                call    cutguard
                 call    page_art
                 call    nextroom        ; before anything reads his row again
                 call    checkpress
                 call    shakeloose
                 call    animtrans
                 call    animmobs
-                call    draw_prince
+                call    draw_chars
                 call    page_art
                 call    hide_floor
                 call    hide_behind
+                call    hide_guard
                 call    rq_run          ; and the redrawing, as time allows
                 call    vw_fill         ; and the view ahead, to the very end
-                jr      main
+                jp      main
 
 ; ---------------------------------------------------------------- paging
 ;
@@ -841,7 +850,11 @@ facejstk:       ld      a, (facing)
                 ld      (clrb), a
                 ret
 
-input_step:     call    read_input
+input_step:     ld      a, (kidstr)     ; PLAYERCTRL: no strength left, no life
+                or      a
+                jr      nz, isalive
+                ld      (charlife), a
+isalive:        call    read_input
                 call    facejstk
                 call    ctrl
                 jp      facejstk
@@ -850,14 +863,35 @@ input_step:     call    read_input
 ; does next depends on what he is doing now, which CTRL.S reads off CharPosn,
 ; the frame he was last drawn in.
 
-ctrl:           ld      a, (charact)
+ctrl:           ld      a, (charlife)   ; dead, and standing: he drops
+                or      a
+                jp      p, ctrldead
+                ld      a, (charact)
                 cp      5               ; mid-bump
                 jr      z, ctrlclr
                 cp      4               ; or falling: not under control, and
                 jr      nz, ctrlon      ; forget whatever was pressed
 ctrlclr:        jp      clrall
 
-ctrlon:         ld      a, (frame)
+ctrldead:       ld      a, (frame)
+                cp      15
+                jr      z, ctrldrop
+                cp      166
+                jr      z, ctrldrop
+                cp      158
+                jr      z, ctrldrop
+                cp      171
+                ret     nz
+ctrldrop:       ld      a, SQ_DROPDEAD
+                jp      jumpseq
+
+ctrlon:         ld      a, (charsword)  ; en garde: FightCtrl
+                cp      2
+                jp      z, fight_ctrl
+                ld      a, (charid)     ; a guard: GuardCtrl
+                cp      2
+                jp      nc, guard_ctrl
+                ld      a, (frame)
                 cp      15
                 jp      z, standing
                 cp      48
@@ -887,7 +921,9 @@ ctrl1:          cp      109
 standing:       ld      a, (clrbtn)     ; a fresh click is "pick it up", and
                 or      a               ; CTRL.S asks that first of all
                 jp      m, stgrab
-stback:         ld      a, (btn)
+stback:         call    kid_engarde     ; an enemy in range: en garde
+                ret     nz
+                ld      a, (btn)
                 or      a
                 jp      z, stnobtn
 
@@ -947,7 +983,7 @@ srgo:           ld      a, SQ_STARTRUN
 
 do_turn:        call    clrall
                 ld      (clrb), a
-                ld      a, SQ_TURN
+                call    turnseq         ; turn, or draw as he turns
                 jp      jumpseq
 
 ; ------------------------------------------------------------------ turning
@@ -1595,7 +1631,7 @@ seqloop:        ld      a, (hl)
                 cp      SEQ_EFFECT
                 jp      z, sqskip1
                 cp      SEQ_TAP
-                jp      z, sqskip1
+                jp      z, sqtap
                 jp      seqloop         ; die and nextlevel: no data
 
 seqframe:       ld      (frame), a
@@ -1663,6 +1699,17 @@ sqsetfall:      inc     hl              ; the X velocity, which we do not use
                 ld      a, (hl)
                 inc     hl
                 ld      (yvel), a
+                jp      seqloop
+
+; A footstep, a smack against a wall, or a tap for nothing but that: each
+; of them is heard, and wakes a guard.
+
+sqtap:          ld      a, (hl)
+                inc     hl
+                cp      3
+                jp      nc, seqloop
+                ld      a, 1
+                ld      (alertguard), a
                 jp      seqloop
 
 sqskip2:        inc     hl              ; ifwtless: never weightless here
@@ -2985,9 +3032,7 @@ gbyhit:         ld      a, b
 base_x:         ld      a, (nowbank)    ; the frame tables are in the canvas
                 push    af              ; bank, and this is asked from both
                 call    page_canvas     ; sides of the paging
-                ld      a, (frame)
-                ld      l, a
-                ld      h, 0
+                call    frame_index
                 ld      d, h
                 ld      e, l
                 ld      bc, fcheck
@@ -3021,9 +3066,7 @@ bxpos:          ld      hl, (charx)
 frame_check:    ld      a, (nowbank)
                 push    af
                 call    page_canvas
-                ld      a, (frame)
-                ld      l, a
-                ld      h, 0
+                call    frame_index
                 ld      de, fcheck
                 add     hl, de
                 ld      c, (hl)
@@ -3180,9 +3223,7 @@ check_floor:    ld      a, (charact)
                 ret     z
                 cp      4
                 ret     z
-                ld      a, (frame)      ; does this frame look for floor?
-                ld      l, a
-                ld      h, 0
+                call    frame_index     ; does this frame look for floor?
                 ld      de, fcheck
                 add     hl, de
                 ld      a, (hl)
@@ -3200,7 +3241,15 @@ cfspace:        call    cmp_space       ; solid: he stays where he is
                 ld      (charact), a
                 xor     a
                 ld      (yvel), a
-                ld      a, SQ_STEPFALL
+                ld      (charsword), a  ; so that he can grab on
+                ld      a, (frame)
+                cp      150
+                jr      c, cfstep
+                cp      180
+                jr      nc, cfstep
+                call    fightfall_seq   ; from a fighting stance
+                jp      jumpseq
+cfstep:         ld      a, SQ_STEPFALL
                 jp      jumpseq
 
 ; GRAVITY and ADDFALL, then the floor plane test of `falling`.  stepfall
@@ -3250,8 +3299,11 @@ hit_floor:      call    floor_plane
                 ld      a, b
                 ld      b, SQ_SOFTLAND
                 cp      OOFVEL
-                jr      c, hfland
+                jr      c, hfsoft
                 cp      DEATHVEL
+                jr      nc, hfhard
+                ld      a, (charid)     ; guards cannot survive two storeys
+                cp      2
                 jr      nc, hfhard
                 ld      a, 1            ; a storey and a half: one life
                 call    decstr
@@ -3262,6 +3314,16 @@ hfhard:         ld      a, 100          ; POP spends more than he can have
                 ld      b, SQ_HARDLAND
 hfland:         ld      a, b
                 jp      jumpseq
+hfsoft:         ld      a, (charid)     ; a guard always lands en garde, and
+                cp      2               ; so does the kid who was
+                jr      nc, hfeng
+                ld      a, (charsword)
+                cp      2
+                jr      nz, hfland
+hfeng:          ld      a, 2
+                ld      (charsword), a
+                ld      b, SQ_LANDENGARDE
+                jr      hfland
 
 ; DECSTR in MISC.S.  A = what to take off him.  Out: Z when that was the last
 ; of it and he dies.  POP keeps the change in ChgKidStr so the meter can be
@@ -3269,8 +3331,14 @@ hfland:         ld      a, b
 
 mpc5:
                 org     mfix5
-decstr:         ld      hl, kidstr
-                cp      (hl)
+decstr:         ld      hl, kidstr      ; the kid's, or his opponent's
+                ld      b, a
+                ld      a, (charid)
+                or      a
+                ld      a, b
+                jr      z, dsgot
+                ld      hl, oppstr
+dsgot:          cp      (hl)
                 jr      c, dsleft
                 ld      (hl), 0
                 xor     a
@@ -3286,15 +3354,39 @@ dsleft:         ld      b, a
 ; Out: HL = table entry for the current frame and facing.
 ;      Entry: width, height, xoff, blob offset (2).
 
-frame_entry:    ld      a, (frame)
-                ld      l, a
-                ld      h, 0
+frame_entry:    call    frame_index
                 ld      d, h
                 ld      e, l
                 add     hl, hl          ; six bytes each
                 add     hl, de
                 add     hl, hl
                 ld      de, sprites
+                add     hl, de
+                ret
+
+; USEALTSETS in CTRLSUBS.S.  Out: HL = where the frame he is on stands in
+; every table indexed by frame.  A guard is drawn in ALTSET1 for 150 to 189
+; -- himself, out of chtable4 -- and falls in its 172 to 176 for 102 to 106;
+; the rest of what he does is done in the kid's own frames.
+
+frame_index:    ld      a, (frame)
+                ld      l, a
+                ld      h, 0
+                ld      a, (charid)
+                or      a
+                ret     z
+                ld      a, l
+                cp      102
+                ret     c
+                cp      107
+                jr      nc, fialt
+                add     a, 70
+fialt:          cp      150
+                ret     c
+                cp      190
+                ret     nc
+                ld      l, a
+                ld      de, ALT_BASE - 150
                 add     hl, de
                 ret
 
@@ -3305,7 +3397,10 @@ frame_entry:    ld      a, (frame)
 ; shown -- is the two of them together; each is then laid down with a clip
 ; of its own.  CROPCHAR reads his own picture, so it goes before the sword.
 
-draw_prince:    call    body_rec
+; The two passes are apart so that a second character can go between them:
+; see draw_chars.
+
+dp_rect:        call    body_rec
                 call    dp_place
                 call    crop_char
                 ld      hl, newcol
@@ -3313,13 +3408,12 @@ draw_prince:    call    body_rec
                 ld      bc, 4
                 ldir
                 call    sword_rec
-                jr      z, dpone
+                jp      z, dp_clip
                 call    dp_place
                 call    dp_union
-dpone:          call    dp_clip
-                call    erase_new
-                call    draw_flames     ; background, so before he is drawn
-                ld      hl, newcol
+                jp      dp_clip
+
+dp_pics:        ld      hl, newcol
                 ld      de, runion
                 ld      bc, 4
                 ldir
@@ -3385,7 +3479,13 @@ dp_union:       ld      hl, rbody
 ; sword's Fdy after it.  Out: NZ with its picture loaded, Z when none.
 
 sword_rec:      call    page_canvas
-                ld      a, (frame)
+                ld      a, (charid)     ; a live guard's is always seen
+                cp      2
+                jr      nz, srkid
+                ld      a, (charlife)
+                or      a
+                jp      m, srpose
+srkid:          ld      a, (frame)
                 cp      229
                 jr      c, srheld
                 cp      238
@@ -3393,9 +3493,7 @@ sword_rec:      call    page_canvas
 srheld:         ld      a, (charsword)
                 or      a
                 jr      z, srnone
-srpose:         ld      a, (frame)
-                ld      l, a
-                ld      h, 0
+srpose:         call    frame_index
                 ld      de, fswd
                 add     hl, de
                 ld      a, (hl)
@@ -3426,10 +3524,8 @@ srnone:         call    page_art
                 ret
 
 body_rec:       call    page_canvas     ; the frame table lives there now
-                ld      a, (frame)      ; and Fdy with it, wanted after the
-                ld      l, a            ; room has been paged back in
-                ld      h, 0
-                ld      de, fdy
+                call    frame_index     ; and Fdy with it, wanted after the
+                ld      de, fdy         ; room has been paged back in
                 add     hl, de
                 ld      a, (hl)
                 push    af
@@ -3580,41 +3676,62 @@ dp_image:       call    dp_place
                 or      a               ; and no rows is not 256 of them
                 ret     z
                 ld      b, a
-                ld      a, (newcol)     ; before HL is loaded: startrows has it
-                ld      (linecol), a
-                call    startrows
-                ld      hl, (curdat)
-                ld      (dfrow), hl
                 ld      a, (newtop)
-                ld      (rowy), a
-drawrow:        push    bc
-                ld      a, (rowy)
+                ld      c, a            ; C = the row in hand
+                ld      hl, (curdat)    ; HL = its pairs
+                ld      de, (dfrowlen)
+
+; The rows above the screen, and those above the floor that cuts him off,
+; are passed over first; then the rows are walked with their addresses in
+; hand, the screen's a line down each time and the pairs a row on.  Working
+; each one out afresh, and asking both questions of every row, was costing
+; more than the bytes themselves once there were two of them fighting.
+
+dpskip:         ld      a, c
                 cp      192
-                jr      nc, drawblank
-                ld      c, a
-                ld      a, (charcu)     ; cut off by the floor above?
+                jr      nc, dpnext      ; above the top of the screen
+                ld      a, (charcu)
                 cp      c
-                jr      c, drawgo
-                jr      z, drawgo
-                call    line_addr       ; above the cut, but the row still
-                jr      drawskip        ; counts towards where the next one is
-drawblank:      call    startrows
-                jr      drawskip
-drawgo:         call    line_addr
-                ld      bc, work - SCREEN
-                add     hl, bc          ; draw into the working copy
+                jr      c, dpgo
+                jr      z, dpgo
+dpnext:         add     hl, de
+                inc     c
+                djnz    dpskip
+                ret
+dpgo:           ld      a, c            ; and none below the foot of it
+                add     a, b
+                jr      c, dpcut
+                cp      193
+                jr      c, dpfit
+dpcut:          ld      a, 192
+                sub     c
+                ld      b, a
+dpfit:          push    hl
+                push    bc
+                ld      a, (newcol)
+                ld      e, a
+                ld      a, c
+                call    scraddr
+                ld      de, work - SCREEN
+                add     hl, de          ; HL = the working copy
+                pop     bc
+                pop     de
+                push    hl
+                ld      hl, (dfsrc)     ; DE = the first pair wanted
+                add     hl, de
                 ex      de, hl
-                ld      hl, (dfsrc)     ; and read from the first pair wanted
-                ld      bc, (dfrow)
-                add     hl, bc
-                ex      de, hl
+                pop     hl
+drawrow:        push    bc
+                push    de
+                push    hl
 dfcall:         call    0               ; dfleft or dfmirror
-drawskip:       ld      hl, rowy
-                inc     (hl)
-                ld      hl, (dfrow)     ; on to the next row of pairs
-                ld      bc, (dfrowlen)
+                pop     hl
+                pop     de
+                ld      bc, (dfrowlen)  ; on to the next row of pairs
+                ex      de, hl
                 add     hl, bc
-                ld      (dfrow), hl
+                ex      de, hl
+                call    nextline
                 pop     bc
                 djnz    drawrow
                 ret
@@ -3666,13 +3783,21 @@ dfskip1:        ld      e, a
                 ld      a, e            ; facing left, rows run as stored
                 dec     a
                 ld      hl, dfleft
+                ld      bc, dfleft0
                 jr      dfset
 dfsetm:         ld      a, b            ; facing right, from the end of the
                 sub     e               ; row back
                 ld      hl, dfmirror
+                ld      bc, dfmirror0
 dfset:          ld      (dfsrc), a
-                ld      (dfcall + 1), hl
-                ld      a, (curshift)   ; and the tables' pages, for good
+                ld      a, (curshift)   ; no shift: the loops that need no
+                or      a               ; tables
+                jr      nz, dfshift
+                ld      h, b
+                ld      l, c
+dfshift:        ld      (dfcall + 1), hl
+                rrca                    ; and the tables' pages, for good:
+                dec     a               ; two, four and six only
                 ld      c, a
                 exx
                 add     a, shifthi / 256
@@ -3683,6 +3808,47 @@ dfset:          ld      (dfsrc), a
                 add     a, shiftlo / 256
                 ld      e, a
                 exx
+                ret
+
+; No shift at all: the byte is the byte, and nothing spills.
+
+dfleft0:        ld      a, (spskip)
+                or      a
+                jr      z, dfl0go
+                inc     de              ; the byte cut off spills nothing
+dfl0go:         ld      a, (dfcnt)
+                or      a
+                ret     z
+                ld      b, a
+dfl0pair:       ld      a, (de)
+                inc     de
+                or      (hl)
+                ld      (hl), a
+                inc     l
+                djnz    dfl0pair
+                ret
+
+dfmirror0:      ld      a, (spskip)
+                or      a
+                jr      z, dfm0go
+                dec     de
+dfm0go:         ld      a, (dfcnt)
+                or      a
+                ret     z
+                ld      b, a
+                exx
+                ld      h, revtab / 256
+                exx
+dfm0pair:       ld      a, (de)
+                dec     de
+                exx
+                ld      l, a
+                ld      a, (hl)
+                exx
+                or      (hl)
+                ld      (hl), a
+                inc     l
+                djnz    dfm0pair
                 ret
 
 ; In: DE = the first pair to read, HL = where its byte goes.
@@ -3832,13 +3998,7 @@ hide_floor:     call    quickfloor
                 ld      (coverb), hl
                 jp      cover_rows
 
-; Put the foreground back over the prince.  The mask carries only the rows a
-; front piece reaches; foreband says which row of it a scanline is, or -1.
-
-hide_behind:    ld      hl, foremask
-                ld      (coverm), hl
-                ld      hl, foreband
-                ld      (coverb), hl
+; Putting the foreground back over him is hide_behind, with the fight.
 
 ; Walk the sprite's rows and lay the mask's own pixels back over him.  Three
 ; things line up on each row: the mask, the room the mask picks out of, and
@@ -3963,7 +4123,9 @@ covernext:      inc     hl
 ;
 ; Put the room back over where the sprite was, in the working copy.
 
-erase_prince:   ld      hl, oldcol
+erase_prince:   ld      hl, oldcol + OP ; the guard where he was, then the kid
+                call    eraseset
+                ld      hl, oldcol
                 jr      eraseset
 
 ; The room under where he is about to be drawn, put back before he is.
@@ -4159,6 +4321,10 @@ fsrow:          push    bc
                 call    copy32
                 push    hl              ; the room, past its thirty two
                 ld      hl, (rowptr)
+                ld      de, newcol
+                call    fs_sprite
+                ld      hl, (rowptr)
+                ld      de, newcol + OP
                 call    fs_sprite
                 pop     hl
                 call    nextrow
@@ -4181,31 +4347,39 @@ showmine:       ld      a, BANK_CANVAS
 ; In: HL = the screen address of column zero on this row.  Puts down the part
 ; of the sprite that falls on it, if any.
 
-fs_sprite:      ld      a, (neww)
+; DE = the rectangle: col, top, width, height.
+
+fs_sprite:      ld      a, (de)
+                ld      c, a            ; C = col
+                inc     de
+                ld      a, (de)
+                ld      b, a            ; B = top
+                inc     de
+                ld      a, (de)
                 or      a
                 ret     z
+                push    af              ; the width
+                inc     de
                 ld      a, (rowy)
+                sub     b               ; how far into him this row is
                 ld      b, a
-                ld      a, (newtop)
-                neg
-                add     a, b            ; how far into him this row is
-                ld      b, a
-                ld      a, (newh)
+                ld      a, (de)
                 cp      b
-                ret     c
-                ret     z
-                ld      a, (newcol)
-                ld      e, a
+                jr      c, fsnone
+                jr      z, fsnone
+                ld      e, c
                 ld      d, 0
                 add     hl, de
                 ld      d, h
                 ld      e, l            ; DE = screen
                 ld      bc, work - SCREEN
                 add     hl, bc          ; HL = working copy
-                ld      a, (neww)
+                pop     af
                 ld      c, a
                 ld      b, 0
                 ldir
+                ret
+fsnone:         pop     af
                 ret
 
 ; Two rectangles reach the screen, not the box around them: where he was and
@@ -4227,12 +4401,9 @@ showdq:         push    bc
                 djnz    showdq
                 xor     a
                 ld      (dirtyn), a
-showold:        ld      a, (oldw)
-                or      a
-                jr      z, shownew
-                ld      hl, oldcol
-                call    show_one
-shownew:        ld      hl, newcol
+showold:        ld      hl, boxcol      ; where each was and is, as one: see
+                call    show_one        ; draw_chars
+                ld      hl, boxcol + OP
                 call    show_one
                 jp      show_flames
 
@@ -4430,14 +4601,14 @@ dirtyn:         db      0               ; rectangles waiting for the blit
 
 ; Remember where the sprite went, so the next frame can rub it out.
 
-keep_rect:      ld      a, (newcol)
-                ld      (oldcol), a
-                ld      a, (neww)
-                ld      (oldw), a
-                ld      a, (newtop)
-                ld      (oldtop), a
-                ld      a, (newh)
-                ld      (oldh), a
+keep_rect:      ld      hl, newcol
+                ld      de, oldcol
+                ld      bc, 4
+                ldir
+                ld      hl, newcol + OP ; and the guard's
+                ld      de, oldcol + OP
+                ld      c, 4
+                ldir
                 ret
 
 ; ---------------------------------------------------------------- helpers
@@ -4473,12 +4644,46 @@ scraddr:        ld      l, a            ; 010 t t l l l -- the third, and the
 
 
 
+; POP's Char: the character in hand -- the kid, or the guard while his turn
+; runs -- and Op, the other one, laid out byte for byte the same.  LoadShadwOp
+; and SaveShadwOp are then one exchange of the two, and every routine written
+; for the kid works on the guard unchanged; what one asks of the other is at
+; its own field plus OP.  The rectangles he is drawn in and rubbed out of go
+; with him: show_one and keep_rect copy them four bytes at a time -- col, top,
+; width, height, in that order -- so nothing may be put between them.  A byte
+; slipped into the middle of the old rectangle once sent the blitter a garbage
+; height.
+
+chrec:
 charx:          dw      0
 chary:          db      0
 facing:         db      0               ; 0 left, 1 right
-jarabove:       db      0               ; 1 the row above, -1 his own
 frame:          db      0
 seqptr:         dw      0
+blocky:         db      0
+yvel:           db      0
+charact:        db      1
+charsword:      db      0               ; CharSword: 2 with it out, en garde
+charid:         db      0               ; CharID: 0 the kid, 2 a guard
+charlife:       db      0xff            ; CharLife: negative while he lives
+charcu:         db      0               ; FCharCU, the row his picture is cut at
+newcol:         db      0
+newtop:         db      0
+neww:           db      0
+newh:           db      0
+oldcol:         db      0
+oldtop:         db      0
+oldw:           db      0
+oldh:           db      0
+boxcol:         db      0               ; the two of them together: rubbed out
+boxtop:         db      0               ; as one, and shown as one
+boxw:           db      0
+boxh:           db      0
+CHRECLEN        equ     $ - chrec
+oprec:          ds      CHRECLEN
+OP              equ     oprec - chrec
+
+jarabove:       db      0               ; 1 the row above, -1 his own
 jstkx:          db      0
 jstky:          db      0
 btn:            db      0
@@ -4490,15 +4695,11 @@ clrbtn:         db      0
 atemp:          db      0
 fwdkind:        db      0
 blockid:        db      0
-blocky:         db      0
-charcu:         db      0               ; FCharCU, the row his picture is cut at
 fchary:         db      0
 curleft:        dw      0
 croprow:        db      0
 croptop:        db      0
-yvel:           db      0
 kidstr:         db      3               ; initmaxstr in TOPCTRL.S
-charact:        db      1
 wanted:         db      0
 
 curw:           db      0
@@ -4510,27 +4711,12 @@ curbank:        db      0
 curent:         dw      0
 rowy:           db      0
 
-; show_one and keep_rect copy four bytes as one record -- col, top, width,
-; height, in that order -- so nothing may be put between them.  That holds
-; for every one of these three, not just the first: a byte slipped into the
-; middle of the old rectangle sent the blitter a garbage height.
-newcol:         db      0
-newtop:         db      0
-neww:           db      0
-newh:           db      0
-
-oldcol:         db      0
-oldtop:         db      0
-oldw:           db      0
-oldh:           db      0
-
 rawcol:         db      0               ; where his picture wanted to go,
 spskip:         db      0               ; and what the left edge cut off
 frstart:        db      0               ; the interrupt this frame began on
 tilestate:      db      0               ; the state of the tile last read
-gotsword:       db      0               ; he has picked the sword up: CTRL.S
+gotsword:       db      START_SWORD               ; he has picked the sword up: CTRL.S
                                         ; asks it before he may draw on anyone
-charsword:      db      0               ; CharSword: 2 with it out, en garde
 rbody:          ds      4               ; where his own picture goes
 runion:         ds      4               ; and the frame's, with the sword
 curfdy:         db      0               ; SETUPCHAR's Fdy for this frame
@@ -4635,6 +4821,20 @@ shiftlo:        incbin  "shiftlo.bin"
 revtab:         incbin  "revtab.bin"
 codeend:
 
+; ---------------------------------------------------------------- the fight
+;
+; The working copy ends 0x800 short of the window, and nothing below the
+; window has ever been written there -- the room build runs up to 0xB2A0 at
+; most.  The guard and the fight go in it, assembled in place and carried on
+; the tape after a gap: see build.sh.
+
+HICODE          equ     (codeend + 0x7FF) / 0x800 * 0x800 + 6144
+hifix:
+                org     HICODE
+                include "fight.asm"
+hiend:
+                org     hifix
+
 ; ---------------------------------------------------------------- start
 ;
 ; What runs once, before the working copy is first written, sits where the
@@ -4684,6 +4884,7 @@ start:          di
                 call    jumpseq
                 call    page_canvas
                 call    step_seq
+                call    add_guard       ; and whoever keeps the room
                 call    page_art
                 jp      start2
 
@@ -4766,7 +4967,7 @@ RBAT1           equ     HALFCAN + CANVAS_W * 45 ; past the canvas and masks
 ; the org pairs round each piece, cut out of pop.bin by build.sh and carried
 ; up with the tables.  What it calls outside restores the bank it found.
 
-modend          equ     mpc5
+modend          equ     mpc6
 MODLEN          equ     modend - MODORG
 SPAREALL        equ     SPARE_LEN + MODLEN
 RB1LEN          equ     roomend - roomblk

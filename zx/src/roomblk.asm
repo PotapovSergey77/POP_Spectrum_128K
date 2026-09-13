@@ -950,6 +950,7 @@ nrcgo:          xor     a               ; nothing of the last room's still
                 call    newroom         ; this block is already back, so the
                 call    readlinks       ; room itself is all that is left
                 call    camhome         ; the view is already where he is
+                call    add_guard       ; and the new room's guard stands up
                 xor     a
                 ld      (oldw), a
                 jp      nrfinish        ; and out of this block first: the

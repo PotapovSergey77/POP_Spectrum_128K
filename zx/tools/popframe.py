@@ -135,6 +135,25 @@ def load(path=None):
     return frames
 
 
+def load_altset1(path=None):
+    """ALTSET1 out of FRAMEDEF.S: the guard's frames 150 to 189."""
+    path = path or os.path.join(os.path.dirname(__file__), '..', '..',
+                                '01 POP Source', 'Source', 'FRAMEDEF.S')
+    frames, inside = {}, False
+    for line in open(path, encoding='latin-1'):
+        if line.startswith('ALTSET1'):
+            inside = True
+        elif line.startswith('ALTSET2'):
+            break
+        m = _LINE.match(line.rstrip('\n')) if inside else None
+        if not m:
+            continue
+        vals = [_num(t) for t in m.group(2).split(',')]
+        if len(vals) == 5 and any(vals):
+            frames[int(m.group(1))] = Frame(int(m.group(1)), vals, m.group(3))
+    return frames
+
+
 _tables = {}
 
 

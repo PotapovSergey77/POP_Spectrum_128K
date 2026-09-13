@@ -24,7 +24,14 @@ data = open('build/pop.bin', 'rb').read()
 base = sym['stubs']
 mod = data[sym['MODORG'] - base:sym['modend'] - base]
 assert len(mod) == sym['MODLEN'], 'the control code did not come out whole'
-open('build/pop.bin', 'wb').write(data[:sym['roomend'] - base])
+# The fight sits past the working copy, and the tape carries a gap to it.
+open('build/pop.bin', 'wb').write(data[:sym['roomend'] - base]
+                                  + bytes(sym['HICODE'] - sym['roomend'])
+                                  + data[sym['HICODE'] - base:sym['hiend'] - base])
+print('бой %04X..%04X, %d байт, свободно там %d'
+      % (sym['HICODE'], sym['hiend'], sym['hiend'] - sym['HICODE'],
+         0xC000 - sym['hiend']))
+assert sym['hiend'] <= 0xC000, 'the fight does not fit under the window'
 spare = open('build/bin/bank_spare.bin', 'rb').read()
 assert len(spare) == sym['SPARE_LEN'], 'the tables are not where MODORG says'
 open('build/bin/bank_spare.bin', 'wb').write(spare + mod)
@@ -52,11 +59,11 @@ room = 0x10000 - sym['RBAT1']
 print('постройка комнаты %04X..%04X, %d байт, в банках места %d'
       % (sym['roomblk'], sym['roomend'], rb, room))
 assert rb <= room, 'код постройки комнаты не влез в банки'
-assert sym['roomblk'] + room <= 0xC000, 'код постройки комнаты вылез из буфера'
+assert sym['roomend'] <= sym['HICODE'], 'код постройки комнаты налез на код боя'
 assert sym['work'] % 0x800 == 0, 'рабочий буфер не на границе 2K'
 print('буферы под загрузчиком %04X..%04X, %d байт'
       % (sym['LOWBUF'], sym['LOWTOP'], sym['LOWTOP'] - sym['LOWBUF']))
 assert sym['LOWTOP'] <= sym['stubs'], 'буферы под загрузчиком налезли на код'
 assert sym['LOWBUF'] >= 23755, 'буферы под загрузчиком залезли в переменные ПЗУ'
-assert work <= 0xC000, 'рабочий буфер налез на окно банков'
+assert work <= sym['HICODE'], 'рабочий буфер налез на код боя'
 PY

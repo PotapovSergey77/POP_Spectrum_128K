@@ -1729,6 +1729,11 @@ nrright:        ld      a, (links + 1)
                 ld      c, 3
 nrcall:         or      a
                 ret     z               ; no room that way, and nothing done:
+                push    bc
+                push    af
+                call    update_guard    ; the guard stays behind, written back
+                pop     af
+                pop     bc
                 ld      (roomnum), a    ; putting the block back would take the
                 ld      a, c            ; working copy's first rows with it,
                 ld      (nrwhich), a    ; and nothing would repaint them

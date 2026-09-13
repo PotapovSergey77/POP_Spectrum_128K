@@ -13,6 +13,7 @@ since the redraw queue puts off drawing and must not lose any.
 
     stress.py            build the tapes it needs, report, and put the game
                          tape back in build/
+    stress.py guard      only the scenes whose name has that in it
 
 The tapes are built with POP_START_ROOM, _ROW and _COL and kept as
 build/stress_<name>.tap.  The first frame after starting builds the room and
@@ -38,6 +39,13 @@ SCENES = [
     ('gate rises', 6, 0, 2, lambda n: [], 60, 8),
     ('loose floors', 7, 0, 8, lambda n: ['left'] if n >= 3 else [], 60, 20),
     ('exit opens', 9, 0, 0, lambda n: [], 70, 8),
+    # Two of them on the screen: he walks at the guard unarmed and is cut
+    # down, then armed he draws, strikes and is struck at.
+    ('a guard cuts him down', 3, 1, 2,
+     lambda n: ['right'] if 5 <= n <= 40 else [], 60, 8),
+    ('the sword fight', 3, 1, 2,
+     lambda n: ['right'] if 2 <= n <= 3 else
+     (['space'] if n % 6 == 0 else []), 110, 8, {'POP_GOTSWORD': '1'}),
 ]
 
 
@@ -51,10 +59,12 @@ def build(env=None):
         raise SystemExit('build failed:\n' + out[-600:])
 
 
-def tape_for(name, room, row, col):
-    tag = 'stress_%d_%d_%d' % (room, row, col)
-    build({'POP_START_ROOM': str(room), 'POP_START_ROW': str(row),
-           'POP_START_COL': str(col)})
+def tape_for(name, room, row, col, extra=None):
+    tag = 'stress_%d_%d_%d%s' % (room, row, col, '_sw' if extra else '')
+    env = {'POP_START_ROOM': str(room), 'POP_START_ROW': str(row),
+           'POP_START_COL': str(col)}
+    env.update(extra or {})
+    build(env)
     b = os.path.join(ZX, 'build')
     for src, dst in (('pop.tap', tag + '.tap'), ('sym.json', tag + '.sym.json'),
                      ('pop.banks.json', tag + '.banks.json')):
@@ -118,8 +128,11 @@ def play(tape, script, frames, settle):
 def main(argv):
     bad = 0
     try:
-        for name, room, row, col, script, frames, settle in SCENES:
-            tape = tape_for(name, room, row, col)
+        for scene in SCENES:
+            name, room, row, col, script, frames, settle = scene[:7]
+            if len(argv) > 1 and argv[1] not in name:
+                continue                # stress.py <part of a name>
+            tape = tape_for(name, room, row, col, *scene[7:])
             works, stale = play(tape, script, frames, settle)
             # frame n's periods are the ones frame n - 1 took; frame 1 is
             # the one that painted the room and is left out, as ever
