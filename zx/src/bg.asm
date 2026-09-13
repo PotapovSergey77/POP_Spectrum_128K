@@ -642,7 +642,11 @@ danotloose:     cp      BG_FLASK        ; the bottle, and drawflaska's bubbles
                 jr      nz, danotflask  ; over it
                 call    dapiece
                 jp      flask_ma
-danotflask:     cp      BG_SWORD        ; drawsworda: its own picture, and
+danotflask:     cp      BG_SPIKES       ; drawspikea over the piece
+                jr      nz, danotspikes
+                call    dapiece
+                jp      spike_ma
+danotspikes:    cp      BG_SWORD        ; drawsworda: its own picture, and
                 jr      nz, dapiece     ; piecea has none for it
                 call    sword_gleam
                 jr      dago
@@ -732,6 +736,8 @@ dmc1:           rrca                    ; (state / 4) mod 8
 draw_mb:        ld      a, (preced)
                 cp      BG_GATE
                 jp      z, drawgateb
+                cp      BG_SPIKES
+                jp      z, spike_mb
                 cp      BG_EXIT
                 jp      z, drawexitb
                 cp      BG_LOOSE
@@ -3359,6 +3365,8 @@ animobj:        xor     a               ; nothing wants redrawing yet -- and
                 jp      z, aosword
                 cp      BG_FLASK
                 jp      z, aoflask
+                cp      BG_SPIKES
+                jp      z, aospikes
                 cp      BG_SPACE
                 jr      z, aodone       ; the floor that was here has gone
                 jp      stopobj         ; none of these: off the list

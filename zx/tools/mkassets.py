@@ -43,7 +43,8 @@ import zxscreen
 # movement; the rest of it is scattered further up the table among the guards
 # and the princess.  Fighting and dying are left out for now.
 KID_SEQS = (list(range(1, 51))
-            + [52,      # crush, under a floor that lands on him
+            + [51,      # impale, on spikes
+               52,      # crush, under a floor that lands on him
                68,      # climbdown
                70,      # climbstairs
                72,      # stepback

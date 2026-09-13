@@ -168,6 +168,8 @@ mainrun:        ld      a, (FRAMES)
                 call    check_barr
                 call    check_floor
                 call    do_fall
+                call    checkspikes     ; spikes near him spring, and running
+                call    checkimpale     ; or jumping on to them is death
                 call    page_canvas
                 call    do_shad         ; and the guard after him
                 call    page_canvas
@@ -3350,6 +3352,8 @@ dfspace:        call    cmp_space
 
 hit_floor:      call    floor_plane
                 ld      (chary), a
+                call    land_spikes     ; on to spikes that are out: impaled
+                ret     nz
                 ld      a, (yvel)
                 ld      b, a
                 xor     a

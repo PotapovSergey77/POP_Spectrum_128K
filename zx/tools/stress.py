@@ -48,6 +48,10 @@ SCENES = [
     ('a flask bubbles', 5, 2, 2,
      lambda n: ['right'] if 2 <= n <= 3 else
      (['space'] if n in (10, 14, 18) else []), 50, 8),
+    # Spikes spring under him as he steps into the shaft, and he falls on
+    # to them and is impaled.
+    ('spikes', 6, 0, 2, lambda n: ['right'] if 2 <= n <= 3 or 8 <= n <= 12
+     else [], 40, 8),
     ('the sword fight', 3, 1, 2,
      lambda n: ['right'] if 2 <= n <= 3 else
      (['space'] if n % 6 == 0 else []), 110, 8, {'POP_GOTSWORD': '1'}),

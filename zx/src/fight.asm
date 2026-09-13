@@ -554,6 +554,8 @@ do_shad:        call    gd_swap
                 call    enemycoll
                 call    check_floor
                 call    do_fall
+                call    checkspikes
+                call    checkimpale
 dsoff:          jp      swapchar
 
 ; SHADCTRL in CTRL.S: a guard whose strength has run out is dead, and a dead
@@ -1791,6 +1793,314 @@ stairs_crop:    ld      a, (strow)
 
 stcol:          db      0
 strow:          db      0
+
+; ---------------------------------------------------------------- spikes
+;
+; The state of a spikes block, as MOVER.S keeps it: 0 in the floor, 1 to 4
+; coming out, 5 out, 6 to 8 going back; with bit 7 set they are out and the
+; rest is a timer; 0xff they are jammed out through somebody.
+
+SPIKEEXT        equ     5
+SPIKERET        equ     9
+SPIKETIMER      equ     15 + 128
+SPIKEWIPE       equ     31
+
+; DRAWSPIKEA and DRAWSPIKEB in FRAMEADV.S: the blades, out as far as the
+; state says, a row above Ay, the A half over the block and the B half in
+; the block to its right.
+
+spike_ma:       call    page_bg
+                ld      a, (state)
+                ld      hl, bgtables + T_SPIKEA
+                jr      spikelay
+spike_mb:       call    page_bg
+                ld      a, (spreced)
+                ld      hl, bgtables + T_SPIKEB
+spikelay:       or      a
+                jp      p, spkframe
+                ld      a, SPIKEEXT
+spkframe:       call    bgentry
+                or      a
+                ret     z
+                ld      c, a
+                ld      a, (ay)
+                dec     a
+                ld      (yco), a
+                ld      a, c
+                ld      c, BG_ORA
+                jp      bglay
+
+; ANIMSPIKES in MOVER.S.
+
+aospikes:       ld      a, (trdirec)
+                or      a
+                jp      m, aosred       ; stopped: only the redraw
+                ld      a, (trobst)
+                or      a
+                jp      m, aostimer
+                inc     a
+                ld      (trobst), a
+                dec     a
+                cp      SPIKEEXT        ; out: the timer starts
+                jr      z, aosout
+                cp      SPIKERET        ; back in: ready again
+                jr      nz, aosred
+                xor     a
+                ld      (trobst), a
+                call    stopobj
+                jr      aosred
+aosout:         ld      a, SPIKETIMER
+                ld      (trobst), a
+                jr      aosred
+aostimer:       dec     a
+                ld      (trobst), a
+                and     0x7f
+                jp      nz, aodone      ; waiting: nothing to draw
+                ld      a, SPIKEEXT + 1 ; time's up: going back
+                ld      (trobst), a
+aosred:         ld      a, 1
+                ld      (redwant), a
+                ld      a, SPIKEWIPE
+                ld      (redh), a
+                jp      aodone
+
+; The spikes block at column A, row C of this room into trloc and trscrn,
+; and its state read.  Out: A = the id.
+
+spk_at:         ld      b, a
+                ld      a, c
+                add     a, a
+                ld      e, a
+                add     a, a
+                add     a, a
+                add     a, e
+                add     a, b
+                ld      (trloc), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+                jp      trobat
+
+; TRIGSPIKES: in the floor they spring; out, their timer starts again.
+
+trig_spikes:    call    spk_at
+                ld      a, (trobst)
+                or      a
+                jr      z, tsready
+                ret     p               ; on their way: leave them
+                inc     a
+                ret     z               ; jammed
+                ld      a, SPIKETIMER
+                ld      (trobst), a
+                jp      trobsave
+tsready:        ld      a, 1
+                ld      (trdirec), a
+                call    addtrob
+                ld      a, SPIKEWIPE
+                ld      (redh), a
+                jp      redplate
+
+; CHECKSPIKES in CTRLSUBS.S: every block his picture spans, in his row, and
+; down through open space below each one.
+
+checkspikes:    ld      a, (nowbank)
+                push    af
+                call    char_edges
+                ld      hl, (edger)
+                call    blockcol_of
+                bit     7, a
+                jr      nz, cksdone
+                ld      (csright), a
+                ld      hl, (edgel)
+                call    blockcol_of
+                bit     7, a
+                jr      z, cksloop
+                xor     a
+cksloop:        ld      (csx), a
+                cp      10
+                jr      nc, cksdone
+                ld      a, (blocky)
+                ld      (csy), a
+cksdown:        ld      a, (csy)
+                cp      3
+                jr      nc, cksnext
+                ld      c, a
+                ld      a, (csx)
+                call    tile_at
+                cp      BG_SPIKES
+                jr      z, ckstrig
+                call    cmp_space
+                jr      nz, cksnext
+                ld      hl, csy
+                inc     (hl)
+                jr      cksdown
+ckstrig:        ld      a, (csy)
+                ld      c, a
+                ld      a, (csx)
+                call    trig_spikes
+cksnext:        ld      a, (csx)
+                ld      hl, csright
+                cp      (hl)
+                jr      nc, cksdone
+                inc     a
+                jr      cksloop
+cksdone:        pop     af
+                jp      pageset
+
+; GETSPIKES in MOVER.S, for the tile just read.  Out: A = 0 safe (in, going
+; in, or jammed), 1 out, 2 springing; Z when safe.
+
+getspikes:      ld      a, (tilestate)
+                or      a
+                jp      m, gssprung
+                ret     z
+                cp      SPIKEEXT
+                jr      c, gsspring
+                xor     a
+                ret
+gssprung:       inc     a
+                ret     z
+                ld      a, 1
+                or      a
+                ret
+gsspring:       ld      a, 2
+                or      a
+                ret
+
+; CHECKIMPALE in CTRL.S: running on to springing spikes, or landing a jump
+; on to spikes that are out.  Landing from a fall is land_spikes.
+
+checkimpale:    ld      hl, (charx)     ; CharBlockX, CharBlockY
+                call    blockcol_of
+                cp      10
+                ret     nc
+                ld      b, a
+                ld      a, (blocky)
+                cp      3
+                ret     nc
+                ld      c, a
+                ld      a, b
+                push    af
+                call    tile_at
+                pop     bc
+                cp      BG_SPIKES
+                ret     nz
+                ld      a, (frame)
+                cp      7
+                ret     c
+                cp      15
+                jr      c, cirun
+                cp      43              ; runjump-10
+                jr      z, cijump
+                cp      26              ; standjump-19
+                ret     nz
+cijump:         call    getspikes
+                ret     z
+                jr      ciimpale
+cirun:          call    getspikes
+                cp      2
+                ret     c
+ciimpale:       ld      a, b
+                jr      doimpale
+
+; CHECKFLOOR's hitflr, landing: spikes out behind him, when he is at least
+; twelve units into his block, or under him.  Out: NZ when he is impaled.
+
+land_spikes:    call    base_x
+                call    blockcol_of
+                ld      b, a
+                push    bc
+                call    get_dist        ; which has B
+                pop     bc
+                cp      12
+                jr      c, lsunder
+                ld      a, (facing)     ; the block behind
+                or      a
+                ld      a, b
+                jr      z, lsleft
+                sub     2
+lsleft:         inc     a
+                call    ls_spikes
+                jr      nz, lsunder
+                call    getspikes
+                jr      nz, lsimpale
+                jr      lsno            ; there, but not lethal
+lsunder:        ld      a, b
+                call    ls_spikes
+                jr      nz, lsno
+                call    getspikes
+                jr      z, lsno
+lsimpale:       ld      a, (lscol)
+                call    doimpale
+                or      1
+                ret
+lsno:           xor     a
+                ret
+
+; A = a column of his row.  Z when spikes are in it; B kept.
+
+ls_spikes:      ld      (lscol), a
+                cp      10
+                jr      nc, lsnot
+                push    bc
+                ld      a, (blocky)
+                ld      c, a
+                ld      a, (lscol)
+                call    tile_at
+                pop     bc
+                cp      BG_SPIKES
+                ret
+lsnot:          or      a               ; off the room: not spikes
+                ret
+
+; DOIMPALE: the spikes are jammed out through him, he is put square on them
+; at the floor, and he dies on them.  A = their column.
+
+doimpale:       ld      (lscol), a
+                ld      a, (blocky)
+                ld      c, a
+                ld      a, (lscol)
+                call    spk_at          ; JAMSPIKES
+                ld      a, 0xff
+                ld      (trobst), a
+                call    trobsave
+                ld      a, 0xff
+                ld      (trdirec), a
+                call    addtrob
+                ld      a, SPIKEWIPE
+                ld      (redh), a
+                call    redplate
+                call    page_canvas     ; move_by is in the canvas bank
+                call    floor_plane
+                ld      (chary), a
+                ld      a, (lscol)      ; the edge of the spikes, ten on
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                sbc     hl, de
+                ld      de, 20
+                add     hl, de
+                ld      (charx), hl
+                ld      a, 8            ; and eight the way he faces
+                call    move_by
+                xor     a
+                ld      (yvel), a
+                ld      a, 100
+                call    decstr
+                call    page_canvas
+                ld      a, SQ_IMPALE
+                call    jumpseq
+                jp      step_seq
+
+csx:            db      0
+csy:            db      0
+csright:        db      0
+lscol:          db      0
 
 ; ---------------------------------------------------------------- potions
 ;
