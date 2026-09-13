@@ -196,15 +196,46 @@ dmshift:        ld      (dmsrc), de
                 ld      (dmcol), a      ; its first byte on the screen, signed
                 ld      a, b
                 ld      (dmw), a
-                ld      a, FF_BLOB
-                ld      (curbank), a
-                call    page_frame
                 ld      a, (moby)
                 sub     MOBROWS - 1
                 ld      (dmtop), a
+                ld      a, (dmcol)      ; and its rectangle, B wide, the
+                                        ; columns clipped to the screen's
+                bit     7, a
+                jr      z, dmright
+                add     a, b            ; off the left: what is left of it
+                ret     m
+                ret     z
+                ld      b, a
+                xor     a
+dmright:        ld      c, a
+                add     a, b
+                sub     32
+                jr      c, dmfits
+                ld      d, a            ; past the right: that much less
+                ld      a, b
+                sub     d
+                ret     c
+                ret     z
+                ld      b, a
+dmfits:         ld      hl, dmrect
+                ld      (hl), c
+                inc     hl
+                ld      a, (dmtop)
+                ld      (hl), a
+                inc     hl
+                ld      (hl), b
+                inc     hl
+                ld      (hl), MOBROWS
+                call    page_art        ; the room back under it first: after
+                ld      hl, dmrect      ; the view has moved, what the working
+                call    eraseset        ; copy holds there is the old view
+                ld      a, FF_BLOB
+                ld      (curbank), a
+                call    page_frame
+                ld      a, (dmtop)
                 ld      b, MOBROWS
                 ld      c, a            ; C = the row in hand
-                ld      de, (dmsrc)
 dmrow:          push    bc
                 ld      a, c
                 cp      192
@@ -248,36 +279,7 @@ dmnext:         ld      hl, (dmsrc)     ; a row on
                 inc     c
                 djnz    dmrow
 
-                ld      a, (dmw)        ; and its rectangle, the columns
-                ld      b, a            ; clipped to the screen's
-                ld      a, (dmcol)
-                bit     7, a
-                jr      z, dmright
-                add     a, b            ; off the left: what is left of it
-                ret     m
-                ret     z
-                ld      b, a
-                xor     a
-dmright:        ld      c, a
-                add     a, b
-                sub     32
-                jr      c, dmfits
-                ld      d, a            ; past the right: that much less
-                ld      a, b
-                sub     d
-                ret     c
-                ret     z
-                ld      b, a
-dmfits:         ld      hl, dmrect
-                ld      (hl), c
-                inc     hl
-                ld      a, (dmtop)
-                ld      (hl), a
-                inc     hl
-                ld      (hl), b
-                inc     hl
-                ld      (hl), MOBROWS
-                ld      hl, (dmslot)
+                ld      hl, (dmslot)    ; and where it is now
                 ld      de, dmrect
                 jp      box_two
 

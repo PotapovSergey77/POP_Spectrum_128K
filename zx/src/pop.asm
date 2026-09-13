@@ -3152,7 +3152,10 @@ crnostairs:
 
                 ld      a, (newtop)     ; topej -- the row his picture starts
                 call    get_blocky
-                ld      (croprow), a
+                cp      3               ; a top over the screen is a line
+                jr      nz, crrow       ; past 191 to GETBLOCKY: it is the
+                ld      a, 0xff         ; row above, climbing through a hole
+crrow:          ld      (croprow), a    ; in the ceiling, not the room below
 
                 ld      a, (croprow)
                 ld      c, a
@@ -4759,6 +4762,9 @@ show_rect:      ld      hl, flipnow     ; the view made behind is ready:
                 call    flip
                 ld      a, 0xff
                 ld      (vwcam), a
+                xor     a               ; what fell was put down for the view
+                ld      (mbshow + 2), a ; gone: the new one never had it
+                ld      (mbshow + 6), a
 shnoflip:
                 ld      a, (fullshow)
                 or      a

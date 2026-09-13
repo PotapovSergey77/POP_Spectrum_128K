@@ -4220,8 +4220,9 @@ rqtime:         ld      a, (rqdid)
                 ld      a, (FRAMES)
                 ld      hl, frstart
                 sub     (hl)
-                cp      1
-                ret
+                cp      FRAME_WAIT - 1  ; a step is shorter than a period, so
+                ret                     ; one begun before the last still ends
+                                        ; before the frame is due
 rqt1:           inc     a
                 ld      (rqdid), a
                 scf
