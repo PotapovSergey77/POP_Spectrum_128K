@@ -38,11 +38,24 @@ class Table(object):
     def _parse(self, path):
         """Line by line into ('label'|'byte'|'word', text)."""
         stream = []
+        off = False                                 # inside a do 0 .. fin
         for raw in open(path):
             line = raw.rstrip()
             if not line.strip() or line.lstrip().startswith('*'):
                 continue
             label, rest = self._split(line)
+            word = rest.split(' ')[0].lower() if not label else ''
+            if word == 'do':                        # Merlin's conditional
+                off = rest.split()[1] == '0'        # assembly: climbstairs
+                continue                            # has a dead goto stand
+            if word == 'else':
+                off = not off
+                continue
+            if word == 'fin':
+                off = False
+                continue
+            if off:
+                continue
             if rest.startswith('='):
                 continue                            # an equate, not a label
             if label:

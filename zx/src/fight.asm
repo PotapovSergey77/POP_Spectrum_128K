@@ -1693,6 +1693,105 @@ ec_read:        ld      a, (blocky)
 ecx:            db      0
 kidkeys:        ds      8
 
+; ---------------------------------------------------------------- the exit
+;
+; Standing, up, in CTRL.S: the exit under him, behind him or in front of him
+; -- the first of those that is one -- and its door raised past stairthres,
+; and he climbs the stairs instead of jumping.  Stairs puts him ten units
+; into the exit's block, facing left.  Out: NZ when he does.
+
+STAIRTHRES      equ     30
+
+stairs_up:      call    base_x
+                call    blockcol_of
+                ld      c, a            ; under him
+                ld      a, (facing)
+                or      a
+                ld      b, 1
+                jr      nz, stdir
+                ld      b, -1
+stdir:          ld      a, c
+                call    st_exit
+                jr      z, stfound
+                ld      a, c            ; behind
+                sub     b
+                call    st_exit
+                jr      z, stfound
+                ld      a, c            ; in front
+                add     a, b
+                call    st_exit
+                jr      z, stfound
+stno:           xor     a
+                ret
+stfound:        ld      a, (tilestate)  ; the door far enough up?
+                rrca
+                rrca
+                and     0x3f
+                cp      STAIRTHRES
+                jr      c, stno
+                ld      a, (stcol)
+                ld      l, a            ; BlockEdge + 10: 28 pixels a column
+                ld      h, 0            ; and 20 on
+                add     hl, hl
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                sbc     hl, de
+                ld      de, 20
+                add     hl, de
+                ld      (charx), hl
+                xor     a
+                ld      (facing), a
+                ld      a, (blocky)
+                ld      (strow), a
+                ld      a, SQ_CLIMBSTAIRS
+                call    jumpseq
+                or      1
+                ret
+
+; A = a column of his row.  Z when the exit is in it; B and C kept.
+
+st_exit:        ld      (stcol), a
+                push    bc
+                ld      a, (blocky)
+                ld      c, a
+                ld      a, (stcol)
+                call    tile_at
+                pop     bc
+                cp      BG_EXIT
+                ret
+
+; CROPCHAR: from frame 224 on he goes in under the door, and nothing of him
+; shows above two rows below its bottom edge -- doortop, as drawexitb works
+; it out: Ay less fourteen, less the door's height.
+
+stairs_crop:    ld      a, (strow)
+                ld      c, a
+                ld      a, (stcol)
+                call    tile_at
+                ld      a, (strow)
+                inc     a
+                ld      e, a
+                ld      d, 0
+                ld      hl, blockbot
+                add     hl, de
+                ld      a, (tilestate)
+                rrca
+                rrca
+                and     0x3f
+                ld      c, a
+                ld      a, (hl)
+                sub     3 + 14 - 2      ; Ay - 14, and the two
+                sub     c
+                ld      (charcu), a
+                ret
+
+stcol:          db      0
+strow:          db      0
+
 ; ---------------------------------------------------------------- potions
 ;
 ; POTIONEFFECT in MISC.S, on the effect in the sequence the kid drinks in.

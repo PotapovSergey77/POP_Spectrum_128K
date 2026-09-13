@@ -1281,7 +1281,9 @@ clno:           xor     a
 ; back, and takes the step.  That second question was missing here, and it is
 ; the one that gets him back up the way he came down.
 
-do_up:          call    clrall
+do_up:          call    stairs_up       ; in front of open stairs: up them
+                ret     nz
+                call    clrall
                 ld      (clru), a
                 ld      a, (jstkx)
                 or      a
@@ -2977,6 +2979,12 @@ sfnext:         ld      hl, (flrec)
 
 crop_char:      xor     a
                 ld      (charcu), a
+                ld      a, (frame)      ; climbing the stairs: the door
+                cp      224
+                jr      c, crnostairs
+                cp      229
+                jp      c, stairs_crop
+crnostairs:
 
                 ld      a, (newtop)     ; topej -- the row his picture starts
                 call    get_blocky
