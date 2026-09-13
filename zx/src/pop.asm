@@ -176,6 +176,7 @@ mainrun:        ld      a, (FRAMES)
                 call    page_canvas
                 call    checkstrike
                 call    checkstab
+                call    page_canvas     ; the sounds' code is in its bank
                 call    addsfx
                 call    cutguard
                 call    page_art
@@ -1225,7 +1226,10 @@ tkwipe:         ld      (redh), a
                 xor     a
                 ld      (rqprio), a
 
-                call    shown_attrs     ; and a flask's colour goes with it
+                call    shown_attrs     ; and a flask's colour goes with it,
+                ld      a, (vwcam)      ; from a view being made as well
+                inc     a
+                ld      (vwatt), a
 
                 ld      a, 1            ; RemoveObj: the press is spent
                 ld      (clrbtn), a
@@ -2343,27 +2347,6 @@ tile_flags:     ld      a, (blocky)
 
 mpc2:
                 org     mfix2
-tilenone:       xor     a
-                ret
-
-; Carry set if HL is a room x the tables cover -- blockof and distof run one
-; block past the room's 280 so the block ahead can be asked for.
-
-inroom:         bit     7, h
-                jr      nz, notinroom   ; behind the left hand wall
-                ld      a, h
-                or      a
-                jr      z, inroomyes    ; under 256, and the table is longer
-                dec     a
-                jr      nz, notinroom
-                ld      a, l
-                cp      280 + 8 - 256   ; the tables run a block past the room
-                jr      nc, notinroom
-inroomyes:      scf
-                ret
-notinroom:      or      a
-                ret
-
 ; CMPSPACE and CMPBARR out of CTRLSUBS.S, as the tables they may as well be.
 ; In: A = a block type.  cmp_space: Z when the block is clear -- and a solid
 ; block counts as clear here, which is why onground has a case of its own for
@@ -2952,14 +2935,51 @@ sacskip:        inc     c
 ; bottle, and in the cell that starts at room pixel 28 col + 16 -- + 12 in
 ; an odd column, where the flask is five pixels further back.
 
+; HL = a rectangle that gets bigger, DE = one to take in.  An empty one takes
+; the other as it is.
+
+box_two:        push    hl
+                inc     de
+                inc     de
+                ld      a, (de)
+                dec     de
+                dec     de
+                or      a
+                jr      z, btdone       ; nothing to take in
+                inc     hl
+                inc     hl
+                ld      a, (hl)
+                dec     hl
+                dec     hl
+                or      a
+                jr      nz, btboth
+                ex      de, hl
+                ld      bc, 4
+                ldir
+btdone:         pop     hl
+                ret
+btboth:         ex      de, hl          ; union4 grows DE
+                call    union4
+                pop     hl
+                ret
+
+dmsrc:          dw      0
+dmcol:          db      0
+dmtop:          db      0
+dmw:            db      0
+dmrect:         ds      4
+dmslot:         dw      0
+mbold:          ds      8               ; where each is drawn now
+mbshow:         ds      8               ; and that with where it was
+
+
 ; The colours of the screen that is shown, worked out again.
 
 shown_attrs:    call    page_canvas     ; bank 7, in case it is that one
-                ld      a, (scrsel + 1)
-                or      a
-                ld      hl, SCREEN + 6144
-                jp      z, set_attrs_at
-                ld      hl, 0xC000 + 6144
+                ld      a, (scrsel + 1) ; 0x5800, or 0xD800 for bank 7
+                or      0x58
+                ld      h, a
+                ld      l, 0
                 jp      set_attrs_at
 
 
@@ -3067,22 +3087,6 @@ kddead:         ld      a, 1
                 ld      a, SONG_HEROIC
 kdsong:         ld      c, 255
                 jp      cue_song
-
-; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
-
-addsfx:         ld      a, (frame)
-                cp      167             ; blocked strike
-                ld      a, SND_SWORDCLASH1
-                jp      z, addsound
-                ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      a, (frame + OP)
-                cp      167
-                ret     nz
-                ld      a, SND_SWORDCLASH2
-                jp      addsound
-
 
 sacol:          db      0
 sarow:          db      0
@@ -4596,22 +4600,8 @@ covernext:      inc     hl
 
 ; ---------------------------------------------------------------- erase
 ;
-; Put the room back over where the sprite was, in the working copy.
-
-erase_prince:   ld      hl, oldcol + OP ; the guard where he was, then the kid
-                call    eraseset
-                ld      hl, oldcol
-                jr      eraseset
-
-; The room under where he is about to be drawn, put back before he is.
-;
-; Only two rectangles of the working copy are ever read -- where he was, which
-; the erase above has just done, and where he is going, which is this one.
-; Everywhere else it holds whatever was there last, and after the view has
-; moved that is the room a byte out; walk him into it and the background
-; under him comes out shifted.  So both go back from the room, every frame.
-
-erase_new:      ld      hl, newcol
+; The room back over a rectangle of the working copy: HL = col, top, width,
+; height.
 
 eraseset:       ld      de, ercol       ; col, top, width, height, in order
                 ld      bc, 4
@@ -4876,7 +4866,11 @@ showdq:         push    bc
                 djnz    showdq
                 xor     a
                 ld      (dirtyn), a
-showold:        ld      hl, boxcol      ; where each was and is, as one: see
+showold:        ld      hl, mbshow      ; what falls, where it was and is
+                call    show_one
+                ld      hl, mbshow + 4
+                call    show_one
+                ld      hl, boxcol      ; where each was and is, as one: see
                 call    show_one        ; draw_chars
                 ld      hl, boxcol + OP
                 call    show_one

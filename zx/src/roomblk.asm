@@ -977,8 +977,279 @@ nrcgo:          xor     a               ; nothing of the last room's still
                 call    add_guard       ; and the new room's guard stands up
                 xor     a
                 ld      (oldw), a
+                ld      (mbold + 2), a  ; nothing falling drawn in it yet
+                ld      (mbold + 6), a
+                ld      (mbshow + 2), a
+                ld      (mbshow + 6), a
                 jp      nrfinish        ; and out of this block first: the
                                         ; repaint goes straight over it
 
 ; He is at one end of the room or the other, and there is a room that way.
+
+; ADDGUARD, which only the building of a room -- and the start, before the
+; first repaint -- ever reaches, so it lives in this block.
+
+add_guard:      ld      a, (gdkeep)     ; one who came along is already here
+                or      a
+                jr      z, agfresh
+                xor     a
+                ld      (gdkeep), a
+                ld      hl, newcol + OP ; nothing of him drawn in this room
+                ld      b, 12
+agclr:          ld      (hl), a
+                inc     hl
+                djnz    agclr
+                ret
+agfresh:        xor     a
+                ld      (gdhere), a
+                ld      (offguard), a
+                ld      a, (nowbank)
+                push    af
+                call    page_bg
+                ld      de, 0
+                call    gd_field
+                ld      a, (hl)
+                cp      30
+                jp      nc, agnone
+                push    af
+                call    swapchar        ; he is made in Char, as POP makes him
+                pop     af
+
+                ld      b, 0            ; the block: ten to a row
+agrow:          cp      10
+                jr      c, agcol
+                sub     10
+                inc     b
+                jr      agrow
+agcol:          ld      a, b
+                ld      (blocky), a
+                ld      de, GDX
+                call    gd_field
+                ld      a, (hl)         ; CharX, 140 wide, to the room's pixels
+                sub     SCRNLEFT
+                ld      l, a
+                ld      h, 0
+                jr      nc, agx
+                dec     h
+agx:            add     hl, hl
+                ld      (charx), hl
+                ld      de, GDFACE
+                call    gd_field
+                ld      a, (hl)         ; -1 left, which is our 0
+                inc     a
+                jr      z, agface
+                ld      a, 1
+agface:         ld      (facing), a
+                ld      de, GDPROG
+                call    gd_field
+                ld      a, (hl)
+                cp      NUMPROGS
+                jr      c, agprog
+                ld      a, 3            ; the default
+agprog:         ld      (guardprog), a
+                ld      a, 2
+                ld      (charid), a
+                ld      de, GDSEQH
+                call    gd_field
+                ld      a, (hl)
+                or      a
+                jr      nz, agseq
+                xor     a               ; 0 is a fresh start
+                ld      (charsword), a
+                call    page_canvas
+                ld      a, SQ_ALERTSTAND
+                call    jumpseq
+                jr      aganim
+agseq:          ld      d, a
+                push    de
+                ld      de, GDSEQL
+                call    gd_field
+                pop     de
+                ld      e, (hl)
+                ld      (seqptr), de
+                call    page_canvas
+aganim:         call    step_seq
+
+                call    floor_plane
+                ld      (chary), a
+                xor     a
+                ld      (yvel), a
+                ld      hl, newcol      ; nothing of him drawn yet
+                ld      b, 13           ; and his rectangles, and CharXVel
+agrect:         ld      (hl), a
+                inc     hl
+                djnz    agrect
+                inc     a
+                ld      (charact), a
+                ld      a, (frame)
+                cp      185             ; killed
+                jr      z, agdead
+                cp      177             ; impaled
+                jr      z, agdead
+                cp      178             ; halved
+                jr      z, agdead
+                ld      a, 0xff
+                ld      (charlife), a
+                xor     a
+                ld      (alertguard), a
+                ld      (refract), a
+                ld      (justblocked), a
+                ld      hl, extrastrength
+                call    gd_prog
+                add     a, BASICSTR
+                jr      agstr
+agdead:         ld      a, 1
+                ld      (charlife), a
+                xor     a
+agstr:          ld      (oppstr), a
+                call    swapchar
+                ld      a, 1
+                ld      (gdhere), a
+agnone:         pop     af
+                jp      pageset
+
+; CUTCHECK in AUTO.S: the kid is going into room A the way C says -- 0 up,
+; 1 down, 2 left, 3 right.  A live guard en garde close to that side goes
+; with him, unless a live guard is waiting in the new room; anyone else is
+; left behind and written back into his own.  Only a room change reaches it,
+; so it lives in this block, which nrcall puts back first.
+
+leave_room:     ld      (lrroom), a
+                ld      a, c
+                ld      (lrdir), a
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (charlife + OP)
+                or      a
+                jp      p, update_guard ; dead: left behind
+                ld      a, (charsword + OP)
+                cp      2
+                jp      nz, update_guard
+                ld      a, (nowbank)
+                push    af
+                call    page_bg
+                ld      a, (lrroom)     ; a live guard there already?
+                ld      de, 0
+                call    gd_field_in
+                ld      a, (hl)
+                cp      30
+                jr      nc, lrnonew
+                ld      a, (lrroom)
+                ld      de, GDSEQH
+                call    gd_field_in
+                ld      a, (hl)
+                or      a
+                jp      z, lrleave
+lrnonew:        ld      a, (lrdir)
+                or      a
+                jr      z, lrup
+                dec     a
+                jr      z, lrdown
+                dec     a
+                jr      z, lrleft
+                ld      hl, (charx + OP) ; right: ShadX past ScrnWidth + 25
+                ld      de, -2 * (140 + 25 - SCRNLEFT)
+                add     hl, de
+                bit     7, h
+                jp      nz, lrleave
+                ld      de, -280
+                jr      lrsideways
+lrleft:         ld      hl, (charx + OP) ; left: ShadX under 256 - ScrnWidth - 25
+                ld      de, -2 * (256 - 140 - 25 - SCRNLEFT)
+                add     hl, de
+                bit     7, h
+                jp      z, lrleave
+                ld      de, 280
+lrsideways:     ld      hl, (charx + OP)
+                add     hl, de
+                ld      (charx + OP), hl
+                jr      lrtake
+lrup:           ld      a, (blocky + OP)
+                or      a
+                jp      p, lrleave
+                add     a, 3
+                ld      (blocky + OP), a
+                ld      a, (chary + OP)
+                add     a, 189
+                jr      lrvert
+lrdown:         ld      a, (blocky + OP)
+                cp      3
+                jr      c, lrleave
+                sub     3
+                ld      (blocky + OP), a
+                ld      a, (chary + OP)
+                sub     189
+lrvert:         ld      (chary + OP), a
+lrtake:         ld      de, 0           ; TRANSFERGUARD: out of both rooms'
+                call    gd_field        ; lists, and along with the kid
+                ld      (hl), 0xff
+                ld      a, (lrroom)
+                ld      de, 0
+                call    gd_field_in
+                ld      (hl), 0xff
+                ld      a, 1
+                ld      (gdkeep), a
+                pop     af
+                jp      pageset
+lrleave:        pop     af
+                call    pageset
+                jp      update_guard
+
+lrroom:         db      0
+lrdir:          db      0
+gdkeep:         db      0
+
+; UPDATEGUARD: leaving him behind.  A live guard starts over when the kid
+; comes back; a dead one keeps the sequence that laid him down.
+
+update_guard:   ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (nowbank)
+                push    af
+                call    page_bg
+                ld      de, 0
+                call    gd_field
+                ld      a, (blocky + OP)
+                add     a, a            ; ten to a row: ADDGUARD takes the
+                ld      b, a            ; column from CharX
+                add     a, a
+                add     a, a
+                add     a, b
+                ld      (hl), a
+                ld      de, GDX
+                call    gd_field
+                push    hl
+                ld      hl, (charx + OP)
+                sra     h
+                rr      l
+                ld      a, l
+                add     a, SCRNLEFT
+                pop     hl
+                ld      (hl), a
+                ld      de, GDFACE
+                call    gd_field
+                ld      a, (facing + OP)
+                dec     a               ; our 0 left is POP's -1
+                ld      (hl), a
+                ld      de, GDPROG
+                call    gd_field
+                ld      a, (guardprog)
+                ld      (hl), a
+                ld      de, GDSEQH
+                call    gd_field
+                ld      a, (charlife + OP)
+                or      a
+                ld      a, 0
+                jp      m, ugseq
+                ld      a, (seqptr + OP + 1)
+ugseq:          ld      (hl), a
+                ld      de, GDSEQL
+                call    gd_field
+                ld      a, (seqptr + OP)
+                ld      (hl), a
+                pop     af
+                call    pageset
+                jp      gd_gone
 

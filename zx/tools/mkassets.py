@@ -319,8 +319,10 @@ def sword_table():
 FF_ROWS = 16                    # the foot's row and fifteen above it
 
 
-def falling_floor():
-    """(width in bytes, the rows as (mask, data) pairs)."""
+def falling_floor(shift=0):
+    """(width in bytes, the rows as (mask, data) pairs), laid shift pixels
+    into its first byte: 28 pixels a block leaves a block's left edge on a
+    byte or four pixels into one."""
     bgd, x, y = renderroom.bg, 8, 100
     f = bgd.Ffalling
 
@@ -341,14 +343,15 @@ def falling_floor():
     left, rows = x * 7, range(y - FF_ROWS + 1, y + 1)
     own = [c for c in range(left, min(len(clear[0]), left + 8 * 8))
            if any(clear[r][c] == solid[r][c] for r in rows)]
-    width = (own[-1] - left + 8) // 8
+    width = (own[-1] - left + shift + 8) // 8
     out = bytearray()
     for r in rows:
         for b in range(width):
             mask = data = 0
             for bit in range(8):
-                c = left + b * 8 + bit
-                if c >= len(clear[r]) or clear[r][c] != solid[r][c]:
+                c = left + b * 8 + bit - shift
+                if (c < left or c >= len(clear[r])
+                        or clear[r][c] != solid[r][c]):
                     mask |= 0x80 >> bit         # the room shows through here
                 elif clear[r][c]:
                     data |= 0x80 >> bit
@@ -596,6 +599,11 @@ def main(argv):
     ff_at = ((len(blobs) - 1) << BANK_SHIFT) | len(blobs[-1])
     table += bytes([ff_w, FF_ROWS, 0, 0]) + ff_at.to_bytes(2, 'little')
     blobs[-1] += ff_data
+    ff_w4, ff_data4 = falling_floor(4)
+    ff_at4 = len(blobs[-1])
+    blobs[-1] += ff_data4
+    ff_at0 = ff_at & ((1 << BANK_SHIFT) - 1)
+    ff_blob = len(blobs) - 1
     assert len(blobs[-1]) <= BANK_SIZE - 2, 'the falling floor does not fit'
 
     # The guard's own frames, after it: USEALTSETS in CTRLSUBS.S draws a
@@ -833,6 +841,15 @@ def main(argv):
     # taller with sharper corners, as the user asked: seven rows, pointing the
     # same way from the same column, down to the foot of the screen.
     bullet = bytes([0x40, 0x60, 0x70, 0x78, 0x70, 0x60, 0x40])
+    # The bubbles as bits, for changing them in place: for each of the three
+    # pictures, its six rows that have anything, pixels one to five of the
+    # seven as bits 4 to 0 -- after six rows of none, for the blank one.
+    bits = bytearray(6)
+    for n in bgexport.BUBBLE_IMAGES:
+        lines = list(t2.get(n).pixels())
+        for r in range(1, 7):
+            bits.append(sum(lines[r][p] << (5 - p) for p in range(1, 6)))
+    open(os.path.join(binout, 'bubblebits.bin'), 'wb').write(bytes(bits))
     open(os.path.join(binout, 'bullet.bin'), 'wb').write(
         bullet + bytes(rev[b] for b in bullet))
 
@@ -872,6 +889,10 @@ def main(argv):
         f.write('FF_FRAME    equ %d' % ff_frame + chr(10))
         f.write('ALT_BASE    equ %d' % alt_base + chr(10))
         f.write('FF_W        equ %d' % ff_w + chr(10))
+        f.write('FF_W4       equ %d' % ff_w4 + chr(10))
+        f.write('FF_BLOB     equ %d' % ff_blob + chr(10))
+        f.write('FF_AT0      equ %d' % (PAGE_WINDOW + ff_at0) + chr(10))
+        f.write('FF_AT4      equ %d' % (PAGE_WINDOW + ff_at4) + chr(10))
         f.write('FF_H        equ %d' % FF_ROWS + chr(10))
 
         # POP's own sequence numbers, so the control code can read the way

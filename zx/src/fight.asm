@@ -106,12 +106,181 @@ dckid:          call    dp_rect
                 call    eraseset
                 ld      hl, boxcol
                 call    eraseset
+                ld      hl, mbold       ; and where the floors fell from
+                call    eraseset
+                ld      hl, mbold + 4
+                call    eraseset
                 call    draw_flames
+                call    draw_mobs       ; behind the two of them
                 call    gd_swap
                 jr      z, dckid2
                 call    dp_pics
                 call    swapchar
 dckid2:         jp      dp_pics
+
+; DrawFF in FRAMEADV.S, for every MOB in the room on screen: a loose floor on
+; its way down, laid over the room with its own mask -- the loose floor's A,
+; D and B sections, composed at build time -- its foot on moby and its left
+; edge at mobx Apple bytes, which lands on a byte or four pixels into one.
+; Where they were last frame has been put back already; where they are now
+; is shown next frame together with it, as mbshow.
+
+MOBROWS         equ     FF_H
+
+draw_mobs:      ld      hl, mbold       ; last frame's, to be shown with this
+                ld      de, mbshow
+                ld      bc, 8
+                ldir
+                xor     a
+                ld      (mbold + 2), a  ; and nothing drawn yet this frame
+                ld      (mbold + 6), a
+                ld      a, (nummob)
+                or      a
+                ret     z
+                ld      b, a
+                ld      c, 0
+                ld      hl, mbold       ; a rectangle each: two far apart in
+dmloop:         push    bc              ; one box was most of the screen to
+                push    hl              ; put back, cover and show
+                ld      (dmslot), hl
+                call    mobload
+                call    draw_mob
+                pop     hl
+                ld      de, 4
+                add     hl, de
+                pop     bc
+                inc     c
+                djnz    dmloop
+                ld      hl, mbshow      ; each with where it was, to show
+                ld      de, mbold
+                call    box_two
+                ld      hl, mbshow + 4
+                ld      de, mbold + 4
+                jp      box_two
+
+draw_mob:       ld      a, (mobvel)
+                inc     a
+                ret     z               ; gone
+                ld      a, (mobroom)
+                ld      hl, roomnum
+                cp      (hl)
+                ret     nz
+                ld      a, (mobx)       ; seven pixels an Apple byte
+                ld      l, a
+                ld      h, 0
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                or      a
+                sbc     hl, de
+                ld      a, l
+                and     7
+                ld      de, FF_AT0
+                ld      b, FF_W
+                jr      z, dmshift
+                ld      de, FF_AT4
+                ld      b, FF_W4
+dmshift:        ld      (dmsrc), de
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                ld      a, (cam)
+                ld      c, a
+                ld      a, l
+                sub     c
+                ld      (dmcol), a      ; its first byte on the screen, signed
+                ld      a, b
+                ld      (dmw), a
+                ld      a, FF_BLOB
+                ld      (curbank), a
+                call    page_frame
+                ld      a, (moby)
+                sub     MOBROWS - 1
+                ld      (dmtop), a
+                ld      b, MOBROWS
+                ld      c, a            ; C = the row in hand
+                ld      de, (dmsrc)
+dmrow:          push    bc
+                ld      a, c
+                cp      192
+                jr      nc, dmnext      ; off the top or the foot
+                ld      e, 0
+                call    scraddr
+                ld      bc, work - SCREEN
+                add     hl, bc          ; column nought of the working copy
+                ld      a, (dmw)
+                ld      b, a
+                ld      a, (dmcol)
+                ld      c, a
+                ld      de, (dmsrc)
+dmbyte:         ld      a, c
+                cp      32
+                jr      nc, dmskip      ; off either side
+                push    hl
+                add     a, l
+                ld      l, a
+                ld      a, (de)         ; the mask: the room shows through
+                and     (hl)
+                inc     de
+                ex      de, hl
+                or      (hl)            ; and the piece
+                ex      de, hl
+                ld      (hl), a
+                pop     hl
+                dec     de
+dmskip:         inc     de
+                inc     de
+                inc     c
+                djnz    dmbyte
+dmnext:         ld      hl, (dmsrc)     ; a row on
+                ld      a, (dmw)
+                add     a, a
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (dmsrc), hl
+                pop     bc
+                inc     c
+                djnz    dmrow
+
+                ld      a, (dmw)        ; and its rectangle, the columns
+                ld      b, a            ; clipped to the screen's
+                ld      a, (dmcol)
+                bit     7, a
+                jr      z, dmright
+                add     a, b            ; off the left: what is left of it
+                ret     m
+                ret     z
+                ld      b, a
+                xor     a
+dmright:        ld      c, a
+                add     a, b
+                sub     32
+                jr      c, dmfits
+                ld      d, a            ; past the right: that much less
+                ld      a, b
+                sub     d
+                ret     c
+                ret     z
+                ld      b, a
+dmfits:         ld      hl, dmrect
+                ld      (hl), c
+                inc     hl
+                ld      a, (dmtop)
+                ld      (hl), a
+                inc     hl
+                ld      (hl), b
+                inc     hl
+                ld      (hl), MOBROWS
+                ld      hl, (dmslot)
+                ld      de, dmrect
+                jp      box_two
+
 
 ; HL = a character's new rectangle, his old one after it and his box after
 ; that.  Out: the box round the two, or whichever of them is not empty.
@@ -344,125 +513,6 @@ gd_field_in:    dec     a               ; A = the room
                 add     hl, de
                 ret
 
-add_guard:      ld      a, (gdkeep)     ; one who came along is already here
-                or      a
-                jr      z, agfresh
-                xor     a
-                ld      (gdkeep), a
-                ld      hl, newcol + OP ; nothing of him drawn in this room
-                ld      b, 12
-agclr:          ld      (hl), a
-                inc     hl
-                djnz    agclr
-                ret
-agfresh:        xor     a
-                ld      (gdhere), a
-                ld      (offguard), a
-                ld      a, (nowbank)
-                push    af
-                call    page_bg
-                ld      de, 0
-                call    gd_field
-                ld      a, (hl)
-                cp      30
-                jp      nc, agnone
-                push    af
-                call    swapchar        ; he is made in Char, as POP makes him
-                pop     af
-
-                ld      b, 0            ; the block: ten to a row
-agrow:          cp      10
-                jr      c, agcol
-                sub     10
-                inc     b
-                jr      agrow
-agcol:          ld      a, b
-                ld      (blocky), a
-                ld      de, GDX
-                call    gd_field
-                ld      a, (hl)         ; CharX, 140 wide, to the room's pixels
-                sub     SCRNLEFT
-                ld      l, a
-                ld      h, 0
-                jr      nc, agx
-                dec     h
-agx:            add     hl, hl
-                ld      (charx), hl
-                ld      de, GDFACE
-                call    gd_field
-                ld      a, (hl)         ; -1 left, which is our 0
-                inc     a
-                jr      z, agface
-                ld      a, 1
-agface:         ld      (facing), a
-                ld      de, GDPROG
-                call    gd_field
-                ld      a, (hl)
-                cp      NUMPROGS
-                jr      c, agprog
-                ld      a, 3            ; the default
-agprog:         ld      (guardprog), a
-                ld      a, 2
-                ld      (charid), a
-                ld      de, GDSEQH
-                call    gd_field
-                ld      a, (hl)
-                or      a
-                jr      nz, agseq
-                xor     a               ; 0 is a fresh start
-                ld      (charsword), a
-                call    page_canvas
-                ld      a, SQ_ALERTSTAND
-                call    jumpseq
-                jr      aganim
-agseq:          ld      d, a
-                push    de
-                ld      de, GDSEQL
-                call    gd_field
-                pop     de
-                ld      e, (hl)
-                ld      (seqptr), de
-                call    page_canvas
-aganim:         call    step_seq
-
-                call    floor_plane
-                ld      (chary), a
-                xor     a
-                ld      (yvel), a
-                ld      hl, newcol      ; nothing of him drawn yet
-                ld      b, 13           ; and his rectangles, and CharXVel
-agrect:         ld      (hl), a
-                inc     hl
-                djnz    agrect
-                inc     a
-                ld      (charact), a
-                ld      a, (frame)
-                cp      185             ; killed
-                jr      z, agdead
-                cp      177             ; impaled
-                jr      z, agdead
-                cp      178             ; halved
-                jr      z, agdead
-                ld      a, 0xff
-                ld      (charlife), a
-                xor     a
-                ld      (alertguard), a
-                ld      (refract), a
-                ld      (justblocked), a
-                ld      hl, extrastrength
-                call    gd_prog
-                add     a, BASICSTR
-                jr      agstr
-agdead:         ld      a, 1
-                ld      (charlife), a
-                xor     a
-agstr:          ld      (oppstr), a
-                call    swapchar
-                ld      a, 1
-                ld      (gdhere), a
-agnone:         pop     af
-                jp      pageset
-
 ; Out: A = table HL's entry for his program.
 
 gd_prog:        ld      a, (guardprog)
@@ -471,59 +521,6 @@ gd_prog:        ld      a, (guardprog)
                 add     hl, de
                 ld      a, (hl)
                 ret
-
-; UPDATEGUARD: leaving him behind.  A live guard starts over when the kid
-; comes back; a dead one keeps the sequence that laid him down.
-
-update_guard:   ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      a, (nowbank)
-                push    af
-                call    page_bg
-                ld      de, 0
-                call    gd_field
-                ld      a, (blocky + OP)
-                add     a, a            ; ten to a row: ADDGUARD takes the
-                ld      b, a            ; column from CharX
-                add     a, a
-                add     a, a
-                add     a, b
-                ld      (hl), a
-                ld      de, GDX
-                call    gd_field
-                push    hl
-                ld      hl, (charx + OP)
-                sra     h
-                rr      l
-                ld      a, l
-                add     a, SCRNLEFT
-                pop     hl
-                ld      (hl), a
-                ld      de, GDFACE
-                call    gd_field
-                ld      a, (facing + OP)
-                dec     a               ; our 0 left is POP's -1
-                ld      (hl), a
-                ld      de, GDPROG
-                call    gd_field
-                ld      a, (guardprog)
-                ld      (hl), a
-                ld      de, GDSEQH
-                call    gd_field
-                ld      a, (charlife + OP)
-                or      a
-                ld      a, 0
-                jp      m, ugseq
-                ld      a, (seqptr + OP + 1)
-ugseq:          ld      (hl), a
-                ld      de, GDSEQL
-                call    gd_field
-                ld      a, (seqptr + OP)
-                ld      (hl), a
-                pop     af
-                call    pageset
-                jp      gd_gone
 
 ; ---------------------------------------------------------------- a frame
 ;
@@ -1319,6 +1316,21 @@ hfcheck:        ld      a, (kidstr)
 hurton:         db      0
 lastkidstr:     db      0
 
+; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
+
+addsfx:         ld      a, (frame)
+                cp      167             ; blocked strike
+                ld      a, SND_SWORDCLASH1
+                jp      z, addsound
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (frame + OP)
+                cp      167
+                ret     nz
+                ld      a, SND_SWORDCLASH2
+                jp      addsound
+
 mpc6:
                 org     mfix6
 
@@ -1562,96 +1574,6 @@ ca_read:        ld      b, a
                 ld      a, b
                 jp      tile_at
 
-; CUTCHECK in AUTO.S: the kid is going into room A the way C says -- 0 up,
-; 1 down, 2 left, 3 right.  A live guard en garde close to that side goes
-; with him, unless a live guard is waiting in the new room; anyone else is
-; left behind and written back into his own.
-
-leave_room:     ld      (lrroom), a
-                ld      a, c
-                ld      (lrdir), a
-                ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      a, (charlife + OP)
-                or      a
-                jp      p, update_guard ; dead: left behind
-                ld      a, (charsword + OP)
-                cp      2
-                jp      nz, update_guard
-                ld      a, (nowbank)
-                push    af
-                call    page_bg
-                ld      a, (lrroom)     ; a live guard there already?
-                ld      de, 0
-                call    gd_field_in
-                ld      a, (hl)
-                cp      30
-                jr      nc, lrnonew
-                ld      a, (lrroom)
-                ld      de, GDSEQH
-                call    gd_field_in
-                ld      a, (hl)
-                or      a
-                jp      z, lrleave
-lrnonew:        ld      a, (lrdir)
-                or      a
-                jr      z, lrup
-                dec     a
-                jr      z, lrdown
-                dec     a
-                jr      z, lrleft
-                ld      hl, (charx + OP) ; right: ShadX past ScrnWidth + 25
-                ld      de, -2 * (140 + 25 - SCRNLEFT)
-                add     hl, de
-                bit     7, h
-                jp      nz, lrleave
-                ld      de, -280
-                jr      lrsideways
-lrleft:         ld      hl, (charx + OP) ; left: ShadX under 256 - ScrnWidth - 25
-                ld      de, -2 * (256 - 140 - 25 - SCRNLEFT)
-                add     hl, de
-                bit     7, h
-                jp      z, lrleave
-                ld      de, 280
-lrsideways:     ld      hl, (charx + OP)
-                add     hl, de
-                ld      (charx + OP), hl
-                jr      lrtake
-lrup:           ld      a, (blocky + OP)
-                or      a
-                jp      p, lrleave
-                add     a, 3
-                ld      (blocky + OP), a
-                ld      a, (chary + OP)
-                add     a, 189
-                jr      lrvert
-lrdown:         ld      a, (blocky + OP)
-                cp      3
-                jr      c, lrleave
-                sub     3
-                ld      (blocky + OP), a
-                ld      a, (chary + OP)
-                sub     189
-lrvert:         ld      (chary + OP), a
-lrtake:         ld      de, 0           ; TRANSFERGUARD: out of both rooms'
-                call    gd_field        ; lists, and along with the kid
-                ld      (hl), 0xff
-                ld      a, (lrroom)
-                ld      de, 0
-                call    gd_field_in
-                ld      (hl), 0xff
-                ld      a, 1
-                ld      (gdkeep), a
-                pop     af
-                jp      pageset
-lrleave:        pop     af
-                call    pageset
-                jp      update_guard
-
-lrroom:         db      0
-lrdir:          db      0
-gdkeep:         db      0
 
 ; ENEMYCOLL in COLL.S: a guard en garde backing into a wall or a closed gate
 ; is put at its edge, and bumps back en garde.
@@ -2547,12 +2469,145 @@ afframe:        ld      c, a
                 and     0xe0
                 or      c
                 ld      (trobst), a
-                ld      a, 1
+                call    bubble_poke
+                xor     a               ; nothing for the queue to redraw
                 ld      (redwant), a
-                ld      (rqstart), a
-                ld      a, FLASKWIPE
-                ld      (redh), a
                 jp      aodone
+
+; A block redraw a frame for three pixels was the heaviest thing in a room
+; with a flask in it.  The bubbles keep to one byte column and six rows, and
+; nothing but they change there, so the new picture goes straight into those
+; bytes -- of the room, of the working copy, and to the screen through the
+; queue of rectangles, and into a view being made -- exactly as flask_ma lays
+; it: the five pixels cleared, and the frame's bits in.
+
+bubble_poke:    call    trrowcol
+                ld      a, (trobst)     ; which picture, or none
+                and     0x1f
+                ld      e, a
+                ld      d, 0
+                ld      hl, bubble
+                add     hl, de
+                ld      a, (hl)
+                ld      c, a            ; C = 0 to 2, or -1
+                ld      a, (trobst)     ; the potion: the tall bottles are
+                and     0xe0            ; eight rows higher, and past the
+                ld      d, 0            ; boost a pixel on
+                ld      e, 2            ; E = the shift into the byte
+                cp      0x40
+                jr      c, bpshort
+                ld      d, 8
+                jr      z, bpshort
+                dec     e
+bpshort:        ld      a, (blockcol)
+                rra
+                jr      nc, bpeven
+                inc     e               ; odd: a pixel further back in its cell
+bpeven:         ld      a, e
+                ld      (bpshift), a
+                ld      a, (blockrow)   ; the top row: 23 over the floor line,
+                inc     a               ; and the rest higher
+                ld      l, a
+                ld      h, 0
+                push    de
+                ld      de, blockbot
+                add     hl, de
+                pop     de
+                ld      a, (hl)
+                sub     23
+                sub     d
+                ld      (rowy), a
+                ld      a, (blockcol)   ; its byte column, as flask_attrs has it
+                ld      b, a
+                add     a, a
+                add     a, a
+                bit     0, b
+                jr      z, bpcol16
+                sub     4
+bpcol16:        add     a, 16
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                add     a, b
+                add     a, b
+                add     a, b
+                ld      (bpcol), a
+                inc     c               ; the picture's six rows of bits,
+                ld      a, c            ; the blank one's first
+                add     a, a
+                add     a, c
+                add     a, a
+                ld      e, a
+                ld      d, 0
+                ld      hl, bubblebits
+                add     hl, de
+                ld      (bpbits), hl
+                ld      a, (bpshift)    ; the five pixels, where they go
+                ld      b, a
+                ld      a, 0x1f
+bpm:            add     a, a
+                djnz    bpm
+                cpl
+                ld      (bpmask), a
+                call    page_art
+                ld      a, (rowy)
+                call    mul35
+                ld      de, room
+                add     hl, de
+                ld      a, (bpcol)
+                ld      e, a
+                ld      d, 0
+                add     hl, de          ; HL = the room's top byte of them
+                ld      de, (bpbits)
+                ld      c, 6
+bprow:          ld      a, (de)
+                ld      b, a
+                ld      a, (bpshift)
+bpsh:           sla     b
+                dec     a
+                jr      nz, bpsh
+                ld      a, (bpmask)
+                and     (hl)
+                or      b
+                ld      (hl), a
+                inc     de
+                push    de
+                ld      de, ROOM_BYTES
+                add     hl, de
+                pop     de
+                dec     c
+                jr      nz, bprow
+
+                ld      a, (rowy)       ; a view being made wants the rows
+                ld      b, 6
+                call    vw_mark
+                ld      a, (bpcol)      ; and the working copy and the screen
+                ld      hl, cam         ; the bytes, if they are in view
+                sub     (hl)
+                cp      32
+                ret     nc
+                ld      (linecol), a
+                ld      (bprect), a
+                ld      a, (rowy)
+                ld      (bprect + 1), a
+                ld      hl, bprect
+                call    eraseset
+                ld      a, 1
+                ld      (rdw), a
+                ld      a, 6
+                ld      (redh), a
+                call    dirty_add
+                ld      a, 63           ; and the band height as it was
+                ld      (redh), a
+                ret
+
+bprect:         db      0, 0, 1, 6
+bpmask:         db      0
+bpshift:        db      0
+bpcol:          db      0
+bpbits:         dw      0
+bubblebits:     incbin  "bubblebits.bin"
 
 lastpotion:     db      0
 takeid:         db      0
@@ -2598,7 +2653,14 @@ smwt:           call    page_canvas     ; bank 7, in case it is the one shown
                 inc     (hl)
                 ld      a, INK_KIDMETER
                 ld      (mmink), a
-                ld      a, 10           ; his, every place drawn
+                ld      a, (kidstr)     ; his, every place drawn -- till he
+                or      a               ; has none left, when they go, and
+                ld      a, (kiddrawn)   ; the room is put back where they were
+                ld      (mmprev), a
+                ld      a, 10
+                jr      nz, smkid
+                xor     a
+smkid:          ld      (kiddrawn), a
                 ld      (mmdrawn), a
                 ld      hl, bullet
                 ld      a, (kidstr)
@@ -2611,6 +2673,8 @@ smwt:           call    page_canvas     ; bank 7, in case it is the one shown
                 ld      (mmink), a
                 xor     a               ; his opponent's: a place spent is
                 ld      (mmdrawn), a    ; the room again, once
+                ld      a, (oppdrawn)
+                ld      (mmprev), a
                 ld      c, 0
                 ld      a, (gdhere)
                 or      a
@@ -2630,7 +2694,8 @@ smopp:          ld      hl, bullet + BULLETH
 ; place is a whole character cell -- the rows round the bullet kept black
 ; as well, so that the colour takes nothing of the wall above it.  A place not
 ; lit is black up to (mmdrawn) places; past that it is put back from the room,
-; in the room's colour, if it was lit the time before, and is otherwise left.
+; in the room's colour, if it was one of the (mmprev) drawn the time before,
+; and is otherwise left.
 
 meter:          ld      (mmimg), hl
                 ld      (mmfirst), de
@@ -2658,7 +2723,7 @@ mmoff:          ld      a, (mmdrawn)
                 ld      a, 1            ; black
                 jr      z, mmroom
                 jr      nc, mmmode
-mmroom:         ld      a, (oppdrawn)   ; the room, if there was a bullet
+mmroom:         ld      a, (mmprev)     ; the room, if there was a bullet
                 cp      (hl)
                 jp      z, mmnext
                 jp      c, mmnext
@@ -2751,6 +2816,8 @@ mmbyte:         db      0
 mmink:          db      0
 mmdrawn:        db      0
 oppdrawn:       db      0
+kiddrawn:       db      10
+mmprev:         db      0               ; the places drawn the time before
 mflash:         db      0
 bullet:         incbin  "bullet.bin"
 

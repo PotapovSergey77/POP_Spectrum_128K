@@ -1829,15 +1829,19 @@ nrright:        ld      a, (links + 1)
                 ld      c, 3
 nrcall:         or      a
                 ret     z               ; no room that way, and nothing done:
-                push    bc
-                push    af
-                call    leave_room      ; the guard goes too, or stays behind
+                push    bc              ; putting the block back would take the
+                push    af              ; working copy's first rows with it,
+                call    roomrest        ; and nothing would repaint them
                 pop     af
                 pop     bc
-                ld      (roomnum), a    ; putting the block back would take the
-                ld      a, c            ; working copy's first rows with it,
-                ld      (nrwhich), a    ; and nothing would repaint them
-                call    roomrest
+                push    bc
+                push    af
+                call    leave_room      ; the guard goes too, or stays behind:
+                pop     af              ; in the block, so after it is back
+                pop     bc
+                ld      (roomnum), a
+                ld      a, c
+                ld      (nrwhich), a
                 jp      nrcut
 
 nrwhich:        db      0
@@ -3749,11 +3753,9 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 call    trobtype
                 ld      a, 1            ; and the wedges with it
                 ld      (mskwant), a
-                xor     a
-                ld      (trobst), a
-                ld      hl, aoid        ; and it is space that gets redrawn
-                ld      (hl), a
-                call    mobstart        ; and from here it is falling
+                xor     a               ; the id stays the loose floor's, so
+                ld      (trobst), a     ; that the space it leaves goes to the
+                call    mobstart        ; front of the queue; and it falls
                 jp      stopobj
 
 afwiggle:       cp      0x80 + WIGGLETIME
