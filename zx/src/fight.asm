@@ -532,7 +532,15 @@ ugseq:          ld      (hl), a
 
 do_shad:        call    gd_swap
                 ret     z
-                call    shadctrl
+                ld      hl, jstkx       ; LoadDesel and SaveDesel: the keys
+                ld      de, kidkeys     ; and their fresh presses are the
+                ld      bc, 8           ; kid's, and the guard's presses are
+                ldir                    ; his own -- left in them, the kid
+                call    shadctrl        ; walked off on the guard's back
+                ld      hl, kidkeys     ; press, and a dead guard's release
+                ld      de, jstkx       ; made a held key new every frame
+                ld      bc, 8
+                ldir
                 call    step_seq        ; ANIMCHAR
                 ld      hl, (charx)     ; CharX under ScrnLeft - 14, or at
                 ld      de, 28          ; ScrnRight + 14 and over
@@ -1683,6 +1691,7 @@ ec_read:        ld      a, (blocky)
                 jp      tile_at
 
 ecx:            db      0
+kidkeys:        ds      8
 
 ; ---------------------------------------------------------------- meters
 ;
