@@ -150,11 +150,13 @@ PALETTE = [(0, 0, 0), (0x94, 0x0c, 0x40), (0x64, 0x4c, 0x00), (0xe8, 0x70, 0x1c)
 
 
 def colours(scr):
-    """192 lines of 140 colour indices."""
+    """192 lines of 140 colour indices.  The first of a colour's four dots
+    is its top bit: taken the other way round every colour comes out as its
+    mirror -- the dusk sky blue, the yellow arch aqua."""
     out = []
     for row in dots(scr):
-        out.append([row[4 * k] | row[4 * k + 1] << 1 | row[4 * k + 2] << 2
-                    | row[4 * k + 3] << 3 for k in range(140)])
+        out.append([row[4 * k] << 3 | row[4 * k + 1] << 2 | row[4 * k + 2] << 1
+                    | row[4 * k + 3] for k in range(140)])
     return out
 
 

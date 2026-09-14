@@ -10,10 +10,16 @@ exactly, and what does not fit is made to fit by the layout instead.
     The border.  The Apple's is tiles 14 pixels wide and 11 or 12 lines tall
     in four colours, which no 8x8 cell can hold.  It is drawn afresh: the
     same tiles, two colours to a cell -- sixteen pixels a tile along the top,
-    a single cell down the sides -- and the aqua line inside it in the first
-    cells of the picture.  The top band is sixteen lines, two more than the
-    Apple's, and the picture loses its first two lines, a black one and one
-    of the tapestry.
+    a single cell down the sides -- and the yellow line inside it in the
+    first cells of the picture.  The top band is sixteen lines, two more
+    than the Apple's, and the picture loses its first two lines, a black one
+    and one of the tapestry.
+
+    The splash.  What stands on the cells is drawn on them: the awning, the
+    wall of bricks, the columns with their pattern and the blocks under
+    them, the arch in yellow, the tapestry's yellow on blue.  The palace
+    keeps every pixel of its outline, and the sky round it is made simple
+    enough to leave it standing out.
 
     The picture.  Inside the border the Apple has 124 colours, the Spectrum
     room for 120: two go at either side, where the tapestry and the pillars
@@ -118,12 +124,22 @@ SIDE = 8                    # pixels of each side border
 FIRST_COL = 10              # the Apple colour at the picture's left pixel
 INNER = 120                 # Apple colours across the picture
 
+# The Apple's colours by name, as poptitles.PALETTE has them.
+A_BLACK, A_CRIMSON, A_BROWN, A_ORANGE, A_DKGREEN, A_GREY1, A_GREEN, \
+    A_YELLOW, A_DKBLUE, A_PURPLE, A_GREY2, A_PINK, A_BLUE, A_LTBLUE, \
+    A_AQUA, A_WHITE = range(16)
+
 
 def apple_col(x):
     """The Apple colour under Spectrum pixel x of the picture, and which of
     its two halves -- 0 or 1."""
     k = x - SIDE
     return FIRST_COL + (k >> 1), k & 1
+
+
+def spectrum_x(col):
+    """The Spectrum pixel an Apple colour's left half lands on."""
+    return SIDE + (col - FIRST_COL) * 2
 
 
 def picture(cols):
@@ -137,8 +153,23 @@ def picture(cols):
     return pix
 
 
-# The border, drawn.  A tile is rows of pixels, '#' ink and '.' paper, and
-# the cell colours it is laid in.
+def put2(pix, x, y, c):
+    """A pixel of the left half and its mirror in the right."""
+    pix[y][x] = c
+    pix[y][255 - x] = c
+
+
+def rect2(pix, xa, ya, w, h, c):
+    for y in range(ya, ya + h):
+        for x in range(xa, xa + w):
+            put2(pix, x, y, c)
+
+
+# The border, drawn.  A tile is rows of pixels, '#' ink and '.' paper.  The
+# Apple's: along the top dark blue tiles, a crimson triangle at head and
+# foot and an orange cross between, on yellow lines; down the sides crimson
+# edges closing in on a white heart; pink corners.  The yellow lines go --
+# a cell has no room for them -- but for the one inside the border.
 
 TOP_TILE = ['..##########....',
             '....######......',
@@ -159,26 +190,27 @@ TOP_TILE = ['..##########....',
 
 SIDE_TILE = ['#......#',
              '#......#',
-             '#..##..#',
-             '#.####.#',
-             '#.####.#',
-             '#.####.#',
-             '#..##..#',
+             '##....##',
+             '###..###',
+             '###..###',
+             '##....##',
              '#......#',
              '#......#',
-             '########']
+             '########',
+             '........']
 
-CORNER = ['########',
-          '#......#',
-          '#.####.#',
-          '#.#..#.#',
-          '#.#..#.#',
-          '#.####.#',
-          '#......#',
-          '########']
+CORNER = ['........',
+          '.######.',
+          '.#....#.',
+          '.#.##.#.',
+          '.#.##.#.',
+          '.#....#.',
+          '.######.',
+          '........']
 
-BORDER_INK, BORDER_PAPER = zx(BLUE), zx(RED)
-FRAME = zx(CYAN, 1)         # the aqua line inside the border
+BORDER_INK, BORDER_PAPER = zx(RED), zx(BLUE)
+CORNER_INK, CORNER_PAPER = zx(RED, 1), zx(MAGENTA, 1)
+FRAME = zx(YELLOW, 1)       # the yellow line inside the border
 
 
 def lay(pix, x0, y0, tile, ink, paper, width=None, height=None):
@@ -192,270 +224,219 @@ def lay(pix, x0, y0, tile, ink, paper, width=None, height=None):
 
 
 def band(pix):
-    """The knotwork band at the foot: its aqua on the blue, the dark green
-    shading and the blues given up to the blue."""
+    """The knotwork band at the foot: its yellow on the crimson, the orange
+    and pink of it yellow too."""
     for y in range(FOOT, 192):
         for x in range(SIDE, 256 - SIDE):
             v = pix[y][x]
             if v < 16:
-                pix[y][x] = zx(CYAN, 1) if v in (13, 14, 15, 6, 7) else zx(BLUE, 1)
+                bright = v in (A_YELLOW, A_WHITE, A_ORANGE, A_PINK, A_GREEN)
+                pix[y][x] = zx(YELLOW, 1) if bright else zx(RED)
 
 
-def border(pix):
+def border(pix, story):
     band(pix)
     for x in range(SIDE, 256 - SIDE, 16):
         lay(pix, x, 0, TOP_TILE, BORDER_INK, BORDER_PAPER)
     for x in (0, 256 - SIDE):
-        lay(pix, x, 0, CORNER, BORDER_INK, zx(CYAN), height=TOP)
-        # the side tiles, centred on the picture's lines
+        lay(pix, x, 0, CORNER, CORNER_INK, CORNER_PAPER, height=TOP)
         n = FOOT - TOP
         off = (n % len(SIDE_TILE)) // 2
         for y in range(TOP, FOOT):
-            k = (y - TOP - off) % len(SIDE_TILE)
-            row = SIDE_TILE[k]
+            row = SIDE_TILE[(y - TOP - off) % len(SIDE_TILE)]
             for i in range(SIDE):
-                c = row[i if x == 0 else SIDE - 1 - i]
-                pix[y][x + i] = BORDER_INK if c == '#' else BORDER_PAPER
-        lay(pix, x, FOOT, CORNER, BORDER_INK, zx(CYAN), height=192 - FOOT)
-    for x in range(SIDE, 256 - SIDE):       # the aqua line inside
+                pix[y][x + i] = BORDER_INK if row[i] == '#' else BORDER_PAPER
+        lay(pix, x, FOOT, CORNER, CORNER_INK, CORNER_PAPER, height=192 - FOOT)
+    for x in range(SIDE, 256 - SIDE):
         pix[TOP][x] = pix[TOP + 1][x] = FRAME
-    for y in range(TOP, FOOT):
-        pix[y][SIDE] = pix[y][255 - SIDE] = FRAME
+    if story:
+        for y in range(TOP, FOOT):
+            pix[y][SIDE] = pix[y][255 - SIDE] = FRAME
 
 
-# ---------------------------------------------------------------- the palace
+# ---------------------------------------------------------------- the splash
 
 ARCH = {}
+RING = (A_YELLOW, A_WHITE, A_GREEN, A_ORANGE)
 
 
 def find_arch(pix):
     """Where the arch's two sides are on each line, from the Apple's own
     picture before anything is drawn over it: from the middle out to the
-    first two aqua side by side -- a star or a minaret has none."""
+    first two yellow side by side.  Down to its widest it only widens, for
+    all a star says."""
     ARCH.clear()
     for y in range(192):
         row = pix[y]
         l = 127
-        while l > SIDE and not row[l] == row[l - 1] == 14:
+        while l > SIDE and not row[l] == row[l - 1] == A_YELLOW:
             l -= 1
         r = 128
-        while r < 255 - SIDE and not row[r] == row[r + 1] == 14:
+        while r < 255 - SIDE and not row[r] == row[r + 1] == A_YELLOW:
             r += 1
         ARCH[y] = (l + 1, r)
-    # it only ever widens going down, whatever a star says
-    for y in range(TOP + 1, 120):
+    for y in range(TOP + 1, 60):        # its widest
         pl, pr = ARCH[y - 1]
         l, r = ARCH[y]
         ARCH[y] = (min(l, pl), max(r, pr))
 
 
-def inside_arch(pix, y):
-    """The pixels of line y between the arch's two sides."""
-    return ARCH[y]
+def ring(pix, y):
+    """The arch's outer edges on line y: out from its inside while the
+    colours are the arch's."""
+    l, r = ARCH[y]
+    while l > SIDE and pix[y][l - 1] in RING:
+        l -= 1
+    while r < 256 - SIDE and pix[y][r] in RING:
+        r += 1
+    return l, r
 
 
-# The sky over the palace, as simple as a Spectrum can say it: the Apple's
-# night of blues, greens and greys is blue, the lower part of it bright; the
-# white of the minarets and the stars stays, the pale blue of the domes is
-# cyan, the roofs red, the trees black.
-SKY_TO = 76
-SKY = {8: zx(BLUE), 4: zx(BLUE), 10: zx(BLUE), 5: zx(BLUE), 2: zx(BLUE),
-       12: zx(BLUE, 1), 15: heavy(WHITE, 1), 13: zx(CYAN, 1), 1: heavy(RED),
-       0: zx(BLACK), 3: zx(BLUE), 9: zx(BLUE), 11: zx(BLUE), 7: zx(BLUE)}
+# Inside the arch, the palace at dusk, every line of its outline where the
+# Apple has it.  The Apple's sky is crimson, brown and grey above and more
+# and more orange lower down, dot by dot; here it is red and yellow, the
+# share of orange round each pixel laid down as an even dither.  The palace
+# -- its pink, white and pale blue -- is a cell's ink, in white or magenta,
+# whichever it has more of, and every one of its pixels stays: the paper is
+# the red of the sky, or where the cell is more roof and shadow than sky,
+# blue or black.
+DUSK_TO = 96
+GROUND_FROM = 70            # below it the Apple's brown is the dark ground
+BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]]
+LIGHT = (A_PINK, A_WHITE, A_LTBLUE)
+DARK = (A_DKBLUE, A_BLACK, A_BLUE)
+SKY = (A_CRIMSON, A_BROWN, A_GREY1, A_GREY2, A_ORANGE, A_DKGREEN, A_YELLOW,
+       A_GREEN, A_PURPLE)
 
 
-def palace(pix):
-    for y in range(TOP, SKY_TO):
-        l, r = inside_arch(pix, y)
-        for x in range(l, r):
-            v = pix[y][x]
+EDGE = 4                    # the arch's white and green edge inside it
+
+
+def dusk(pix):
+    src = [row[:] for row in pix]
+    inside = lambda x, y: ARCH[min(y, 119)][0] + EDGE <= x < ARCH[min(y, 119)][1] - EDGE
+    for y in range(TOP, DUSK_TO):
+        l, r = ARCH[min(y, 119)]
+        for x in list(range(l, l + EDGE)) + list(range(r - EDGE, r)):
+            v = src[y][x]
+            if y < 88:
+                pix[y][x] = zx(YELLOW, 1) if v in RING + LIGHT else zx(RED)
+        for x in range(l + EDGE, r - EDGE):
+            v = src[y][x]
+            if v == A_BROWN and y >= GROUND_FROM:
+                src[y][x] = v = A_BLACK     # the ground the palace stands on
             if v in SKY:
-                pix[y][x] = SKY[v]
-    castle(pix)
-    water(pix)
-    dunes(pix)
-    sides(pix)
+                n = orange = 0
+                for yy in range(max(TOP, y - 3), min(DUSK_TO, y + 4)):
+                    for xx in range(x - 5, x + 6):
+                        w = src[yy][xx]
+                        if w in SKY and inside(xx, yy):
+                            n += 1
+                            orange += w in (A_ORANGE, A_YELLOW)
+                share = orange * 16 // max(n, 1)
+                glow = share > 10 or (share > 6 and y & 1)
+                pix[y][x] = zx(YELLOW) if glow else zx(RED)
+            elif v in DARK:
+                pix[y][x] = zx(BLUE) if v != A_BLACK else zx(BLACK)
+    for cy in range(TOP // 8, DUSK_TO // 8):
+        for cx in range(32):
+            cells = [(x, y) for y in range(cy * 8, cy * 8 + 8)
+                     for x in range(cx * 8, cx * 8 + 8) if inside(x, y)]
+            light = [src[y][x] for x, y in cells if src[y][x] in LIGHT]
+            if not light:
+                continue
+            ink = zx(WHITE, 1) if sum(v != A_PINK for v in light) * 2 > len(light)                 else zx(MAGENTA, 1)
+            dark = [src[y][x] for x, y in cells if src[y][x] in DARK]
+            sky = [pix[y][x] for x, y in cells if src[y][x] in SKY]
+            if len(dark) > 2 * len(sky):
+                paper = zx(BLUE) if sum(v != A_BLACK for v in dark) * 2 >= len(dark)                     else zx(BLACK)
+            else:
+                paper = zx(RED)
+            for x, y in cells:
+                pix[y][x] = heavy(ink >> 0 and (ink - ZX) >> 1, (ink - ZX) & 1)                     if src[y][x] in LIGHT else heavy((paper - ZX) >> 1, (paper - ZX) & 1)
 
 
-# The palace itself, drawn again where the Apple has it, in shapes a cell of
-# two colours can carry: minarets and a dome in white against the sky, the
-# hall below them pale with its roof red, the gatehouse in front, the trees
-# to the right black, and the green of the hills under it all.  Cell rows
-# 3 to 10, columns 9 to 24.
-
-def castle(pix):
-    x0, x1, y0, y1 = 64, 208, 24, 88
-    sky_dark, sky = zx(BLUE), zx(BLUE, 1)
-    white, pale, red, black = zx(WHITE, 1), zx(CYAN, 1), zx(RED, 1), zx(BLACK)
-    green, water = zx(GREEN), zx(CYAN)
-
-    def put(x, y, c):
-        if x0 <= x < x1 and y0 <= y < y1:
-            l, r = inside_arch(pix, y) if y < SKY_TO else (0, 256)
-            if l <= x < r:
-                pix[y][x] = c
-
-    def rect(xa, ya, w, h, c):
-        for y in range(ya, ya + h):
-            for x in range(xa, xa + w):
-                put(x, y, c)
-
-    # the sky: dark above, bright from the minarets' feet down
-    for y in range(y0, y1):
-        for x in range(x0, x1):
-            put(x, y, sky_dark if y < 48 else sky)
-    for x, y in ((90, 34), (178, 38), (150, 30), (100, 28), (170, 52),
-                 (76, 44), (196, 46), (138, 26)):
-        put(x, y, white)
-
-    def minaret(x, top, foot, balcony):
-        put(x, top, white)
-        rect(x, top + 1, 2, 1, white)
-        rect(x - 1, top + 2, 4, 2, white)          # the cap
-        rect(x, top + 4, 2, foot - top - 4, white)
-        rect(x - 1, balcony, 4, 1, white)          # the gallery
-
-    minaret(114, 26, 64, 40)
-    minaret(124, 32, 64, 44)
-    minaret(136, 42, 64, 52)
-    minaret(90, 48, 64, 56)
-    minaret(160, 50, 64, 58)
-
-    # the dome, an onion on a drum
-    for i, half in enumerate((0, 1, 1, 2, 3, 4, 5, 6, 6, 6, 6, 5, 4)):
-        if half:
-            rect(104 - half, 46 + i, 2 * half, 1, white)
-        else:
-            rect(103, 46 + i, 2, 1, white)
-    rect(99, 59, 10, 5, white)
-
-    # the hall: roof red, walls pale, windows dark and arched
-    rect(96, 64, 72, 2, red)
-    rect(96, 66, 72, 14, pale)
-    for x in range(99, 166, 8):
-        if 118 <= x < 138:
-            continue
-        rect(x + 1, 72, 2, 1, black)
-        rect(x, 73, 4, 5, black)
-    # the gatehouse in front of it
-    rect(118, 66, 20, 2, red)
-    rect(120, 68, 16, 12, white)
-    rect(126, 72, 4, 8, black)
-    rect(127, 71, 2, 1, black)
-
-    # the trees on the right
-    for x, top in ((174, 62), (182, 58), (190, 63), (198, 60)):
-        for y in range(top, 76):
-            w = (1, 2, 3, 3, 4, 4, 4, 3, 3, 4, 4, 3, 2, 2, 2, 2, 2, 2)[min(17, y - top)]
-            rect(x - w, y, 2 * w, 1, black)
-    rect(168, 76, 40, 4, black)
-
-    # the hills
-    rect(64, 80, 144, 8, green)
-    rect(64, 72, 32, 8, green)
-    for x in range(64, 96):
-        for y in range(72, 72 + max(0, 6 - (x - 64) // 5)):
-            put(x, y, sky)
-
-
-# The dunes in front of the palace, below the water: the Apple's are deep
-# red streaks on black, a check of them here and there.  Each pixel takes
-# what most of the nine round it are, which keeps the streaks and loses the
-# single dots between them.
+# The dunes in front, down to the band: dark blue streaks on black, a check
+# of them here and there.  Each pixel takes what most of the nine round it
+# are, which keeps the streaks and loses the single dots between them.
 
 def dunes(pix):
     src = [row[:] for row in pix]
-    red = lambda v: v in (1, zx(RED), 2, 9, 11, 3)
-    for y in range(88, FOOT):
-        l, r = ARCH.get(min(y, 119), (SIDE, 256 - SIDE))
+    blue = lambda v: v in (A_DKBLUE, A_BLUE, A_PURPLE, A_LTBLUE)
+    for y in range(DUSK_TO, FOOT):
+        l, r = ARCH[min(y, 119)]
         for x in range(max(l, SIDE + 1), min(r, 255 - SIDE)):
             v = src[y][x]
-            if not (v == 0 or red(v)):
+            if not (v == A_BLACK or blue(v)):
                 continue
-            n = sum(red(src[yy][xx]) for yy in (y - 1, y, y + 1)
+            n = sum(blue(src[yy][xx]) for yy in (y - 1, y, y + 1)
                     for xx in (x - 1, x, x + 1) if yy < 192)
-            pix[y][x] = zx(RED) if n >= 5 else zx(BLACK)
+            pix[y][x] = zx(BLUE) if n >= 5 else zx(BLACK)
 
 
-# Either side of the arch, drawn on the cells: the tapestry, its aqua
-# pattern on the red, the awning's stripes, white and blue, the wall of
-# bricks under it, orange and red by turns on black, the arch's column
-# and the block it stands on.  The left side, and the right as its mirror.
-
-RING = (14, 15, 6, 12, 8, 13, 2)
-
-
-def tapestry(pix):
+def arch(pix):
+    """The tapestry either side of the arch, its yellow on dark blue, and
+    the arch itself yellow."""
     for y in range(TOP + 2, 88):
-        l, r = inside_arch(pix, y)
-        while l > SIDE and pix[y][l - 1] in RING:
-            l -= 1
-        while r < 256 - SIDE and pix[y][r] in RING:
-            r += 1
-        if l >= 128:            # no arch on this line: all of it is picture
+        l, r = ring(pix, y)
+        il, ir = ARCH[y]
+        if il >= 128:
             continue
         for x in list(range(SIDE, l)) + list(range(r, 256 - SIDE)):
             v = pix[y][x]
-            pix[y][x] = zx(CYAN) if v in (13, 14, 15, 6) else zx(RED)
-        # the arch itself, aqua, its blue shadow on the sky's side
-        il, ir = inside_arch(pix, y)
+            pix[y][x] = zx(YELLOW) if v in (A_YELLOW, A_WHITE, A_ORANGE, A_GREEN) \
+                else zx(BLUE)
         for x in list(range(l, il)) + list(range(ir, r)):
-            v = pix[y][x]
-            pix[y][x] = zx(BLUE) if v in (12, 8, 2) else zx(CYAN, 1)
+            pix[y][x] = zx(YELLOW, 1)
 
 
-def sides(pix):
-    tapestry(pix)
-    white, blue, black = zx(WHITE, 1), zx(BLUE, 1), zx(BLACK)
-    cyan = zx(CYAN, 1)
+# The column the arch comes down to, its three Apple colours a line: white
+# and yellow, or the orange and blue of the pattern on its upper part, or
+# black between.  Drawn a cell wide, the pattern across the whole cell.
+COLUMN = 32                 # its Apple colour
 
-    def put(x, y, c):
-        pix[y][x] = c
-        pix[y][255 - x] = c
 
-    def rect(xa, ya, w, h, c):
-        for y in range(ya, ya + h):
-            for x in range(xa, xa + w):
-                put(x, y, c)
+def column(pix, cols):
+    x = 48
+    for y in range(80, 152):
+        c = cols[y][COLUMN:COLUMN + 3]
+        rect2(pix, x, y, 8, 1, zx(BLACK))
+        if all(v in (A_WHITE, A_YELLOW) for v in c):
+            rect2(pix, x + 2, y, 6, 1, zx(YELLOW, 1))
+        elif any(v in (A_ORANGE, A_BLUE) for v in c):
+            for i, v in enumerate((c[0], c[0], c[0], c[1], c[1], c[2], c[2], c[2])):
+                put2(pix, x + i, y, zx(YELLOW, 1) if v == A_ORANGE else zx(BLUE, 1))
 
-    # the awning: a cell of white, then one of blue, over two cell rows
-    rect(SIDE, 88, 40, 16, black)
+
+def sides(pix, cols):
+    arch(pix)
+    # the awning: stripes of white and crimson, a cell of each by turns
+    rect2(pix, SIDE, 88, 40, 16, zx(BLACK))
     for cx in range(5):
         x = SIDE + cx * 8
         if cx % 2 == 0:
-            rect(x, 88, 6, 14, white)
-            rect(x + 6, 88, 2, 14, blue)
+            rect2(pix, x, 88, 6, 14, zx(WHITE, 1))
+            rect2(pix, x + 6, 88, 2, 14, zx(RED, 1))
         else:
-            rect(x, 88, 8, 14, blue)
-    # the bricks
+            rect2(pix, x, 88, 8, 14, zx(RED, 1))
+    # the wall under it: bricks of two blues by turns, on black
     for cy in range(13, 21):
         for cx in range(5):
             x, y = SIDE + cx * 8, cy * 8
-            colour = zx(YELLOW) if (cx + cy) % 2 == 0 else zx(RED)
-            rect(x, y, 8, 8, black)
-            rect(x, y, 6, 6, colour)
-    # the column, white down its outer edge, and the block under it
-    rect(48, 80, 8, 72, black)
-    rect(48, 80, 2, 72, white)
-    rect(50, 80, 6, 72, cyan)
-    rect(40, 152, 24, 16, cyan)
-    rect(40, 152, 24, 2, white)
-    rect(40, 152, 2, 16, white)
+            rect2(pix, x, y, 8, 8, zx(BLACK))
+            rect2(pix, x, y, 6, 6, zx(BLUE, (cx + cy) & 1))
+    column(pix, cols)
+    # the block it stands on, yellow, lit along its top and outer side
+    rect2(pix, 40, 152, 24, 16, zx(YELLOW, 1))
+    rect2(pix, 40, 152, 24, 2, zx(WHITE, 1))
+    rect2(pix, 40, 152, 2, 16, zx(WHITE, 1))
 
 
-# The water under the hills, down to the dunes: blue, a gleam of cyan.
-WATER_TO = 104
-WATER = {4: zx(BLUE, 1), 12: zx(BLUE, 1), 8: zx(BLUE, 1), 13: zx(CYAN, 1),
-         10: zx(BLUE, 1), 5: zx(BLUE, 1), 6: zx(BLUE, 1), 14: zx(CYAN, 1),
-         15: zx(CYAN, 1)}
-
-
-def water(pix):
-    for y in range(88, WATER_TO):
-        for x in range(64, 208):
-            v = pix[y][x]
-            if v in WATER:
-                pix[y][x] = WATER[v]
+def splash_picture(pix, cols):
+    find_arch(pix)
+    dusk(pix)
+    dunes(pix)
+    sides(pix, cols)
 
 
 # ---------------------------------------------------------------- letters
@@ -527,17 +508,17 @@ def letters(pix, mask, y0, y1, x0, x1, ground=None):
                     pix[top + j][sx + i] = LETTER
 
 
-# The story screens: white letters on a ground of deep red, a dot in every
+# The story screens: white letters on a ground of dark blue, a dot in every
 # other colour in a check with black, inside the border -- colours 8 to
 # 131, lines 14 to 167.  A letter's dot is lit and not the ground's.
 STORY = ('prolog', 'sumup')
-GROUND = 1
+GROUND = A_DKBLUE
 
 
 def story(pix, cols, dots):
     for y in range(TOP + 2, FOOT):
         for x in range(SIDE + 1, 255 - SIDE):
-            pix[y][x] = zx(RED)
+            pix[y][x] = zx(BLUE)
     mask = [[bool(dots[y][d]) and cols[y][d >> 2] != GROUND
              for d in range(560)] for y in range(192)]
     letters(pix, mask, TOP + 2, FOOT, 8 * 4, 132 * 4)
@@ -547,7 +528,7 @@ def credit(pix, apple, cols, dots, splash):
     """The credits and the title are letters in dots laid over the splash:
     where a credit has changed a byte of the splash, a lit dot beside
     another lit dot, of anything but the ground's colour, is a letter's --
-    a lone dot is the band's blue or the ground's red.  They go over the
+    a lone dot is the band's crimson or the dunes' blue.  They go over the
     Spectrum's splash, each with a black edge a pixel wide round it, as the
     Apple's letters have."""
     mask = [[False] * 560 for _ in range(192)]
@@ -557,7 +538,7 @@ def credit(pix, apple, cols, dots, splash):
                 continue
             c = cols[y][d >> 2]
             run = dots[y][d] and ((d and dots[y][d - 1]) or (d < 559 and dots[y][d + 1]))
-            if run and c not in (0, GROUND):
+            if run and c not in (A_BLACK, A_CRIMSON, GROUND):
                 mask[y][d] = True
     letters(pix, mask, TOP, FOOT, 0, 560)
     edge = heavy(BLACK)
@@ -605,7 +586,7 @@ def copyright(pix):
     x = (256 - width) // 2
     for yy in range(176, 184):
         for xx in range(x - 4, x + width + 4):
-            pix[yy][xx] = zx(BLUE)
+            pix[yy][xx] = zx(RED)
     for ch in COPYRIGHT:
         glyph = FONT[ch]
         for j, row in enumerate(glyph):
@@ -646,10 +627,9 @@ def screen(name):
     cols, dots = poptitles.colours(apple), poptitles.dots(apple)
     splash = poptitles.screen('splash') if name not in STORY else apple
     pix = picture(poptitles.colours(splash))
-    find_arch(pix)
     if name not in STORY:
-        palace(pix)
-    border(pix)
+        splash_picture(pix, poptitles.colours(splash))
+    border(pix, name in STORY)
     if name in STORY:
         story(pix, cols, dots)
     elif name != 'splash':
