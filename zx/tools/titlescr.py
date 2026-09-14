@@ -528,7 +528,10 @@ def letters(pix, mask, y0, y1, x0, x1, ground=None):
         sx = SIDE + (left - p - FIRST_COL * 4) // 2
         for j, r in enumerate(rows):
             for i, v in enumerate(r):
-                if v and 0 <= sx + i < 256:
+                # inside the border: the title's tips reach two pixels
+                # past the picture, and a letter in the border's cells
+                # would take their colours from its tiles
+                if v and SIDE <= sx + i < 256 - SIDE:
                     pix[top + j][sx + i] = LETTER
 
 
