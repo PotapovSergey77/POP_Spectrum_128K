@@ -70,7 +70,7 @@ SPECTRUM = [(BLACK, 0),     # black
             (GREEN, 0),     # dark green
             (WHITE, 0),     # grey
             (GREEN, 1),     # green
-            (YELLOW, 1),    # yellow
+            (YELLOW, 0),    # yellow, as dark as the rest of it
             (BLUE, 0),      # dark blue
             (MAGENTA, 1),   # purple
             (WHITE, 0),     # grey
@@ -210,7 +210,7 @@ CORNER = ['........',
 
 BORDER_INK, BORDER_PAPER = zx(RED), zx(BLUE)
 CORNER_INK, CORNER_PAPER = zx(RED, 1), zx(MAGENTA, 1)
-FRAME = zx(YELLOW, 1)       # the yellow line inside the border
+FRAME = zx(YELLOW)          # the yellow line inside the border
 
 
 def lay(pix, x0, y0, tile, ink, paper, width=None, height=None):
@@ -256,6 +256,27 @@ def border(pix, story):
 
 
 # ---------------------------------------------------------------- the splash
+
+# The arch's point.  On the Apple its two sides meet above the picture, in
+# the border, and cut through the tiles and the yellow line; the top band
+# here is drawn afresh, so the point is drawn over it: the sides as they
+# close in over the picture's first lines, carried on up until they meet.
+
+def apex(pix):
+    l, r = ARCH[TOP]
+    half, mid = (r - l) / 2, (l + r) / 2
+    for y in range(2, TOP + 2):
+        w = half - (TOP - y) * 1.5
+        if w < -4:
+            continue
+        inner = max(0, round(w))
+        for x in range(round(mid - w - 6), round(mid + w + 6)):
+            if abs(x + 0.5 - mid) < inner:
+                pix[y][x] = zx(RED)
+            else:
+                pix[y][x] = heavy(YELLOW)
+
+
 
 ARCH = {}
 RING = (A_YELLOW, A_WHITE, A_GREEN, A_ORANGE)
@@ -321,7 +342,7 @@ def dusk(pix):
         for x in list(range(l, l + EDGE)) + list(range(r - EDGE, r)):
             v = src[y][x]
             if y < 88:
-                pix[y][x] = zx(YELLOW, 1) if v in RING + LIGHT else zx(RED)
+                pix[y][x] = zx(YELLOW) if v in RING + LIGHT else zx(RED)
         for x in range(l + EDGE, r - EDGE):
             v = src[y][x]
             if v == A_BROWN and y >= GROUND_FROM:
@@ -388,7 +409,7 @@ def arch(pix):
             pix[y][x] = zx(YELLOW) if v in (A_YELLOW, A_WHITE, A_ORANGE, A_GREEN) \
                 else zx(BLUE)
         for x in list(range(l, il)) + list(range(ir, r)):
-            pix[y][x] = zx(YELLOW, 1)
+            pix[y][x] = zx(YELLOW)
 
 
 # The column the arch comes down to, its three Apple colours a line: white
@@ -404,10 +425,10 @@ def column(pix, cols):
         c = cols[y][COLUMN:COLUMN + 3]
         rect2(pix, x, y, 8, 1, zx(BLACK))
         if all(v in (A_WHITE, A_YELLOW) for v in c):
-            rect2(pix, x + 2, y, 6, 1, zx(YELLOW, 1))
+            rect2(pix, x + 2, y, 6, 1, zx(YELLOW))
         elif any(v in (A_ORANGE, A_BLUE) for v in c):
             for i, v in enumerate((c[0], c[0], c[0], c[1], c[1], c[2], c[2], c[2])):
-                put2(pix, x + i, y, zx(YELLOW, 1) if v == A_ORANGE else zx(BLUE, 1))
+                put2(pix, x + i, y, zx(YELLOW) if v == A_ORANGE else zx(BLUE))
 
 
 def sides(pix, cols):
@@ -430,9 +451,9 @@ def sides(pix, cols):
     column(pix, cols)
     # the block it stands on, yellow, lit along its top and outer side
     rect2(pix, 40, 152, 28, 16, zx(BLACK))
-    rect2(pix, 40, 152, 24, 16, zx(YELLOW, 1))
-    rect2(pix, 40, 152, 24, 2, zx(WHITE, 1))
-    rect2(pix, 40, 152, 2, 16, zx(WHITE, 1))
+    rect2(pix, 40, 152, 24, 16, zx(YELLOW))
+    rect2(pix, 40, 152, 24, 2, zx(WHITE))
+    rect2(pix, 40, 152, 2, 16, zx(WHITE))
 
 
 def splash_picture(pix, cols):
@@ -607,10 +628,10 @@ def big_text(pix, text, centre, baseline):
 
 
 def presents(pix):
-    # the Apple's lines: its letters' feet on 129 and 143, their middle
-    # at dot 295 and 287
-    big_text(pix, 'Broderbund Software', SIDE + (295 - FIRST_COL * 4) // 2, 130)
-    big_text(pix, 'presents', SIDE + (287 - FIRST_COL * 4) // 2, 144)
+    # the Apple's lines: its letters' feet on 129 and 143; across, the
+    # middle of the screen
+    big_text(pix, 'Broderbund Software', 128, 130)
+    big_text(pix, 'presents', 128, 144)
 
 
 # The copyright line on the knotwork band: the Apple's letters there are
@@ -692,6 +713,8 @@ def screen(name):
     if name not in STORY:
         splash_picture(pix, poptitles.colours(splash))
     border(pix, name in STORY)
+    if name not in STORY:
+        apex(pix)
     if name in STORY:
         story(pix, cols, dots)
     elif name != 'splash':
