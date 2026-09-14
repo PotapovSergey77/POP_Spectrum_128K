@@ -225,13 +225,14 @@ def lay(pix, x0, y0, tile, ink, paper, width=None, height=None):
 
 def band(pix):
     """The knotwork band at the foot: its yellow on the crimson, the orange
-    and pink of it yellow too."""
+    and pink of it yellow too -- both of one brightness, or each cell would
+    pick its own."""
     for y in range(FOOT, 192):
         for x in range(SIDE, 256 - SIDE):
             v = pix[y][x]
             if v < 16:
                 bright = v in (A_YELLOW, A_WHITE, A_ORANGE, A_PINK, A_GREEN)
-                pix[y][x] = zx(YELLOW, 1) if bright else zx(RED)
+                pix[y][x] = heavy(YELLOW) if bright or y < FOOT + 2 else heavy(RED)
 
 
 def border(pix, story):
@@ -398,6 +399,7 @@ COLUMN = 32                 # its Apple colour
 
 def column(pix, cols):
     x = 48
+    rect2(pix, 46, 80, 18, 72, zx(BLACK))   # and nothing of the Apple's beside it
     for y in range(80, 152):
         c = cols[y][COLUMN:COLUMN + 3]
         rect2(pix, x, y, 8, 1, zx(BLACK))
@@ -427,6 +429,7 @@ def sides(pix, cols):
             rect2(pix, x, y, 6, 6, zx(BLUE, (cx + cy) & 1))
     column(pix, cols)
     # the block it stands on, yellow, lit along its top and outer side
+    rect2(pix, 40, 152, 28, 16, zx(BLACK))
     rect2(pix, 40, 152, 24, 16, zx(YELLOW, 1))
     rect2(pix, 40, 152, 24, 2, zx(WHITE, 1))
     rect2(pix, 40, 152, 2, 16, zx(WHITE, 1))
@@ -524,7 +527,7 @@ def story(pix, cols, dots):
     letters(pix, mask, TOP + 2, FOOT, 8 * 4, 132 * 4)
 
 
-def credit(pix, apple, cols, dots, splash):
+def credit(pix, apple, cols, dots, splash, upto=FOOT):
     """The credits and the title are letters in dots laid over the splash:
     where a credit has changed a byte of the splash, a lit dot beside
     another lit dot, of anything but the ground's colour, is a letter's --
@@ -540,7 +543,11 @@ def credit(pix, apple, cols, dots, splash):
             run = dots[y][d] and ((d and dots[y][d - 1]) or (d < 559 and dots[y][d + 1]))
             if run and c not in (A_BLACK, A_CRIMSON, GROUND):
                 mask[y][d] = True
-    letters(pix, mask, TOP, FOOT, 0, 560)
+    letters(pix, mask, TOP, upto, 0, 560)
+
+
+def edges(pix):
+    """A black edge a pixel wide round every letter."""
     edge = heavy(BLACK)
     for y in range(TOP, FOOT):
         for x in range(SIDE, 256 - SIDE):
@@ -549,6 +556,61 @@ def credit(pix, apple, cols, dots, splash):
             if any(0 <= y + dy < 192 and pix[y + dy][x + dx] == LETTER
                    for dy in (-1, 0, 1) for dx in (-1, 0, 1)):
                 pix[y][x] = edge
+
+
+# "Broderbund Software presents": the Apple sets it in a narrow face whose
+# strokes run into each other two dots to a pixel.  It is set again, where
+# the Apple has it, in a face of the same height with room between the
+# strokes; the Broderbund sign above it stays the Apple's.
+PRESENTS_AT = 118           # the first line under the sign
+BIG = {
+    ' ': ['...'] * 10,
+    'B': ['#####.', '##..##', '##..##', '##..##', '#####.', '##..##', '##..##',
+          '##..##', '##..##', '#####.'],
+    'S': ['.####.', '##..##', '##....', '##....', '.####.', '....##', '....##',
+          '....##', '##..##', '.####.'],
+    'a': ['.####.', '....##', '.#####', '##..##', '##..##', '##..##', '.#####'],
+    'b': ['##....', '##....', '##....', '#####.', '##..##', '##..##', '##..##',
+          '##..##', '##..##', '#####.'],
+    'd': ['....##', '....##', '....##', '.#####', '##..##', '##..##', '##..##',
+          '##..##', '##..##', '.#####'],
+    'e': ['.####.', '##..##', '##..##', '######', '##....', '##..##', '.####.'],
+    'f': ['..###.', '.##..#', '.##...', '#####.', '.##...', '.##...', '.##...',
+          '.##...', '.##...', '.##...'],
+    'n': ['#####.', '##..##', '##..##', '##..##', '##..##', '##..##', '##..##'],
+    'o': ['.####.', '##..##', '##..##', '##..##', '##..##', '##..##', '.####.'],
+    'p': ['#####.', '##..##', '##..##', '##..##', '##..##', '##..##', '#####.',
+          '##....', '##....', '##....'],
+    'r': ['##.###', '###...', '##....', '##....', '##....', '##....', '##....'],
+    's': ['.####.', '##..##', '##....', '.####.', '....##', '##..##', '.####.'],
+    't': ['.##...', '.##...', '#####.', '.##...', '.##...', '.##...', '.##...',
+          '.##..#', '..###.'],
+    'u': ['##..##', '##..##', '##..##', '##..##', '##..##', '##..##', '.#####'],
+    'w': ['##...##', '##...##', '##...##', '##.#.##', '#######', '###.###',
+          '.#...#.'],
+}
+DESCENDS = ('p',)
+
+
+def big_text(pix, text, centre, baseline):
+    """A line of BIG, centred on a pixel, its letters sitting on a line."""
+    width = sum(len(BIG[ch][0]) + 1 for ch in text) - 1
+    x = centre - width // 2
+    for ch in text:
+        glyph = BIG[ch]
+        top = baseline - len(glyph) + (3 if ch in DESCENDS else 0)
+        for j, row in enumerate(glyph):
+            for i, c in enumerate(row):
+                if c == '#':
+                    pix[top + j][x + i] = LETTER
+        x += len(glyph[0]) + 1
+
+
+def presents(pix):
+    # the Apple's lines: its letters' feet on 129 and 143, their middle
+    # at dot 295 and 287
+    big_text(pix, 'Broderbund Software', SIDE + (295 - FIRST_COL * 4) // 2, 130)
+    big_text(pix, 'presents', SIDE + (287 - FIRST_COL * 4) // 2, 144)
 
 
 # The copyright line on the knotwork band: the Apple's letters there are
@@ -633,7 +695,12 @@ def screen(name):
     if name in STORY:
         story(pix, cols, dots)
     elif name != 'splash':
-        credit(pix, apple, cols, dots, splash)
+        if name == 'presents':
+            credit(pix, apple, cols, dots, splash, upto=PRESENTS_AT)
+            presents(pix)
+        else:
+            credit(pix, apple, cols, dots, splash)
+        edges(pix)
         if name == 'title':
             copyright(pix)
     rows = [[0] * 256 for _ in range(192)]
