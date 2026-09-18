@@ -156,15 +156,26 @@ mtal:           db      0
 ; And on to the screen, wherever the view has put them.
 
 
+CPKEEP          equ     64 + (CANVAS_W * 192) % 32  ; cleared by hand
+
 compose:        xor     a               ; no front pieces noted yet
                 ld      (nfront), a
                 ld      (recfront), a
                 inc     a
                 ld      (frontok), a
-                call    page_pixels     ; a clean canvas first
+                call    page_pixels     ; a clean canvas first: pushed, a
+                ld      (cpsp + 1), sp  ; quarter of the time an LDIR takes.
+                ld      sp, CANVAS + CANVAS_W * 192     ; The interrupt may
+                ld      hl, 0           ; come while the stack is the canvas:
+                ld      b, (CANVAS_W * 192 - CPKEEP) / 32   ; it pushes below
+cpfill:         rept    16              ; it, in this bank -- what it pages in
+                push    hl              ; for the sound is this one -- and
+                endm                    ; what it leaves is cleared in turn;
+                djnz    cpfill          ; the last CPKEEP bytes go by hand,
+cpsp:           ld      sp, 0           ; so it never reaches under the canvas
                 ld      hl, CANVAS
                 ld      de, CANVAS + 1
-                ld      bc, CANVAS_W * 192 - 1
+                ld      bc, CPKEEP - 1
                 ld      (hl), 0
                 ldir
 
@@ -551,11 +562,6 @@ newroom:        call    compose
                 call    maketorches
                 jp      page_art
 
-; build_fore below is written but not called yet: the rectangles it collects
-; are right -- the row index it makes matches the one baked on the host, row
-; for row -- but something paints rows it should not, so the mask that
-; travels is still the baked one until that is found.
-
 cvrow:          db      0
 cvleft:         db      0
 
@@ -603,13 +609,8 @@ bfnum1:         inc     hl
                 or      a
                 ret     z
                 call    mul35
-                ld      b, h
-                ld      c, l
-                dec     bc
-                ld      hl, foremask
-                ld      de, foremask + 1
-                ld      (hl), 0
-                ldir
+                call    zerofill
+
 
                 ld      a, (nfront)     ; then paint the rectangles into it
                 ld      (fleft), a
@@ -620,21 +621,6 @@ bfpaint:        call    frontrect
                 ld      (frow), a
                 ld      a, c
                 ld      (frows), a
-bfrow:          ld      a, (frow)
-                cp      192
-                jp      nc, bfrownext
-                ld      l, a
-                ld      h, 0
-                ld      de, foreband
-                add     hl, de
-                ld      a, (hl)
-                inc     a
-                jp      z, bfrownext
-                dec     a
-                call    mul35
-                ld      de, foremask
-                add     hl, de
-                ld      (fmrow), hl
                 ld      hl, (fx0)       ; the byte it starts in
                 srl     h
                 rr      l
@@ -642,9 +628,8 @@ bfrow:          ld      a, (frow)
                 rr      l
                 srl     h
                 rr      l
-                ex      de, hl
-                ld      hl, (fmrow)
-                add     hl, de
+                ld      a, l
+                ld      (fcol), a
                 ld      a, (fx0)        ; and the bits of that byte
                 and     7
                 ld      b, a
@@ -654,12 +639,11 @@ bfsh1:          dec     b
                 jr      z, bfsh2
                 srl     a
                 jr      bfsh1
-bfsh2:          ld      c, a            ; C = the first byte's mask
+bfsh2:          ld      (fmask0), a     ; the first byte's mask
 
-                push    hl              ; the last pixel of it, which for a
-                ld      hl, (fx0)       ; piece at the right hand end of the
-                ld      a, (fpx)        ; room does not fit in eight bits
-                ld      e, a
+                ld      hl, (fx0)       ; the last pixel of it, which for a
+                ld      a, (fpx)        ; piece at the right hand end of the
+                ld      e, a            ; room does not fit in eight bits
                 ld      d, 0
                 add     hl, de
                 dec     hl
@@ -675,28 +659,57 @@ bfsh3:          dec     d
                 jr      z, bfsh4
                 add     a, a
                 jr      bfsh3
-bfsh4:          ld      d, a            ; D = the last byte's mask
-                srl     h               ; and B = which byte that is
+bfsh4:          ld      (fmask1), a     ; the last byte's mask
+                srl     h               ; and how many bytes on it is
                 rr      l
                 srl     h
                 rr      l
                 srl     h
                 rr      l
-                ld      b, l
-                pop     hl
+                ld      a, (fcol)
+                ld      b, a
+                ld      a, l
+                sub     b
+                ld      (fspan), a
 
-                push    hl              ; how many bytes it spans, without
-                ld      hl, (fx0)       ; losing the row it is writing to
-                srl     h
-                rr      l
-                srl     h
-                rr      l
-                srl     h
-                rr      l
-                ld      e, l
-                pop     hl
-                ld      a, b
-                sub     e
+; All of that is the rectangle's and the same on every row of it: worked
+; out once, and each row only finds its place in the mask and paints.
+
+                ld      hl, 0           ; no row of it placed yet
+                ld      (fmrow), hl
+bfrow:          ld      a, (frow)
+                cp      192
+                jr      nc, bfrownext
+                ld      hl, (fmrow)     ; the row after one placed: every
+                ld      a, h            ; row of a rectangle is marked, so
+                or      l               ; it is the next row of the mask
+                jr      z, bfplace
+                ld      de, ROOM_BYTES
+                add     hl, de
+                jr      bfat
+bfplace:        ld      a, (frow)
+                ld      l, a
+                ld      h, 0
+                ld      de, foreband
+                add     hl, de
+                ld      a, (hl)
+                inc     a
+                jr      z, bfrownext
+                dec     a
+                call    mul35
+                ld      de, foremask
+                add     hl, de
+                ld      a, (fcol)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+bfat:           ld      (fmrow), hl
+                ld      a, (fmask1)
+                ld      d, a
+                ld      a, (fmask0)
+                ld      c, a
+                ld      a, (fspan)
+                or      a
                 jr      nz, bfwide
                 ld      a, c            ; all in the one byte
                 and     d
@@ -724,6 +737,41 @@ bfrownext:      ld      hl, frow
                 ld      hl, fleft
                 dec     (hl)
                 jp      nz, bfpaint
+                ret
+
+; HL bytes of the foreground mask from its start made nought, eight to a
+; round and the few over them first.
+
+zerofill:       ld      a, l
+                and     7
+                ld      c, a            ; the few over eights
+                srl     h
+                rr      l
+                srl     h
+                rr      l
+                srl     h
+                rr      l               ; HL = how many eights
+                ex      de, hl
+                ld      hl, foremask
+                xor     a
+                inc     c
+                jr      zfodd1
+zfodd:          ld      (hl), a
+                inc     hl
+zfodd1:         dec     c
+                jr      nz, zfodd
+                inc     e               ; DE eights: counted as E within D
+                dec     e
+                jr      z, zfouter
+                inc     d
+zfouter:        ld      b, e
+zfloop:         rept    8
+                ld      (hl), a
+                inc     hl
+                endm
+                djnz    zfloop
+                dec     d
+                jr      nz, zfloop
                 ret
 
 ; The next note, unpacked: B = its top row, C = how many, (fx0) = its first
@@ -775,6 +823,10 @@ frow:           db      0
 frows:          db      0
 fx0:            dw      0
 fpx:            db      0
+fcol:           db      0
+fmask0:         db      0
+fmask1:         db      0
+fspan:          db      0
 
 floormasks:     ld      a, 1
                 call    onemask

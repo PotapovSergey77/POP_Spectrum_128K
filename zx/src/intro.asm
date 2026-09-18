@@ -253,7 +253,8 @@ introsp:        dw      0
 ; in the room the canvas has once the game begins.
 
 cutbuf          equ     roomblk
-CUT_PERIOD      equ     4               ; fiftieths a frame at SPEED 7
+CUT_Q7          equ     19              ; quarters of a fiftieth a frame at
+CUT_Q12         equ     22              ; SPEED 7 and at SPEED 12
 CUT_CLEAN       equ     0xC000 + CUT_CLEAN_OFF
 BAND_BYTES      equ     CUT_BAND_ROWS * 32
 
@@ -430,22 +431,27 @@ cfltip:         ld      (hl), c
                 ld      c, CUT_INK_WHITE
 cflbody:        ld      (hl), c
 
-; PAUSE, SPEED long: four fiftieths a frame at 7, and four and five by
-; turns at 12, which is what six more of the Apple's milliseconds come to
-; -- a third slower than the three the game's frame takes, which went too
-; fast.  The screen changes on an interrupt, never in the middle of one
+; PAUSE, SPEED long: four and three quarter fiftieths a frame at 7, and
+; five and a half at 12, which is what six more of the Apple's milliseconds
+; come to -- over half as long again as the three the game's frame takes,
+; which went too fast.  What a frame does not take whole is carried to the
+; next.  The screen changes on an interrupt, never in the middle of one
 ; being shown, and a key starts the game.
 
                 ld      a, (cflags)
-                and     1
-                ld      hl, ctog
-                and     (hl)
+                rrca                    ; carry: SPEED 12
+                ld      a, CUT_Q7
+                jr      nc, cq1
+                ld      a, CUT_Q12
+cq1:            ld      hl, ctog        ; quarters of a fiftieth, and what
+                add     a, (hl)         ; was left of the last frame's
                 ld      c, a
-                ld      a, (hl)
-                xor     1
+                and     3
                 ld      (hl), a
                 ld      a, c
-                add     a, CUT_PERIOD
+                rrca
+                rrca
+                and     0x3F
                 ld      c, a
 cwait:          halt
                 xor     a

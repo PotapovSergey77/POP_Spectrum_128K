@@ -489,11 +489,14 @@ vb2:            rrca
 ; enough that the frame can begin the moment it is done, with the beam still
 ; in the border, instead of waiting at the halt.  That is the third
 ; interrupt; a frame that has overrun it will start on the next one whatever
-; happens, so the view has until then.  And VWMIN runs go whatever the clock
-; says: on a machine slower than this one a frame had nothing left over, and
-; the view never moved at all.
+; happens, so the view has until then.  And when the view has had nothing
+; for VWHUNG frames, VWMIN runs go whatever the clock says: on a machine
+; slower than this one a frame had nothing left over, and the view never
+; moved at all.  Only then: in a fight a frame's own work runs well into its
+; last period, and runs owed every frame made it late.
 
 VWMIN           equ     2
+VWHUNG          equ     2
 VWBATCH         equ     4
 
 vw_fill:        ld      a, (vwcam)
@@ -505,8 +508,15 @@ vw_fill:        ld      a, (vwcam)
                 ld      a, FRAME_WAIT - 1
 vwgoal:         inc     a
                 ld      (vwstop), a
-                ld      a, VWMIN
+                ld      hl, vwhung      ; gone hungry: runs owed, and
+                ld      a, (hl)         ; otherwise none, and only as time
+                inc     (hl)            ; allows
+                cp      VWHUNG
+                sbc     a, a
+                cpl
+                and     VWMIN
                 ld      (vwmin), a
+                jr      z, vwtime
 vwf1:           ld      a, (vwatt)
                 or      a
                 jr      nz, vwfatt
@@ -515,11 +525,13 @@ vwf1:           ld      a, (vwatt)
                 call    vw_batch
                 jr      vwf2
 vwfatt:         call    vw_attrs
-vwf2:           ld      hl, vwmin       ; the runs it has whatever happens
+vwf2:           xor     a
+                ld      (vwhung), a
+                ld      hl, vwmin       ; the runs it has whatever happens
                 dec     (hl)
                 jp      p, vwf1
                 inc     (hl)
-                call    vwdue
+vwtime:         call    vwdue
                 ld      hl, vwstop
                 cp      (hl)
                 jr      c, vwf1
@@ -5427,6 +5439,7 @@ nohalt:         db      0               ; the fill ran up to the interrupt
 vwwait:         db      0               ; a step is due: the queue waits
 vwstop:         db      0               ; the one it runs up to
 vwmin:          db      0               ; rows still owed it this frame
+vwhung:         db      0               ; frames since it last had a run
 atbase:         dw      0               ; the colours set_attrs writes
 masterc:        db      0
 coverm:         dw      0
