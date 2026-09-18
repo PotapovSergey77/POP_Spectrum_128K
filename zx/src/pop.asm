@@ -5565,7 +5565,9 @@ stubbank:       push    bc
                 ld      bc, 0x4000 - 2 - ISRSTUBLEN - 1 ; to the interrupt's
                 ld      (hl), 0         ; way in
                 ldir
-                call    newroom         ; and the room is composed, not loaded
+                call    roombuild       ; and the room is composed, not loaded:
+                                        ; its code put back first, the
+                                        ; princess's band having been there
                 call    readlinks
                 call    set_attrs
 

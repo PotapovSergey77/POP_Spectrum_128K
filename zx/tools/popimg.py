@@ -49,9 +49,10 @@ class Image:
 
 
 class Table:
-    def __init__(self, path):
+    def __init__(self, path, data=None):
         self.name = os.path.basename(path)
-        data = open(path, 'rb').read()
+        if data is None:
+            data = open(path, 'rb').read()
         self.count = data[0]
         # Records follow the pointer table, so image 1 pins the load address.
         first = struct.unpack_from('<H', data, 1)[0]
@@ -70,6 +71,13 @@ class Table:
             rows = [body[y * w:(y + 1) * w] for y in range(h)]
             rows.reverse()                  # stored bottom first
             self.images[i] = Image(i, w, h, b''.join(rows))
+
+    @classmethod
+    def from_memory(cls, mem, addr):
+        """A table where a loader left it: its pointers say how far it runs."""
+        count = mem[addr]
+        end = struct.unpack_from('<H', mem, addr + 2 * count + 1)[0]
+        return cls('$%04X' % addr, bytes(mem[addr:end]))
 
     def get(self, index):
         return self.images.get(index)
