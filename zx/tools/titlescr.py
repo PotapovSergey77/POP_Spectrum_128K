@@ -787,13 +787,49 @@ STORY = ('prolog', 'sumup')
 GROUND = A_DKBLUE
 
 
-def story(pix, cols, dots):
+# The story's text: the Apple sets it in dots, four to a colour, and two of
+# them to a Spectrum pixel left its letters ragged whichever way they were
+# halved.  So it is set again in the face "presents" has, a pixel wider
+# apart so the lines run as far as the Apple's, each line where the Apple's
+# starts and on its line; the great initial letter of each page stays the
+# Apple's.
+STORY_TEXT = {
+    'prolog': [(51, 44, "n the Sultan's absence"),
+               (51, 60, 'the Grand Vizier JAFFAR'),
+               (26, 76, 'rules with the iron fist of'),
+               (26, 92, 'tyranny.  Only one obstacle'),
+               (26, 109, 'remains between Jaffar and'),
+               (26, 125, "the throne: the Sultan's"),
+               (26, 142, 'beautiful young daughter. . . .')],
+    'sumup': [(80, 45, 'arry Jaffar . . . or die'),
+              (80, 62, 'within the hour.  All'),
+              (32, 78, "the Princess's hopes now"),
+              (32, 94, 'rest on the brave youth she'),
+              (32, 111, 'loves.  Little does she know'),
+              (32, 127, 'that he is already a prisoner'),
+              (32, 144, "in Jaffar's dungeons. . . .")],
+}
+INITIAL = 16                # taller than this, a letter is the initial
+STORY_GAP = 2               # between letters: the lines as long as the Apple's
+
+
+def story(pix, cols, dots, name):
     for y in range(TOP + 2, FOOT):
         for x in range(SIDE + 1, 255 - SIDE):
             pix[y][x] = zx(BLUE)
     mask = [[bool(dots[y][d]) and cols[y][d >> 2] != GROUND
              for d in range(560)] for y in range(192)]
-    letters(pix, mask, TOP + 2, FOOT, 8 * 4, 132 * 4)
+    initial = [[False] * 560 for _ in range(192)]
+    for left, top, bits in components(mask, TOP + 2, FOOT, 8 * 4, 132 * 4):
+        if len(bits) > INITIAL:
+            for j, row in enumerate(bits):
+                for i, c in enumerate(row):
+                    if c == '#':
+                        initial[top + j][left + i] = True
+    letters(pix, initial, TOP + 2, FOOT, 8 * 4, 132 * 4)
+    for x, baseline, text in STORY_TEXT[name]:
+        assert x + big_width(text, STORY_GAP) <= 255 - SIDE - 1, text
+        big_text(pix, text, None, baseline, left=x, gap=STORY_GAP)
 
 
 def credit(pix, apple, cols, dots, splash, upto=FOOT, ink=LETTER):
@@ -871,13 +907,42 @@ BIG = {
     'y': ['##..##', '##..##', '##..##', '##..##', '##..##', '##..##', '.#####',
           '....##', '##..##', '.####.'],
 }
+BIG.update({
+    'A': ['.####.', '##..##', '##..##', '##..##', '######', '##..##', '##..##',
+          '##..##', '##..##', '##..##'],
+    'F': ['######', '##....', '##....', '##....', '#####.', '##....', '##....',
+          '##....', '##....', '##....'],
+    'G': ['.####.', '##..##', '##....', '##....', '##.###', '##..##', '##..##',
+          '##..##', '##..##', '.#####'],
+    'L': ['##....'] * 9 + ['######'],
+    'O': ['.####.'] + ['##..##'] * 8 + ['.####.'],
+    'P': ['#####.', '##..##', '##..##', '##..##', '#####.', '##....', '##....',
+          '##....', '##....', '##....'],
+    'R': ['#####.', '##..##', '##..##', '##..##', '#####.', '####..', '##.##.',
+          '##..##', '##..##', '##..##'],
+    'T': ['######'] + ['..##..'] * 9,
+    'V': ['##..##'] * 6 + ['.####.', '.####.', '..##..', '..##..'],
+    'i': ['##', '##', '..', '##', '##', '##', '##', '##', '##', '##'],
+    'k': ['##....', '##....', '##....', '##..##', '##.##.', '####..', '###...',
+          '####..', '##.##.', '##..##'],
+    'l': ['##'] * 10,
+    'v': ['##..##', '##..##', '##..##', '##..##', '.####.', '.####.', '..##..'],
+    'z': ['######', '....##', '...##.', '..##..', '.##...', '##....', '######'],
+    '.': ['##', '##'],
+    ':': ['##', '##', '..', '..', '..', '##', '##'],
+    "'": ['##', '##', '.#', '#.', '..', '..', '..', '..', '..', '..'],
+})
 DESCENDS = ('p', 'g', 'y')
 
 
-def big_text(pix, text, centre, baseline):
-    """A line of BIG, centred on a pixel, its letters sitting on a line."""
-    width = sum(len(BIG[ch][0]) + 1 for ch in text) - 1
-    x = centre - width // 2
+def big_width(text, gap=1):
+    return sum(len(BIG[ch][0]) + gap for ch in text) - gap
+
+
+def big_text(pix, text, centre, baseline, left=None, gap=1):
+    """A line of BIG, centred on a pixel or from a left edge, its letters
+    sitting on a line, gap pixels apart."""
+    x = left if left is not None else centre - big_width(text, gap) // 2
     for ch in text:
         glyph = BIG[ch]
         top = baseline - len(glyph) + (3 if ch in DESCENDS else 0)
@@ -885,7 +950,7 @@ def big_text(pix, text, centre, baseline):
             for i, c in enumerate(row):
                 if c == '#':
                     pix[top + j][x + i] = LETTER
-        x += len(glyph[0]) + 1
+        x += len(glyph[0]) + gap
 
 
 def byline(pix):
@@ -985,7 +1050,7 @@ def screen(name):
     if name not in STORY:
         apex(pix)
     if name in STORY:
-        story(pix, cols, dots)
+        story(pix, cols, dots, name)
     elif name != 'splash':
         if name == 'presents':
             credit(pix, apple, cols, dots, splash, upto=PRESENTS_AT)
