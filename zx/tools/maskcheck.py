@@ -78,7 +78,8 @@ def main(argv):
     bad = 0
     for n in rooms:
         cpu.mem[sym['roomnum']] = n
-        call(cpu, sym['roombuild'])
+        call(cpu, sym['roomrest'])
+        call(cpu, sym['newroom'])
         ids = bytes(cpu.mem[sym['roomids']:sym['roomids'] + 60])
         whole = masks(cpu, sym)
         for loc in range(30):
@@ -113,15 +114,18 @@ def main(argv):
     carried = 0
     for n in rooms:
         cpu.mem[sym['roomnum']] = n
-        call(cpu, sym['roombuild'])
+        call(cpu, sym['roomrest'])
+        call(cpu, sym['newroom'])
         alone = masks(cpu, sym)
         for other in rooms:
             if other == n:
                 continue
             cpu.mem[sym['roomnum']] = other
-            call(cpu, sym['roombuild'])
+            call(cpu, sym['roomrest'])
+            call(cpu, sym['newroom'])
         cpu.mem[sym['roomnum']] = n
-        call(cpu, sym['roombuild'])
+        call(cpu, sym['roomrest'])
+        call(cpu, sym['newroom'])
         if masks(cpu, sym) != alone:
             carried += 1
             print('room %2d  floor %-28s half %s'
@@ -136,7 +140,8 @@ def main(argv):
     redraw = 0
     for n in rooms:
         cpu.mem[sym['roomnum']] = n
-        call(cpu, sym['roombuild'])
+        call(cpu, sym['roomrest'])
+        call(cpu, sym['newroom'])
         call(cpu, sym['repaint'])
         room0 = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
         for h in (16, 63):

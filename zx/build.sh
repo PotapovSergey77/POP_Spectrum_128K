@@ -40,7 +40,7 @@ print('управление %04X..%04X, %d байт в банке 7, свобо�
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'
 assert sym['modend'] <= 0x10000 - 12 and sym['modend'] > sym['MODORG'], 'the control code does not fit under the interrupt stub'
 PY
-python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin
+python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin $(ls build/bin/level*.bin 2>/dev/null | sort -V | sed 's/^/L:/')
 python - <<'PY'
 import re, json, os
 sym = {}
@@ -67,5 +67,7 @@ print('буферы под загрузчиком %04X..%04X, %d байт'
       % (sym['LOWBUF'], sym['LOWTOP'], sym['LOWTOP'] - sym['LOWBUF']))
 assert sym['LOWTOP'] <= sym['stubs'], 'буферы под загрузчиком налезли на код'
 assert sym['LOWSTACK'] >= 23755, 'буферы под загрузчиком залезли в переменные ПЗУ'
+assert sym['blockbot'] & 0xff <= 0xff - 4, 'blockbot не на одной странице'
+assert sym['LOWVARS'] + sym['LOWVARLEN'] <= 23755, 'переменные рисования налезли на стек'
 assert work <= sym['HICODE'], 'рабочий буфер налез на код боя'
 PY

@@ -65,6 +65,8 @@ def boot(path):
     """
     manifest = os.path.splitext(path)[0] + '.banks.json'
     banks = json.load(open(manifest)) if os.path.exists(manifest) else []
+    levels = [m['file'] for m in banks if m.get('level')]
+    banks = [m for m in banks if not m.get('level')]
     cpu = z80.Z80()
     cpu.mem[0x5B5C] = 0x00          # BANKM, as 128 BASIC leaves it
     # The two bytes of the 48K ROM that the program's IM 2 vector leans on:
@@ -89,7 +91,39 @@ def boot(path):
     cpu.pc = entry
     release(cpu)
     skip_intro(cpu, path)
+    tape_levels(cpu, path, levels)
     return cpu
+
+
+def tape_levels(cpu, path, levels):
+    """
+    The levels after the first are bare blocks on the tape after the banks,
+    which the game loads itself through the ROM's LD-BYTES in tapeload --
+    and there is no ROM here, so tapeload is done here: the next block of
+    the tape, in order, into the background bank at the blueprint.
+    """
+    for sym in (os.path.splitext(path)[0] + '.sym.json',
+                os.path.join(os.path.dirname(path), 'sym.json')):
+        if os.path.exists(sym):
+            s = json.load(open(sym))
+            break
+    else:
+        return
+    if 'tapeload' not in s:
+        return
+    queue = list(levels)
+
+    def load(cpu):
+        data = open(queue.pop(0), 'rb').read()
+        at = s['level'] - 0xC000
+        bank = s['BANK_BG']
+        if cpu.page == bank:
+            cpu.mem[0xC000 + at:0xC000 + at + len(data)] = data
+        else:
+            cpu.banks[bank][at:at + len(data)] = data
+        cpu.f |= 1                      # carry: loaded
+        cpu.iff1 = cpu.iff2 = 1         # LD-BYTES leaves them on
+    cpu.traps[s['tapeload']] = load
 
 
 def skip_intro(cpu, path):

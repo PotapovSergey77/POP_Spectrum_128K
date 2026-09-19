@@ -65,14 +65,15 @@ def host_masks(level, n):
 def compose(cpu, sym, n):
     """Have the game build room n, and hand back what it made."""
     cpu.mem[sym['roomnum']] = n
-    cpu.sp = (cpu.sp - 2) & 0xffff
-    cpu.mem[cpu.sp] = SENTINEL & 0xff
-    cpu.mem[cpu.sp + 1] = SENTINEL >> 8
-    cpu.pc = sym['roombuild']
-    steps = 0
-    while cpu.pc != SENTINEL and steps < 8000000:
-        cpu.step()
-        steps += 1
+    for step in ('roomrest', 'newroom'):
+        cpu.sp = (cpu.sp - 2) & 0xffff
+        cpu.mem[cpu.sp] = SENTINEL & 0xff
+        cpu.mem[cpu.sp + 1] = SENTINEL >> 8
+        cpu.pc = sym[step]
+        steps = 0
+        while cpu.pc != SENTINEL and steps < 8000000:
+            cpu.step()
+            steps += 1
     base = sym['room']
     return bytes(cpu.mem[base:base + 6720])
 

@@ -14,7 +14,7 @@ Load in 128 mode: entering 48 BASIC locks paging until a hard reset.
 Writes a manifest beside the tape so the emulator can place the blocks the
 same way without pretending to be a tape.
 
-Usage: maketap.py <out.tap> <code.bin> <org> [bank:file ...]
+Usage: maketap.py <out.tap> <code.bin> <org> [bank:file ...] [L:level.bin ...]
 """
 import json
 import os
@@ -28,7 +28,9 @@ STUB = 4                        # bytes per paging stub in the program
 
 def main(argv):
     out, binary, org = argv[1], argv[2], int(argv[3])
-    banks = [(int(a.split(':')[0]), a.split(':', 1)[1]) for a in argv[4:]]
+    banks = [(int(a.split(':')[0]), a.split(':', 1)[1]) for a in argv[4:]
+             if not a.startswith('L:')]
+    levels = [a[2:] for a in argv[4:] if a.startswith('L:')]
 
     lines = [t.line(10, [t.CLEAR] + list(t.number(org - 1))),
              t.line(20, [t.LOAD, ord('"'), ord('"'), t.CODE_T])]
@@ -57,10 +59,22 @@ def main(argv):
         tap += t.code_file(os.path.basename(path)[:10], payload, PAGE_WINDOW)
         manifest.append({'file': path, 'addr': PAGE_WINDOW, 'bank': bank})
 
+    # The levels after the first: each a bare data block, no header, which
+    # the game loads itself with the ROM's LD-BYTES when the one before is
+    # left by its stairs -- the tape going on where the loader stopped.
+    for path in levels:
+        payload = open(path, 'rb').read()
+        tap += t.data(payload)
+        manifest.append({'file': path, 'addr': None, 'bank': None,
+                         'level': True})
+
     open(out, 'wb').write(tap)
     json.dump(manifest, open(os.path.splitext(out)[0] + '.banks.json', 'w'))
     print('%s: %d байт, %d блоков' % (out, len(tap), len(manifest) + 1))
     for m in manifest:
+        if m.get('level'):
+            print('   %-18s    уровень, грузит игра' % os.path.basename(m['file']))
+            continue
         print('   %-18s -> %04X%s' % (os.path.basename(m['file']), m['addr'],
                                       '' if m['bank'] is None
                                       else '  банк %d' % m['bank']))

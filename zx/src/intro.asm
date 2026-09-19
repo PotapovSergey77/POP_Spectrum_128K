@@ -247,7 +247,7 @@ introsp:        dw      0
 ; hidden one over peels of what was under them.  Here the lines anything
 ; moves in, the band, are composed in fixed memory, where the room-build
 ; code lies when the game is on -- it is put by in its bank at start, and
-; roombuild puts it back -- over a clean copy of them kept in the art bank,
+; roomrest puts it back -- over a clean copy of them kept in the art bank,
 ; past the title screens; then the band goes to whichever screen is not
 ; shown, and that one is shown on an interrupt.  The pictures are in bank 1,
 ; in the room the canvas has once the game begins.

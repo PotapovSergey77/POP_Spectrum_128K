@@ -151,6 +151,33 @@ _KID = poplevel.Level(os.path.join(
 START_ROW = int(os.environ.get('POP_START_ROW', _KID[1] // 10 if POP_START else 0))
 START_COL = int(os.environ.get('POP_START_COL', _KID[1] % 10 if POP_START else 5))
 START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
+# The levels the tape carries: the first in the background bank, the rest
+# after the banks, each loaded over it when the one before is left by its
+# stairs -- LoadNextLevel, with the tape for the disk.
+LEVELS = 2
+
+
+def level_path(n):
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..',
+                        '01 POP Source', 'Levels', 'LEVEL%d' % n)
+
+
+def level_head(n):
+    """
+    STARTKID's normal start worked out here, where the tables are: CharX,
+    CharY and the block row of KidStartBlock, CharFace the other way from
+    KidStartFace -- the turn he starts with brings him round to it -- and
+    whether another level follows this one on the tape.
+    """
+    scrn, block, face = poplevel.Level(level_path(n)).kid_start
+    x = popframe.screen_x(popframe.char_x(block % 10)) & 0xffff
+    return bytes([x & 0xff, x >> 8, popframe.char_y(block // 10),
+                  block // 10, 1 if face == 0xff else 0,
+                  1 if n < LEVELS else 0])
+
+
+LEVEL_HEAD = 6
+
 # Level one's drop lands him with his face in the first torch's colours; two
 # POP units back, and he stands in the cell before them.
 START_NUDGE = 4 if POP_START and ROOM[0] == 'LEVEL1' else 0
@@ -714,6 +741,14 @@ def main(argv):
     bgblob, bgat, bgoffs = bgexport.build(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), '..', '..',
         '01 POP Source', 'Levels', ROOM[0]))
+    # After the blueprint, what the Z80 needs to start a level: see
+    # level_head.  Level one's is only there to keep the shape; the next
+    # levels come off the tape as blueprint and head together, over it.
+    assert bgat['level'] + 2304 == len(bgblob)
+    bgblob = bytes(bgblob) + level_head(1)
+    for n in range(2, LEVELS + 1):
+        blob = bgexport.level_blob(level_path(n)) + level_head(n)
+        open(os.path.join(binout, 'level%d.bin' % n), 'wb').write(blob)
     # The torch flames go in after the level.  They are read a frame at a
     # time, into a buffer, before they are laid over the room -- which is
     # in the art bank, so they could not be read from here directly -- and
@@ -893,6 +928,10 @@ def main(argv):
         assert fb_at + 192 + len(foremask) <= 0x10000, 'the art bank is full'
         f.write('foreband    equ %d' % fb_at + chr(10))
         f.write('foremask    equ %d' % (fb_at + 192) + chr(10))
+        # as many of its rows as fit under the interrupt's way in: a room
+        # that wants more goes without cover on its lowest
+        fore_rows = (0x10000 - 12 - fb_at - 192) // ROOM_BYTES
+        f.write('FORE_ROWS   equ %d' % min(fore_rows, 192) + chr(10))
         f.write('ROOM_BYTES  equ %d' % ROOM_BYTES + chr(10))
         f.write('CAM_MAX     equ %d' % CAM_MAX + chr(10))
         f.write('SIG_ART_AT  equ %d' % PAGE_WINDOW + chr(10))
@@ -939,6 +978,11 @@ def main(argv):
         # gets no stairs, wherever a test tape starts.
         f.write('START_ROOM  equ %d\n' % int(os.environ.get('POP_START_ROOM', level.kid_start[0])))
         f.write('KIDSTART_SCRN equ %d\n' % level.kid_start[0])
+        f.write('LEVEL_LEN   equ %d\n' % (2304 + LEVEL_HEAD))
+        f.write('LEVELS      equ %d\n' % LEVELS)
+        f.write('LV_ARMED1   equ %d\n' % (1 if LEVELS > 1 else 0))
+        f.write('LV_KIDSCRN  equ %d\n' % (poplevel.INFO + poplevel.KidStartScrn))
+        f.write('LV_HEAD     equ 2304\n')
         # And a tape for the fight can start him with the sword already his.
         f.write('START_SWORD equ %d\n' % int(os.environ.get('POP_GOTSWORD', 0)))
         for n, name in enumerate(SOUNDS):

@@ -128,7 +128,8 @@ def play(tape, script, frames, settle):
         if n < frames:
             works.append((n, work, periods))
     live = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
-    call(cpu, sym['roombuild'])
+    call(cpu, sym['roomrest'])
+    call(cpu, sym['newroom'])
     fresh = bytes(cpu.mem[sym['room']:sym['room'] + 6720])
     stale = sum(1 for i in range(6720) if live[i] != fresh[i])
     return works[1:], stale

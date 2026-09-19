@@ -76,6 +76,7 @@ class Z80:
         self.halted_now = False
         self.cycles = 0
         self.ports = {}          # port -> value returned by IN
+        self.traps = {}          # address -> what the harness does there
         self.default_in = 0xFF
         # 128K paging.  Rather than route every read through a mapper -- which
         # would cost more than the rest of the interpreter -- the window is
@@ -260,6 +261,12 @@ class Z80:
 
     def step(self):
         self._acc = 0
+        if self.pc in self.traps:
+            # a routine the harness does itself -- the ROM's, which is
+            # not here -- and returns from as the routine would
+            self.traps[self.pc](self)
+            self.pc = self.pop()
+            return
         if self.pc == 0x0038 and self.im == 2:
             # IM 2 handlers call the ROM's own at 0x38 for the frame count
             # and the keyboard, and there is no ROM here: the count, the
@@ -484,8 +491,14 @@ class Z80:
             elif y == 2:                                # out (n),a
                 self.io_write((self.a << 8) | self.fetch(), self.a)
             elif y == 3:                                # in a,(n)
-                self.fetch()
-                self.a = self.default_in
+                n = self.fetch()
+                v = self.default_in
+                if n == 0xFE:                           # the keyboard: every
+                    for r in range(8):                  # half row whose line
+                        if not self.a & (1 << r):       # is low, ANDed
+                            v &= self.ports.get(((0xFF ^ (1 << r)) << 8)
+                                                | 0xFE, 0xFF)
+                self.a = v
             elif y == 4:                                # ex (sp),hl
                 v = self.rw(self.sp)
                 self.ww(self.sp, self.hl)

@@ -600,8 +600,13 @@ bfmark2:        inc     b
 bfnum:          ld      a, (hl)
                 inc     a
                 jr      z, bfnum1
-                ld      (hl), c
+                ld      a, c            ; as many as the mask has room for:
+                cp      FORE_ROWS       ; any past those go without
+                ld      a, 0xff
+                jr      nc, bfnum2
+                ld      a, c
                 inc     c
+bfnum2:         ld      (hl), a
 bfnum1:         inc     hl
                 djnz    bfnum
 
@@ -686,7 +691,12 @@ bfrow:          ld      a, (frow)
                 jr      z, bfplace
                 ld      de, ROOM_BYTES
                 add     hl, de
-                jr      bfat
+                ld      de, foremask + FORE_ROWS * ROOM_BYTES
+                or      a               ; unless that is past the rows the
+                sbc     hl, de          ; mask has room for
+                add     hl, de
+                jr      c, bfat
+                jr      bfrownext
 bfplace:        ld      a, (frow)
                 ld      l, a
                 ld      h, 0
@@ -978,6 +988,8 @@ nrcut:          ld      a, (nrwhich)    ; the stub has the room already: all
                 jr      z, nrcdown
                 dec     a
                 jr      z, nrcleft
+                dec     a
+                jp      nz, levelgo
 
                 ld      hl, (charx)     ; right
                 ld      de, -280
@@ -1035,6 +1047,129 @@ nrcgo:          xor     a               ; nothing of the last room's still
                 ld      (mbshow + 6), a
                 jp      nrfinish        ; and out of this block first: the
                                         ; repaint goes straight over it
+
+; LoadNextLevel and RESTART in TOPCTRL.S, as far as this game has them --
+; nextroom has let the tune he went up to play out -- the screen black, the next blueprint off the tape over this one -- the disk's
+; LoadLevelX -- and the level set going: nothing moving or falling, nobody
+; following him, the exit he came in by open and coming down behind him
+; (ENTRANCE), and he stands at KidStartBlock with the sword he has, all his
+; strength, and the turn STARTKID starts him with.  The room itself is the
+; room change's to build.
+
+levelgo:        xor     a
+                ld      (gdkeep), a
+                ld      (numtrans), a
+                ld      (nummob), a
+                ld      (exitopen), a
+                ld      (charsword), a
+                ld      (yvel), a
+                ld      (xvel), a
+                ld      (jarabove), a
+                ld      (weightless), a
+                ld      (offguard), a
+                ld      (droppedout), a
+                ld      hl, SCREEN      ; black while the tape turns
+                ld      de, SCREEN + 1
+                ld      bc, 6143
+                ld      (hl), a
+                ldir
+                call    setvis
+                call    tapeload
+
+                call    page_bg         ; where he starts, and whether a
+                ld      hl, level + LV_HEAD     ; level comes after this one
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      (charx), de
+                ld      a, (hl)
+                ld      (chary), a
+                inc     hl
+                ld      a, (hl)
+                ld      (blocky), a
+                inc     hl
+                ld      a, (hl)
+                ld      (facing), a
+                inc     hl
+                ld      a, (hl)
+                ld      (lvflag), a
+                ld      a, (level + LV_KIDSCRN)
+                ld      (roomnum), a
+
+                ld      c, a            ; ENTRANCE: the exit in his room, open,
+                dec     a               ; and coming down fast -- CLOSEEXIT
+                ld      l, a
+                ld      h, 0
+                add     hl, hl          ; thirty to a room
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                or      a
+                sbc     hl, de
+                ld      de, level + 29
+                add     hl, de
+                ld      b, 30
+lgexit:         ld      a, (hl)
+                and     0x1f
+                cp      BG_EXIT
+                jr      z, lgclose
+                dec     hl
+                djnz    lgexit
+                jr      lgkid
+lgclose:        ld      de, 720         ; its state, all the way open
+                add     hl, de
+                ld      (hl), EMAXVAL
+                dec     b
+                ld      a, b
+                ld      (trloc), a
+                ld      a, c
+                ld      (trscrn), a
+                ld      a, 3
+                ld      (trdirec), a
+                call    addtrob
+
+lgkid:          ld      a, 0xff         ; STARTKID
+                ld      (charlife), a
+                ld      a, 1
+                ld      (gotsword), a
+                ld      (charact), a
+                ld      a, (maxkidstr)
+                ld      (kidstr), a
+                ld      a, 1
+                ld      (meterdirty), a
+                call    page_canvas
+                ld      a, SQ_TURN
+                call    jumpseq
+                call    page_canvas
+                call    step_seq
+                jp      nrcgo
+
+; LD-BYTES in the 48K ROM, which is what is paged: the blueprint and its head
+; into the background bank.  Until it loads -- a tape not playing is waited
+; for, and one that went wrong is tried again.  The border it leaves is
+; BASIC's, and the game's is black.
+
+tapeload:       ld      a, BANK_BG
+                call    pageset
+                ld      ix, level
+                ld      de, LEVEL_LEN
+                ld      a, 0xff
+                scf
+                call    0x0556
+                jr      nc, tapeload
+                xor     a
+                out     (254), a
+                ret
+
+; On the way into a room, straight to where the rule puts it.
+
+camhome:        call    camsched
+                ld      (cam), a
+                ret
 
 ; He is at one end of the room or the other, and there is a room that way.
 

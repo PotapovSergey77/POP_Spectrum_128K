@@ -78,7 +78,22 @@ def front_body(imgnum, t1, t2):
     img = (t2 if imgnum & 0x80 else t1).get(imgnum & 0x7f)
     if img is None:
         return 0, 0
+    if imgnum in SHAFTS:
+        # The long pillars are laid masked, not stamped, so only their
+        # pixels hide him -- and for all but a few rows at one end those are
+        # a narrow shaft in the middle of the picture.  The mask is one
+        # rectangle, so it is the shaft's: the columns lit in most rows, and
+        # the pixel either side that MASKTAB clears too.  The whole width hid
+        # him in the dark to the shaft's left.
+        rows = list(img.pixels())
+        cols = [x for x in range(img.px_width)
+                if sum(r[x] for r in rows) * 2 >= len(rows)]
+        lo, hi = max(0, min(cols) - 1), min(img.px_width - 1, max(cols) + 1)
+        return lo, hi - lo + 1
     return 0, img.width * 7
+
+
+SHAFTS = (0x48, 0x49)           # fronti of pillarbottom and pillartop
 
 
 def piece_tables():
@@ -206,12 +221,33 @@ def flasks_set(level):
     return bytes(level)
 
 
+def gates_set(level):
+    """
+    GETINITOBJ's gates: a gate's spec in the blueprint is 1 for up and 2 for
+    down, which initsettings turns into the state -- gmaxval or gminval.  A
+    gate left at its raw 1 was all but shut.
+    """
+    level = bytearray(level)
+    for i in range(720):
+        if level[i] & 0x1f == 4 and level[720 + i] in (1, 2):
+            level[720 + i] = (GMAXVAL, 0)[level[720 + i] - 1]
+    return bytes(level)
+
+
+GMAXVAL = 47 * 4
+
+
+def level_blob(level_path):
+    """A level's blueprint as the game keeps it."""
+    return gates_set(flasks_set(guards_fixed(open(level_path, 'rb').read())))
+
+
 def build(level_path):
     """(blob, {name: offset}) -- everything the background bank carries."""
     tables = piece_tables()
     t1 = image_table(os.path.join(IMAGES, 'IMG.BGTAB1.DUN'))
     t2 = image_table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'), True)
-    level = flasks_set(guards_fixed(open(level_path, 'rb').read()))
+    level = level_blob(level_path)
 
     blob = bytearray()
     at = {}

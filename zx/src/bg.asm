@@ -890,10 +890,11 @@ drawexitb:      ld      a, (xco)
 dxbody:         ld      a, (dxonly)     ; the top slat alone: the stairs are
                 or      a               ; far below those rows, and so is
                 jr      nz, dxdoor      ; every slice under the top one
-                ld      a, (roomnum)
-                cp      KIDSTART_SCRN
-                jr      z, dxdoor
                 call    page_bg
+                ld      a, (roomnum)
+                ld      hl, level + LV_KIDSCRN
+                cp      (hl)
+                jr      z, dxdoor
                 ld      a, (ay)
                 sub     12
                 ld      (yco), a
@@ -1273,25 +1274,30 @@ spdown:         ld      a, c
 
 ; The room's thirty ids and thirty states, out of the blueprint.
 
-imgnum:         db      0
-imgw:           db      0
-imgh:           db      0
-xco:            db      0
-yco:            db      0
-bgop:           db      0
-bgrow:          db      0
-bgsrc:          dw      0
-frimg:          db      0
-objid:          db      0
-state:          db      0
-preced:         db      0
-spreced:        db      0
-below:          db      0
-sbelow:         db      0
-dy:             db      0
-ay:             db      0
-blockrow:       db      0
-blockcol:       db      0
+; These the drawing sets before it reads them, and they live under the
+; loader's stack, where 48K BASIC kept its channels: see LOWVARS.
+
+imgnum          equ     LOWVARS
+imgw            equ     LOWVARS + 1
+imgh            equ     LOWVARS + 2
+xco             equ     LOWVARS + 3
+yco             equ     LOWVARS + 4
+bgop            equ     LOWVARS + 5
+bgrow           equ     LOWVARS + 6
+bgsrc           equ     LOWVARS + 7     ; two
+frimg           equ     LOWVARS + 9
+objid           equ     LOWVARS + 10
+state           equ     LOWVARS + 11
+preced          equ     LOWVARS + 12
+spreced         equ     LOWVARS + 13
+below           equ     LOWVARS + 14
+sbelow          equ     LOWVARS + 15
+dy              equ     LOWVARS + 16
+ay              equ     LOWVARS + 17
+blockrow        equ     LOWVARS + 18
+blockcol        equ     LOWVARS + 19
+LOWVARLEN       equ     20
+
 blockptr:       dw      0
 roomnum:        db      START_ROOM      ; the way into the level
 blockbot:       db      2, 65, 128, 191, 254
@@ -1304,8 +1310,6 @@ imgbuf:         ds      384             ; the largest piece is 378 bytes
 ; in, thirty five out, and the two banks are never in together, so a row goes
 ; through a buffer down here.
 
-cvleft2:        db      0
-cvacc:          db      0
 ; Eight bytes of seven pixels are exactly seven of eight, so the row divides
 ; into five of these and nothing is left over.  The art is stored with its
 ; leftmost pixel already in bit 7 -- see bgexport.py -- so all that is left
@@ -1804,8 +1808,6 @@ bgmask:         db      0
 ; the room on that side, and everything about the new one -- its picture, its
 ; three masks, its torches -- is made on the way in.
 
-nextroom:       jp      cutchar
-
 ; The rooms stack 189 scanlines apart -- the bottom of the row below the
 ; screen against the bottom of the top row of the next one -- so falling
 ; through takes that off his height and puts him on the top row.
@@ -1866,6 +1868,25 @@ CUTRIGHTX       equ     286
 TOPCUTPL        equ     10
 TOPCUTMI        equ     240             ; ScrnTop - 16, as a byte
 BOTCUT          equ     215             ; ScrnBottom + 24
+
+; 1: a level follows this one on the tape, and 2 once he has gone up the
+; stairs, when the next level is loaded; 0 when there is none.
+
+lvflag:         db      LV_ARMED1
+
+nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
+                cp      2               ; has: LoadNextLevel, by way of the
+                jr      nz, cutchar     ; room change it is so much like --
+                ld      a, 0x3f         ; once the tune up the stairs is heard
+                in      a, (254)        ; out, the torches burning on as it
+                rra                     ; plays, or ENTER or SPACE has cut it
+                call    nc, ststop      ; short, as a key does POP's PlaySong
+                ld      a, (sfxtimer)
+                or      a
+                ret     nz
+                ld      c, 4
+                ld      a, c
+                jp      nrcall
 
 cutchar:        ld      a, (charact)    ; falling: only the bottom counts
                 cp      3
@@ -3519,13 +3540,17 @@ gdr1:           rrca
 agwas:          db      0
 aoplate:        call    animplate
                 jr      aodone
-aoexit:         ld      a, (trobst)     ; the door's height before, the
-                rrca                    ; lower: nothing below its foot
-                rrca                    ; changes
+aoexit:         ld      a, (trobst)     ; the door's height before and
+                push    af              ; after, the lower of the two:
+                call    animexit        ; nothing below its foot changes --
+                pop     bc              ; after, when it is coming down
+                ld      a, (trobst)
+                cp      b
+                jr      c, aoex1
+                ld      a, b
+aoex1:          rrca
+                rrca
                 and     0x3f
-                push    af
-                call    animexit
-                pop     af
                 add     a, 17
                 jr      aostart
 aofloor:        call    animfloor
@@ -3685,7 +3710,8 @@ agf1:           ld      l, a
                 call    addsound
                 jp      stopobj
 
-; The exit door only ever opens, and stops when it is all the way up.
+; The exit door opens, and stops when it is all the way up; the one a
+; level is come into by comes down behind him, as fast as a gate.
 
 animexit:       ld      a, 1
                 ld      (redwant), a
@@ -3694,6 +3720,9 @@ animexit:       ld      a, 1
                 ld      a, (trdirec)
                 and     0x80
                 ret     nz
+                ld      a, (trdirec)    ; 3 on: coming down fast, as a gate
+                cp      3               ; does -- the entrance closing
+                jp      nc, agfast
                 ld      a, SND_RAISINGEXIT
                 call    addsound
                 ld      a, (trobst)

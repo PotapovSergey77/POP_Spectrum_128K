@@ -75,6 +75,14 @@ dopage:         and     7
                 include "bg.inc"
 MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 
+; And between the last system variable the 48K ROM's interrupt touches and
+; the bottom of the stack, what 48K BASIC kept its channels in: nothing uses
+; it now, and twenty of the drawing's bytes live there, which start makes
+; nought as the program they came out of had them.  Here, ahead of bg.asm:
+; pasmo takes an equ on an equ not yet defined as nought.
+
+LOWVARS         equ     23734
+
 SCREEN          equ     16384
 FRAMES          equ     23672           ; the ROM's own count of interrupts,
                                         ; kept by the handler at 0x38
@@ -381,12 +389,6 @@ camtake:
                 ld      (flipnow), a
                 ret
 
-; On the way into a room, straight to where the rule puts it.
-
-camhome:        call    camsched
-                ld      (cam), a
-                ret
-
 ; A = the camera the rule gives: how many of the three steps, the way he
 ; faces, he has passed.  In the room's pixels, where each step lands for the
 ; view it starts from -- 44, 86 and 128 facing right; facing left 264, 208
@@ -680,9 +682,6 @@ roomrest:       ld      a, BANK_CVS
                 ld      bc, RB1LEN
                 ldir
                 jp      page_art
-
-roombuild:      call    roomrest
-                jp      newroom
 
 ; Which screen the ULA shows: bank 5, the ordinary one at 0x4000, or bank 7,
 ; the 128's second.  A new view is made in the one not shown and shown with
@@ -1689,6 +1688,8 @@ seqloop:        ld      a, (hl)
                 cp      SEQ_FIRSTOP     ; nextlevel: GoneUpstairs
                 jp      nz, seqloop     ; die: no data
                 push    hl
+                ld      hl, lvflag      ; inc NextLevel, if there is one
+                sla     (hl)
                 ld      a, SONG_UPSTAIRS
                 ld      c, 25
                 call    cue_song
@@ -2830,7 +2831,6 @@ flskp:          ld      bc, 0           ; patched
                 djnz    flrow
                 ret
 
-flvw:           db      0               ; the flame's bytes that are in view
 
 ; Colour, which the Spectrum keeps in cells of eight pixels by eight.  The
 ; map is the room's width and the camera slides over it in whole cells, so
@@ -2955,7 +2955,7 @@ sacskip:        inc     c
 ; And the colour of a flask's potion in the one cell its bubbles keep to: red
 ; for the two that give strength, green for weightlessness, blue for the
 ; rest.  flask_ma puts them in cell row 5 of the block row, 4 for a tall
-; bottle, and in the cell that starts at room pixel 28 col + 16 -- + 12 in
+; bottle -- which potion five's is not -- and in the cell that starts at room pixel 28 col + 16 -- + 12 in
 ; an odd column, where the flask is five pixels further back.
 
 ; HL = a rectangle that gets bigger, DE = one to take in.  An empty one takes
@@ -3193,15 +3193,17 @@ fatile:         ld      a, (hl)
                 rlca
                 and     7
                 jr      z, faout        ; empty: no bubbles
-                ld      de, INK_POTRED * 256 + 5
-                cp      2
-                jr      c, faink        ; refresh: the short bottle
-                ld      e, 4
-                jr      z, faink
+                ld      de, INK_POTRED * 256 + 4
+                cp      2               ; the tall bottle a cell row higher
+                jr      z, faink        ; than the short one --
+                jr      c, fashort      ; refresh: the short bottle
                 ld      d, INK_POTGREEN
                 cp      3
                 jr      z, faink
                 ld      d, INK_POTBLUE
+                cp      5               ; and five's is the short one too
+                jr      nz, faink
+fashort:        inc     e
 faink:          ld      a, b            ; eight cell rows a block row
                 add     a, a
                 add     a, a
@@ -5376,7 +5378,6 @@ curleft:        dw      0
 croprow:        db      0
 croptop:        db      0
 kidstr:         db      3               ; initmaxstr in TOPCTRL.S
-wanted:         db      0
 
 curw:           db      0
 curh:           db      0
@@ -5387,7 +5388,6 @@ curbank:        db      0
 curent:         dw      0
 rowy:           db      0
 
-rawcol:         db      0               ; where his picture wanted to go,
 spskip:         db      0               ; and what the left edge cut off
 frstart:        db      0               ; the interrupt this frame began on
 tilestate:      db      0               ; the state of the tile last read
@@ -5448,7 +5448,6 @@ covr:           dw      0               ; the room's and the working copy's,
 covw:           dw      0               ; and which row of the mask that is
 covi:           db      0
 coverb:         dw      0
-workp:          dw      0
 roomp:          dw      0
 rowptr:         dw      0
 rndseed:        db      37
@@ -5458,7 +5457,6 @@ flrec:          dw      0
 flst:           dw      0
 flsrc:          dw      0
 flstride:       db      0
-flmask:         dw      0
 flmbase:        dw      0
 flroom:         dw      0
 flwork:         dw      0
@@ -5468,14 +5466,11 @@ ercol:          db      0
 ertop:          db      0
 erw:            db      0
 erh:            db      0
-hidecnt:        db      0
-hidebits:       db      0
 shcol:          db      0
 shtop:          db      0
 shw:            db      0
 shh:            db      0
 
-dfrow:          dw      0               ; the fused row's pair, and its
 dfrowlen:       dw      0               ; bookkeeping: see dfsetup
 dfsrc:          dw      0
 dfcnt:          db      0
@@ -5528,6 +5523,12 @@ hiend:
 start:          di
                 ld      sp, stack
 
+                ld      hl, LOWVARS     ; the drawing's bytes, nought
+                ld      de, LOWVARS + 1
+                ld      bc, LOWVARLEN - 1
+                ld      (hl), 0
+                ldir
+
                 ld      hl, revsrc      ; the bit reversal table, out to where
                 ld      de, REVTAB      ; it lives from now on
                 ld      bc, 256
@@ -5578,7 +5579,8 @@ stubbank:       push    bc
                 ld      bc, 0x4000 - 2 - ISRSTUBLEN - 1 ; to the interrupt's
                 ld      (hl), 0         ; way in
                 ldir
-                call    roombuild       ; and the room is composed, not loaded:
+                call    roomrest        ; and the room is composed, not loaded:
+                call    newroom
                                         ; its code put back first, the
                                         ; princess's band having been there
                 call    readlinks

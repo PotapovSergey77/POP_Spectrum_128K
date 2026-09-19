@@ -2357,7 +2357,9 @@ peflash:        ld      a, b
 ; and bubbles, goes five pixels to the left -- a byte back and two pixels on
 ; -- and every flask then has its bubbles in a single cell, which is the one
 ; its colour goes in; flask_front moves the bottle the same way.  And a tall
-; bottle's bubbles go another four rows up, into one cell row.  The bottle
+; bottle's bubbles go another four rows up, into one cell row -- but not
+; potion five's, which drawfrnt gives the ordinary bottle: SETUPFLASK raises
+; them all the same, and they stood off its neck.  The bottle
 ; itself stands two pixels lower, every one of them, so that its top is in
 ; the cell row under the bubbles' and takes none of their colour.
 
@@ -2381,9 +2383,15 @@ flask_ma:       ld      a, (state)
                 jr      z, fmcont       ; empty
                 cp      0x40
                 jr      c, fmcont       ; refresh
-                ld      e, 8            ; the tall bottle
-                jr      z, fmcont       ; boost
+                jr      z, fmtall       ; boost
                 ld      hl, BUBBLES + 3 + 256 * (BUBMASK + 1)
+                cp      0xa0            ; potion five is in the ordinary
+                jr      z, fmcont       ; bottle, and bubbles at its height
+fmtall:         ld      e, 7            ; the tall bottle: the last line of
+                                        ; the pictures is empty, so seven up
+                                        ; keeps every dot in the cell row
+                                        ; above and brings them a line nearer
+                                        ; its neck
 fmcont:         ld      a, (ay)
                 sub     14
                 sub     e
@@ -2469,28 +2477,25 @@ bubble_poke:    call    trrowcol
                 ld      a, (hl)
                 ld      c, a            ; C = 0 to 2, or -1
                 ld      a, (trobst)     ; the potion: the tall bottles are
-                and     0xe0            ; eight rows higher, and past the
-                ld      d, 0            ; boost a pixel on
-                ld      e, 2            ; E = the shift into the byte
-                cp      0x40
-                jr      c, bpshort
-                ld      d, 8
+                and     0xe0            ; seven rows higher, as flask_ma has
+                ld      de, 2           ; them, and past the boost a pixel on
+                cp      0x40            ; -- potion five too, though its
+                jr      c, bpshort      ; bottle and its bubbles' height are
+                jr      z, bptall       ; the ordinary one's
+                dec     e               ; E = the shift into the byte
+                cp      0xa0
                 jr      z, bpshort
-                dec     e
+bptall:         ld      d, 7
 bpshort:        ld      a, (blockcol)
                 rra
                 jr      nc, bpeven
                 inc     e               ; odd: a pixel further back in its cell
 bpeven:         ld      a, e
                 ld      (bpshift), a
-                ld      a, (blockrow)   ; the top row: 23 over the floor line,
-                inc     a               ; and the rest higher
+                ld      hl, blockbot + 1        ; the top row: 23 over the floor
+                ld      a, (blockrow)   ; line, and the rest higher -- the
+                add     a, l            ; table on one page
                 ld      l, a
-                ld      h, 0
-                push    de
-                ld      de, blockbot
-                add     hl, de
-                pop     de
                 ld      a, (hl)
                 sub     23
                 sub     d
