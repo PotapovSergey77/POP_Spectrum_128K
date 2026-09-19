@@ -1760,7 +1760,8 @@ sfxtake:        ld      a, c
 ; nowbank to whoever the handler interrupted.
 
 page_sfx:       ld      a, (pgbits + 1)
-                or      BANK_CVS
+                ld      hl, sfxbank     ; the sounds' bank: the canvas bank's,
+                or      (hl)            ; or the art bank's for the titles
                 jr      pgout
 page_back:      ld      a, (pgbits + 1)
                 ld      hl, nowbank

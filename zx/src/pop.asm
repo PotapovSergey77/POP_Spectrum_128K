@@ -6139,9 +6139,14 @@ stubbank:       push    bc
                 ld      a, ISRPAGE
                 ld      i, a
                 im      2
+                ld      a, BANK_ART     ; the titles' music is theirs
+                ld      (sfxbank), a
                 ld      a, POP_START    ; the titles, before the game begins
                 or      a               ; -- a tape started elsewhere, for a
                 call    nz, intro       ; test, goes straight in
+                call    ststop          ; and the game's sounds its own
+                ld      a, BANK_CVS
+                ld      (sfxbank), a
                 call    page_art        ; and they are gone from the art bank:
                 ld      hl, 0xC000 + 2  ; the room is composed into a bank of
                 ld      de, 0xC000 + 3  ; noughts, past the signature and up
@@ -6288,6 +6293,7 @@ RBROOM          equ     3275            ; the room's code at most: RBINTRO's
 PRISTINE        equ     RBAT1 + RBROOM  ; the level as it began: see lvkeep
 PRISTLEN        equ     2304
 pristok         equ     0x5C77          ; there is one to keep
+sfxbank         equ     0x5CD4          ; where the sounds are: see page_sfx
 curlev          equ     0x5C75          ; the level, less one
 origstr         equ     0x5C76          ; MaxKidStr as the level began
 cvbasep         equ     0x5C72          ; the canvas as a redraw sees it: two

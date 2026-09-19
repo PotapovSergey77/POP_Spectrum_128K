@@ -34,6 +34,7 @@ import sys
 import bgexport
 import popframe
 import popimg
+import cpcmusic
 import cpcsound
 import titlescr
 import popseq
@@ -541,9 +542,15 @@ def main(argv):
     # screens are shown before that: they travel in it, packed, after the
     # signature, and are gone once the room goes over them.
     intro_at, intro = titlescr.build(binout)
+    # And the CPC's music for them, after the screens: see cpcmusic.py.
+    tunes = cpcmusic.tunes()
+    tunes_off = len(SIG_ART) + len(intro)
+    intro = intro + b''.join(tunes)
     assert len(SIG_ART) + len(intro) <= BANK_SIZE - 12, 'the title screens do not fit the art bank'
     open(os.path.join(binout, 'bank_art.bin'), 'wb').write(SIG_ART + intro)
-    print('заставка   %d байт, в банке свободно %d' % (len(intro), BANK_SIZE - 12 - len(SIG_ART) - len(intro)))
+    print('заставка   %d байт, музыка %d, в банке свободно %d'
+          % (len(intro) - sum(map(len, tunes)), sum(map(len, tunes)),
+             BANK_SIZE - 12 - len(SIG_ART) - len(intro)))
     open(os.path.join(binout, 'floorband.bin'), 'wb').write(bytes(floorband))
 
     # RDBLOCK's handler wants a column for coordinates outside the room too,
@@ -832,6 +839,11 @@ def main(argv):
         inc.append('T_%-9s equ %d' % (name.upper(), PAGE_WINDOW + len(SIG_ART) + off))
     inc += cutinc
     inc.append('CUT_CLEAN_OFF equ %d' % clean_off)
+    at = tunes_off
+    for i, t in enumerate(tunes):                   # where each begins,
+        inc.append('TUNE%d       equ %d' % (i, PAGE_WINDOW + at))     # and
+        at += len(t)                                # the last its end
+    inc.append('TUNE%d       equ %d' % (len(tunes), PAGE_WINDOW + at))
     for k, v in bgat.items():
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
     inc.append('flames      equ %d' % (PAGE_WINDOW + flames_at))

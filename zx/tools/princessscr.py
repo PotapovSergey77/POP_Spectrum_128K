@@ -448,6 +448,8 @@ def build_blobs():
             f |= 32
         if covered(rec, body):
             f |= 64
+        if st.get('tune'):
+            f |= 128
         script.append(f)
         for n, x in rec:
             script += bytes([n, x])

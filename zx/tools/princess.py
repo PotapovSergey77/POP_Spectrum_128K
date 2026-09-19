@@ -120,19 +120,25 @@ def cut0():
             if flash[0]:
                 flash[0] -= 1
 
+    def tune():
+        tunes.append(len(frames))
+
+    tunes = []
     play(2)
-    play(8)                 # s_Princess
+    tune()
+    play(8)                 # s_Princess: the CPC's tune 2
     play(5)
     prn.jumpseq(PALERT)
     play(9)
-    # s_Squeek: none with the music off
+    tune()                  # s_Squeek: its tune 3, where the Apple's plays
     speed[0] = 7
     play(5)
     viz.jumpseq(VAPPROACH)
     play(6)
     viz.jumpseq(VSTOP)
     play(4)
-    play(12)                # s_Vizier
+    tune()
+    play(12)                # s_Vizier: its tune 4, which plays on to the end
     play(4)
     viz.jumpseq(VAPPROACH)
     play(30)
@@ -158,6 +164,8 @@ def cut0():
     play(28)
     speed[0] = 12
     play(20)                # s_StTimer
+    for n in tunes:
+        frames[n]['tune'] = True
     return frames
 
 

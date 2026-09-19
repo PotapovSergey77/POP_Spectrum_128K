@@ -11,8 +11,12 @@
 ; setvis shows one or the other.  The screens come packed in the art bank --
 ; see titlescr.py -- and are unpacked onto bank 5 with that bank paged in.
 ;
-; No music: the pauses are the ones PlaySongI makes when it is off.  TPAUSE
-; counts twice round 256 calls of StartGame?, some 32 milliseconds a count.
+; The music is the Amstrad CPC's (cpcmusic.py): its first tune from the
+; splash, its second with the story, and three of its own in the princess's
+; room -- the CPC starts each where these do, and each plays on until the
+; next or its end.  The pauses are still the ones PlaySongI makes when it is
+; off.  TPAUSE counts twice round 256 calls of StartGame?, some 32
+; milliseconds a count.
 
 intro:          ld      (introsp), sp
                 ei
@@ -20,6 +24,8 @@ intro:          ld      (introsp), sp
                 ld      a, 0x80         ; shown
                 call    setvis
 
+                xor     a               ; the CPC's title music
+                call    itune
                 ld      hl, T_SPLASH    ; PubCredit: the splash, all at once,
                 call    unpack          ; and a copy of it behind
                 xor     a
@@ -33,18 +39,24 @@ intro:          ld      (introsp), sp
                 ld      hl, T_BYLINE    ; AuthorCredit
                 ld      bc, 80 * 256 + 38
                 call    credit
-                ld      hl, T_TITLE     ; TitleScreen
-                ld      b, 140
-                call    credit1
+                ld      hl, T_TITLE     ; TitleScreen, and the splash after
+                ld      b, 255          ; it for as long as the CPC's first
+                call    credit1         ; tune still has to play: 772 counts
+                ld      a, 233          ; in all is its 1206 fiftieths
+                call    tpause
 
                 ld      a, 0x80         ; Prolog1: unpacked out of sight and
                 call    setvis          ; wiped on from the left, the way
+                ld      a, 1            ; the story's
+                call    itune
                 ld      hl, T_PROLOG    ; DBLEXPAND lays its columns down
                 call    unpack
                 call    wipe
                 xor     a
                 call    setvis
-                ld      a, 250
+                ld      a, 250          ; the story for as long as its tune:
+                call    tpause          ; 785 fiftieths
+                ld      a, 252
                 call    tpause
 
                 call    princess        ; PrincessScene
@@ -52,6 +64,8 @@ intro:          ld      (introsp), sp
                 call    black7          ; Prolog2, after a blackout: all at
                 ld      a, 0x80         ; once
                 call    setvis
+                ld      hl, T_PROLOG    ; the story's end is packed on its
+                call    unpack          ; beginning
                 ld      hl, T_SUMUP
                 call    unpack
                 xor     a
@@ -60,6 +74,7 @@ intro:          ld      (introsp), sp
                 call    tpause
 
 introend:       ld      sp, (introsp)   ; and the game: the key let go, as
+                call    ststop          ; the music stopped,
 iewait:         halt                    ; the Apple clears its strobe, and both
                 xor     a               ; screens black
                 in      a, (254)
@@ -233,6 +248,37 @@ tploop:         halt
                 ret
 
 introsp:        dw      0
+ctune:          db      0
+
+; A = one of the CPC's tunes, TUNE0 on, in the art bank: from its first tick,
+; over whatever was playing.
+
+itune:          add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, tunes
+                add     hl, de
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      c, (hl)
+                inc     hl
+                ld      b, (hl)
+                di
+                ld      (sfxptr), de
+                ld      (sfxstart), de
+                ld      (sfxend), bc
+                ld      a, 255
+                ld      (sfxprio), a
+                ld      (sfxcur), a
+                ld      a, 1
+                ld      (sfxtimer), a
+                call    sfx_quiet
+                ei
+                ret
+
+tunes:          dw      TUNE0, TUNE1, TUNE2, TUNE3, TUNE4, TUNE5
 
 ; ---------------------------------------------------------------- the princess
 ;
@@ -290,6 +336,8 @@ bandin:         push    af
                 ld      bc, BAND_BYTES
                 ldir
 
+                ld      a, 1            ; the room's tunes are 2, 3 and 4
+                ld      (ctune), a
                 ld      hl, cutinit     ; INITIT
                 ld      de, cutvars
                 ld      bc, CUTVARS
@@ -349,6 +397,14 @@ cnoglass:
                 xor     a
                 ld      (psand), a
 cnosand:
+                ld      a, (cflags)     ; one of the CPC's tunes for the room:
+                rla                     ; the next of the three
+                jr      nc, cnotune
+                ld      a, (ctune)
+                inc     a
+                ld      (ctune), a
+                call    itune
+cnotune:
                 call    pburn           ; DoFast: two flames and the stars
                 call    pburn
                 call    pstars

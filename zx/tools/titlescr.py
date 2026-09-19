@@ -1133,7 +1133,7 @@ def pack(target, base=None):
                 i = j
                 continue
         best, at = 0, 0
-        for c in reversed(heads.get(bytes(target[i:i + 3]), [])[-48:]):
+        for c in reversed(heads.get(bytes(target[i:i + 3]), [])[-1000:]):
             m = 0
             while i + m < n and m < 66 and target[c + m] == target[i + m]:
                 m += 1
@@ -1184,7 +1184,10 @@ def unpack(data, base=None):
 
 # The screens intro.asm shows, in the order they are packed.
 INTRO = [('splash', None), ('presents', 'splash'), ('byline', 'splash'),
-         ('title', 'splash'), ('prolog', None), ('sumup', None)]
+         ('title', 'splash'), ('prolog', None), ('sumup', 'prolog')]
+# The story's end on its beginning: the same border, and three quarters of
+# the screen the same.  intro.asm lays the beginning down again under it,
+# out of sight, and the CPC's music has the room that saves in the bank.
 
 
 def intro_blob():
