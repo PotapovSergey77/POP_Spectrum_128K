@@ -24,6 +24,14 @@ data = open('build/pop.bin', 'rb').read()
 base = sym['stubs']
 mod = data[sym['MODORG'] - base:sym['modend'] - base]
 assert len(mod) == sym['MODLEN'], 'the control code did not come out whole'
+# The canvas bank's own code, assembled at CODE1, rides in the start block
+# for start to put in place.
+c1 = data[sym['CODE1'] - base:sym['c1end'] - base]
+assert len(c1) == sym['C1LEN'] <= sym['CODE1_MAX'], 'код банка холста не влез'
+at = sym['c1img'] - base
+data = data[:at] + c1 + data[at + len(c1):]
+print('код банка холста %04X..%04X, %d байт, свободно там %d'
+      % (sym['CODE1'], sym['c1end'], len(c1), sym['CODE1_MAX'] - len(c1)))
 # The fight sits past the working copy, and the tape carries a gap to it.
 open('build/pop.bin', 'wb').write(data[:sym['roomend'] - base]
                                   + bytes(sym['HICODE'] - sym['roomend'])
@@ -57,7 +65,7 @@ print('код %04X..%04X, рабочий буфер %04X..%04X, до него с
 print('пуск %04X..%04X, в рабочем буфере' % (sym['start'], sym['initend']))
 assert sym['initend'] <= 0xC000, 'пуск не влез'
 rb = sym['roomend'] - sym['roomblk']
-room = 0x10000 - sym['RBAT1']
+room = min(0x10000 - 12 - sym['RBINTRO'], sym['CODE1'] - sym['RBAT1'])
 print('постройка комнаты %04X..%04X, %d байт, в банках места %d'
       % (sym['roomblk'], sym['roomend'], rb, room))
 assert rb <= room, 'код постройки комнаты не влез в банки'

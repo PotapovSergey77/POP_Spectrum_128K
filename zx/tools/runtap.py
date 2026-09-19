@@ -69,6 +69,10 @@ def boot(path):
     banks = [m for m in banks if not m.get('level')]
     cpu = z80.Z80()
     cpu.mem[0x5B5C] = 0x00          # BANKM, as 128 BASIC leaves it
+    # BASIC's system variables are not nought when the program starts, and
+    # the game keeps variables among them: something other than nought, so
+    # that one read before start clears it shows up here too.
+    cpu.mem[0x5C0B:0x5CCA] = bytes([0xA5]) * (0x5CCA - 0x5C0B)
     # The two bytes of the 48K ROM that the program's IM 2 vector leans on:
     # the run of 0xFF it points I into, and the DI at 0x0000 that the JR at
     # 0xFFFF takes as its displacement.

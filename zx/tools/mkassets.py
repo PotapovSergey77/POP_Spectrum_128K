@@ -782,13 +782,20 @@ def main(argv):
     canvas = PAGE_WINDOW + len(spr3) + len(SIG_SPR) + 3
     # The two floorpiece masks follow the canvas's pixels in their bank, and
     # the room-build code follows them; the canvas bank keeps the tables.
-    maskcan = canvas + 40 * 192
-    assert maskcan + 2 * 40 * 45 <= 0x10000, 'no room for the canvas and masks'
+    # Past the canvas, and never written by building a room: the code that
+    # works on the canvas bank with it paged in (CODE1, see pop.asm) and at
+    # the top the two floorpiece masks.  While the titles run, the room's
+    # code is kept where CODE1's tail and the masks will go (RBINTRO).
+    code1 = canvas + 40 * 192
+    maskcan = 0x10000 - 12 - 2 * 40 * 45
+    rbintro = 0x10000 - 12 - 3275           # the princess's room had 715 spare
+    code1_max = maskcan - code1
+    assert code1_max >= 256, 'no room for the canvas bank code'
     # The princess's room rides in the canvas's place, empty until the
     # first room is built: the room packed, the pictures and the script
     # packed, unpacked there for the scene -- see princessscr.py.  The clean
     # copy of the band it composes goes past the title screens.
-    cut_room = maskcan + 2 * 40 * 45 - canvas
+    cut_room = rbintro - canvas
     cut, cutfixed, cutinc, cutstats = princessscr.build(canvas, cut_room)
     open(os.path.join(binout, 'cutfixed.bin'), 'wb').write(cutfixed)
     clean_off = len(SIG_ART) + len(intro)
@@ -814,6 +821,9 @@ def main(argv):
            'swposes     equ %d' % (tables + len(table) + len(code)
                                    + len(entry) + 4 * top),
            'MASKCAN     equ %d' % maskcan,
+           'CODE1       equ %d' % code1,
+           'CODE1_MAX   equ %d' % code1_max,
+           'RBINTRO     equ %d' % rbintro,
            'CANVAS      equ %d' % canvas,
            'sfxmap      equ %d' % sfxmap_at,
            'sfxtab      equ %d' % sfxtab_at,

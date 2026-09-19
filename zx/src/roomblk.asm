@@ -562,11 +562,74 @@ cvgroup:        push    bc
 
 ; A room, start to finish: the blocks laid into the canvas, then repacked.
 
-newroom:        call    compose
+newroom:        ld      hl, CANVAS      ; the whole canvas: see rbwipe
+                ld      (cvbasep), hl
+                ld      a, (pristok)    ; the level as it began is in the
+                or      a               ; canvas, which the room is about to
+                jr      z, nrp1         ; take: into the working copy, which
+                call    page_pixels     ; the repaint after takes in turn
+                ld      hl, PRISTINE
+                ld      de, work        ; (the working copy)
+                ld      bc, PRISTLEN
+                ldir
+nrp1:           call    compose
                 call    convert
                 call    build_fore
                 call    floormasks
                 call    maketorches
+                ld      a, BANK_CVS     ; and this code put by again, in the
+                call    pageset         ; canvas bank past the slice: the
+                ld      hl, roomblk     ; canvas was all the room's while it
+                ld      de, RBAT1       ; was built, and roomrest brings it
+                ld      bc, RB1LEN      ; back from there for the next
+                ldir
+                ld      a, (pristok)    ; and the level as it began back
+                or      a
+                jr      z, nrp2
+                ld      hl, work
+                ld      de, PRISTINE
+                ld      bc, PRISTLEN
+                ldir
+nrp2:           jp      page_art
+
+; The level as it begins, into the canvas past the room's code (PRISTINE),
+; for a death to begin it again from: LoadLevelX in RESTART.  lvback puts it
+; back.  A page at a time through imgbuf, the two being in different banks.
+
+lvkeep:         ld      a, 1
+                ld      (pristok), a
+                ld      a, (maxkidstr)  ; and origstrength
+                ld      (origstr), a
+                ld      hl, level
+                ld      de, PRISTINE
+                ld      bc, BANK_BG * 256 + BANK_CVS
+                jr      lvcopy
+lvback:         ld      hl, PRISTINE
+                ld      de, level
+                ld      bc, BANK_CVS * 256 + BANK_BG
+lvcopy:         ld      a, 9            ; the blueprint: 2304 bytes
+lvc1:           push    af
+                ld      a, b
+                call    pageset
+                push    bc
+                push    de
+                ld      de, imgbuf
+                ld      bc, 256
+                ldir
+                pop     de
+                pop     bc
+                ld      a, c
+                call    pageset
+                push    bc
+                push    hl
+                ld      hl, imgbuf
+                ld      bc, 256
+                ldir
+                pop     hl
+                pop     bc
+                pop     af
+                dec     a
+                jr      nz, lvc1
                 jp      page_art
 
 cvrow:          db      0
@@ -1075,15 +1138,40 @@ levelgo:        xor     a
                 ld      (weightless), a
                 ld      (offguard), a
                 ld      (droppedout), a
+                ld      (heroic), a
+                ld      (enemyalert), a
+                ld      (stunned), a
+                ld      (oppstr), a
                 ld      hl, SCREEN      ; black while the tape turns
                 ld      de, SCREEN + 1
                 ld      bc, 6143
                 ld      (hl), a
                 ldir
                 call    setvis
-                call    tapeload
+                ld      a, (lvflag)     ; a death: RESTART, the level as it
+                cp      3               ; began, and the strength he began it
+                jr      z, lgagain      ; with
+                ld      hl, msgstart    ; the next level off the tape: the
+                call    tapemsg         ; player told to start it, and to
+                call    tapeload        ; stop it again once it has loaded --
+                ld      hl, msgstop     ; for a few seconds, or until ENTER or
+                call    tapemsg         ; SPACE
+                ld      b, 150
+lgwait:         halt
+                ld      a, 0x3f
+                in      a, (254)
+                rra
+                jr      nc, lgwent
+                djnz    lgwait
+lgwent:         ld      hl, curlev      ; kept as it begins
+                inc     (hl)
+                call    lvkeep
+                jr      lghead
+lgagain:        call    lvback
+                ld      a, (origstr)
+                ld      (maxkidstr), a
 
-                call    page_bg         ; where he starts, and whether a
+lghead:         call    page_bg         ; where he starts, and whether a
                 ld      hl, level + LV_HEAD     ; level comes after this one
                 ld      e, (hl)
                 inc     hl
@@ -1148,12 +1236,60 @@ lgkid:          ld      a, 0xff         ; STARTKID
                 ld      (kidstr), a
                 ld      a, 1
                 ld      (meterdirty), a
+                ld      a, (curlev)     ; level one's :special1: no sword yet,
+                or      a               ; the gate by the way in slams and he
+                ld      b, SQ_TURN      ; drops in
+                jr      nz, lgseq
+                ld      (gotsword), a
+                ld      a, 5
+                ld      (trscrn), a
+                ld      a, 2
+                ld      (trloc), a
+                call    trobat
+                call    pushpp
+                ld      b, SQ_STEPFALL
+lgseq:          push    bc
                 call    page_canvas
-                ld      a, SQ_TURN
+                pop     af
                 call    jumpseq
                 call    page_canvas
                 call    step_seq
                 jp      nrcgo
+
+; A line of the ROM's letters across the middle of the black screen: HL = the
+; column, then the text, nought at its end.
+
+tapemsg:        ld      a, (hl)
+                inc     hl
+                add     a, 0x60         ; cell row 11: the middle third's
+                ld      e, a            ; fourth
+                ld      d, 0x48
+tm1:            ld      a, (hl)
+                or      a
+                ret     z
+                push    hl
+                push    de
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                ld      bc, 0x3C00      ; the ROM's letters, space at 0x3D00
+                add     hl, bc
+                ld      b, 8
+tm2:            ld      a, (hl)
+                ld      (de), a
+                inc     hl
+                inc     d
+                djnz    tm2
+                pop     de
+                pop     hl
+                inc     hl
+                inc     e
+                jr      tm1
+
+msgstart:       db      9, "START THE TAPE", 0
+msgstop:        db      9, "STOP THE TAPE ", 0
 
 ; LD-BYTES in the 48K ROM, which is what is paged: the blueprint and its head
 ; into the background bank.  Until it loads -- a tape not playing is waited

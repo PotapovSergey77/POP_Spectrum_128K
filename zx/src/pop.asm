@@ -83,11 +83,15 @@ MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 
 LOWVARS         equ     23734
 
-; Below that, from just past FRAMES, system variables the 48K ROM has no use
-; for once BASIC is gone -- its interrupt keeps to KSTATE, LAST_K, REPDEL,
-; REPPER, FLAGS, MODE, FLAGS2 and FRAMES -- and the colder of the fixed
-; code's variables live there; start makes them nought with LOWVARS'.
+; Below that, system variables the 48K ROM has no use for once BASIC is
+; gone -- its interrupt keeps to KSTATE, LAST_K, REPDEL, REPPER, FLAGS, MODE,
+; FLAGS2 and FRAMES, and LD-BYTES reads BORDCR -- and many of the fixed
+; code's variables live there: from just past FRAMES, and between the ROM's
+; own from 0x5C0B, at the addresses they are given where they are declared.
+; start makes the lot nought, the ROM's with them, from SYSLOW to LOWVARS'
+; end.
 
+SYSLOW          equ     0x5C0B
 SYSVARS         equ     23675
 SYSVARLEN       equ     58
 
@@ -3263,8 +3267,11 @@ fanext:         inc     hl
 
 kid_death:      ld      a, (charlife)
                 or      a
-                ret     nz
-                ld      a, (frame)
+                jr      z, kdnow
+                ret     m               ; alive
+                call    page_pixels     ; dead a while: c1dead
+                jp      c1dead
+kdnow:          ld      a, (frame)
                 cp      185
                 jr      z, kddead
                 cp      177
@@ -5785,25 +5792,316 @@ hifix:
 hiend:
                 org     hifix
 
+; ---------------------------------------------------------------- CODE1
+;
+; What works on the canvas bank with it paged in, and on nothing else but
+; the fixed half of the map, lives in that bank: past the canvas, where a
+; room being built never writes.  Assembled in place, cut out of pop.bin by
+; build.sh into c1img, and put there by start.
+
+c1fix:
+                org     CODE1
+
+; The band's groups, imgbuf's seven room bytes (or fourteen) a row, back
+; into the slice as the canvas had them.
+
+c1unpack:       ld      a, (rbgroup)
+                add     a, a
+                add     a, a
+                add     a, a
+                ld      e, a
+                ld      d, 0
+                ld      hl, SLICE
+                add     hl, de
+                ex      de, hl          ; DE = the slice at the group
+                ld      hl, imgbuf
+                ld      a, (rbh)
+                ld      b, a
+                ld      a, (fmode)
+                or      a
+                jr      z, cufull
+                ld      a, (blockcol)
+                rra
+                jr      c, cuodd
+                inc     hl              ; an even block is the first half: the
+                inc     hl              ; second, from the fourth room byte
+                inc     hl
+                inc     de
+                inc     de
+                inc     de
+                inc     de
+cue1:           push    bc              ; unp_hi has B
+                ld      c, (hl)
+                inc     hl
+                call    unp_hi
+                pop     bc
+                inc     hl              ; seven on to the next row's fourth
+                inc     hl
+                inc     hl
+                ld      a, e            ; and forty less the four laid
+                add     a, CANVAS_W - 4
+                ld      e, a
+                jr      nc, cue2
+                inc     d
+cue2:           djnz    cue1
+                ret
+cuodd:          push    bc              ; an odd one the second: the first,
+                push    de              ; and the next group whole if a piece
+                call    unp_lo          ; runs on into it
+                inc     hl
+                inc     hl
+                inc     hl
+                ld      a, (rbwide)
+                or      a
+                jr      z, cuo1
+                inc     de
+                inc     de
+                inc     de
+                inc     de
+                call    unp8
+cuo1:           pop     de
+                ex      de, hl
+                ld      bc, CANVAS_W
+                add     hl, bc
+                ex      de, hl
+                pop     bc
+                djnz    cuodd
+                ret
+cufull:         push    bc
+                push    de
+                call    unp8
+                ld      a, (rbwide)
+                or      a
+                call    nz, unp8
+                pop     de
+                ex      de, hl
+                ld      bc, CANVAS_W
+                add     hl, bc
+                ex      de, hl
+                pop     bc
+                djnz    cufull
+                ret
+
+; cv8to7 turned about: seven room bytes at HL, eight pixels each, into eight
+; canvas bytes at DE, seven pixels each in bits 7 to 1.  Both move on.
+
+unp8:           call    unp_lo
+                jr      unp_hi
+unp_lo:         ld      c, (hl)         ; nought: bits 7..1 of the first
+                ld      a, c
+                and     0xfe
+                ld      (de), a
+                inc     de
+                inc     hl
+                ld      a, c            ; one: bit 0 of it, 7..2 of the next
+                rrca
+                and     0x80
+                ld      b, a
+                ld      c, (hl)
+                ld      a, c
+                rrca
+                and     0x7e
+                or      b
+                ld      (de), a
+                inc     de
+                inc     hl
+                ld      a, c            ; two
+                rrca
+                rrca
+                and     0xc0
+                ld      b, a
+                ld      c, (hl)
+                ld      a, c
+                rrca
+                rrca
+                and     0x3e
+                or      b
+                ld      (de), a
+                inc     de
+                inc     hl
+                ld      a, c            ; three
+                rrca
+                rrca
+                rrca
+                and     0xe0
+                ld      b, a
+                ld      c, (hl)
+                ld      a, c
+                rrca
+                rrca
+                rrca
+                and     0x1e
+                or      b
+                ld      (de), a
+                inc     de
+                inc     hl
+                ret                     ; C = the fourth room byte, HL past it
+unp_hi:         ld      a, c            ; four
+                rrca
+                rrca
+                rrca
+                rrca
+                and     0xf0
+                ld      b, a
+                ld      c, (hl)
+                ld      a, c
+                rrca
+                rrca
+                rrca
+                rrca
+                and     0x0e
+                or      b
+                ld      (de), a
+                inc     de
+                inc     hl
+                ld      a, c            ; five
+                rlca
+                rlca
+                rlca
+                and     0xf8
+                ld      b, a
+                ld      c, (hl)
+                ld      a, c
+                rlca
+                rlca
+                rlca
+                and     0x06
+                or      b
+                ld      (de), a
+                inc     de
+                inc     hl
+                ld      a, c            ; six
+                rlca
+                rlca
+                and     0xfc
+                ld      b, a
+                ld      c, (hl)
+                ld      a, c
+                rlca
+                rlca
+                and     0x02
+                or      b
+                ld      (de), a
+                inc     de
+                inc     hl
+                ld      a, c            ; seven: the last one's 6..0
+                rlca
+                and     0xfe
+                ld      (de), a
+                inc     de
+                ret
+
+; The block's own four columns of the band, wiped.
+
+c1wipe:         ld      a, (xco)
+                ld      e, a
+                ld      d, 0
+                ld      hl, SLICE
+                add     hl, de
+                ld      a, (rbh)
+                ld      b, a
+                ld      de, CANVAS_W - 3
+cw1:            ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                add     hl, de
+                djnz    cw1
+                ret
+
+; B rows of the band's group or groups, HL on in the slice, out to imgbuf
+; at DE for the repacking.
+
+c1copy:         push    bc
+                push    hl
+                ld      bc, 8
+                ld      a, (rbwide)
+                or      a
+                jr      z, c1c1
+                ld      c, 16
+c1c1:           ldir
+                pop     hl
+                ld      c, CANVAS_W
+                add     hl, bc
+                pop     bc
+                djnz    c1copy
+                ret
+
+; The floor mask's four columns for its band, wiped for maskone.
+
+c1mowipe:       call    mocanrow
+                ld      b, 15
+cmw1:           ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                inc     hl
+                ld      (hl), 0
+                ld      de, CANVAS_W - 3
+                add     hl, de
+                djnz    cmw1
+                ret
+
+; The rest of ctrlplayer's :dead in TOPCTRL.S, once he has fallen for good:
+; CharLife counted up to deadenough, and then the level begun again --
+; RESTART, by way of the room change: lvflag 3, which nextroom and levelgo
+; take from there -- as soon as the tune for his death is heard out, or at
+; once for ENTER or SPACE, which cut it short.  No "Press button to
+; continue": nothing waits to be told.
+
+DEADENOUGH      equ     4               ; TOPCTRL.S
+
+c1dead:         ld      hl, charlife
+                ld      a, (hl)
+                cp      DEADENOUGH
+                jr      nc, cd1
+                inc     (hl)
+                jp      page_art
+cd1:            ld      a, 0x3f         ; ENTER or SPACE
+                in      a, (254)
+                rra
+                call    nc, ststop
+                ld      a, (sfxtimer)
+                or      a
+                jp      nz, page_art
+                ld      a, 3
+                ld      (lvflag), a
+                jp      page_art
+
+c1end:
+                org     c1fix
+C1LEN           equ     c1end - CODE1
+
 ; ---------------------------------------------------------------- start
 ;
 ; What runs once, before the working copy is first written, sits where the
 ; working copy goes: it comes in with the program and the first repaint goes
 ; over it, so the fixed half of the map keeps its room for the game.
 
+c1img:          ds      C1LEN           ; CODE1, put here by build.sh
+
 start:          di
                 ld      sp, stack
 
-                ld      hl, SYSVARS     ; the variables under the loader,
-                ld      de, SYSVARS + 1 ; nought
-                ld      bc, LOWVARS + LOWVARLEN - SYSVARS - 1
+                ld      hl, SYSLOW      ; the variables under the loader,
+                ld      de, SYSLOW + 1  ; nought
+                ld      bc, LOWVARS + LOWVARLEN - SYSLOW - 1
                 ld      (hl), 0
                 ldir
 
-                ld      hl, revsrc      ; the bit reversal table, out to where
-                ld      de, REVTAB      ; it lives from now on
-                ld      bc, 256
-                ldir
+                ld      hl, REVTAB      ; the bit reversal table, where it
+revt1:          ld      a, l            ; lives from now on: each byte's bits
+                ld      b, 8            ; the other way round
+revt2:          rra
+                rl      c
+                djnz    revt2
+                ld      (hl), c
+                inc     l
+                jr      nz, revt1
 
                 xor     a
                 out     (254), a
@@ -5818,9 +6116,9 @@ start:          di
                 lddr                                    ; the two overlap
 
                 ld      a, BANK_CVS     ; and the code that builds a room put
-                call    pageset         ; by, for the rooms after this one:
-                ld      hl, roomblk     ; past the canvas and its masks
-                ld      de, RBAT1
+                call    pageset         ; by where the titles leave it alone
+                ld      hl, roomblk
+                ld      de, RBINTRO
                 ld      bc, RB1LEN
                 ldir
 
@@ -5850,8 +6148,18 @@ stubbank:       push    bc
                 ld      bc, 0x4000 - 2 - ISRSTUBLEN - 1 ; to the interrupt's
                 ld      (hl), 0         ; way in
                 ldir
-                call    roomrest        ; and the room is composed, not loaded:
-                call    newroom
+                ld      a, BANK_CVS     ; the room's code back, the princess's
+                call    pageset         ; band having been there, and the
+                ld      hl, RBINTRO     ; canvas bank's own code in
+                ld      de, roomblk
+                ld      bc, RB1LEN
+                ldir
+                ld      hl, c1img
+                ld      de, CODE1
+                ld      bc, C1LEN
+                ldir
+                call    newroom         ; and the room is composed, not loaded:
+                call    lvkeep          ; the level as it begins, kept
                                         ; its code put back first, the
                                         ; princess's band having been there
                 call    readlinks
@@ -5948,7 +6256,6 @@ badload:        ld      a, 2
 
 isrbanks:       db      BANK_SPR1, BANK_SPR2, BANK_SPR3, BANK_BG, BANK_ART
                 db      BANK_CANVAS
-revsrc:         incbin  "revtab.bin"
 
                 include "intro.asm"
 
@@ -5974,7 +6281,17 @@ roomend:
 ; when the sprites lost their masks, which would have made the second of
 ; them nine kilobytes of whatever lies beyond.
 
-RBAT1           equ     HALFCAN + CANVAS_W * 45 ; past the canvas and masks
+SLICE           equ     CANVAS          ; a redraw's band: see rbwipe
+SLICE_LEN       equ     16 * CANVAS_W   ; RQBAND rows at most
+RBAT1           equ     SLICE + SLICE_LEN       ; in the canvas, past the slice
+RBROOM          equ     3275            ; the room's code at most: RBINTRO's
+PRISTINE        equ     RBAT1 + RBROOM  ; the level as it began: see lvkeep
+PRISTLEN        equ     2304
+pristok         equ     0x5C77          ; there is one to keep
+curlev          equ     0x5C75          ; the level, less one
+origstr         equ     0x5C76          ; MaxKidStr as the level began
+cvbasep         equ     0x5C72          ; the canvas as a redraw sees it: two
+fmode           equ     0x5C74          ; rb_fetch's A
 
 ; The control code -- GENCTRL and all it calls, the sequence interpreter and
 ; the checks for walls and floors -- runs only while the canvas bank is in,

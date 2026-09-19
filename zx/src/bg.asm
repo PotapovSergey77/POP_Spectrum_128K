@@ -380,9 +380,9 @@ canvasrow:      ld      l, a
                 add     hl, hl
                 add     hl, hl          ; thirty two
                 add     hl, de          ; and forty
-                ld      de, CANVAS
-                add     hl, de
-                ret
+                ld      de, (cvbasep)   ; the canvas, or a redraw's slice as
+                add     hl, de          ; if it were the canvas from its top
+                ret                     ; row: see rbwipe
 
 ; Set the piece up and lay it: A = image, (xco)/(yco) already set, C = the op.
 
@@ -1690,18 +1690,7 @@ mo1:            ld      (mocan), hl
                 ld      a, (xco)        ; the wipe works in the block's own
                 ld      (mooff), a      ; four bytes
                 call    page_pixels
-                call    mocanrow
-                ld      b, 15
-mowipe:         ld      (hl), 0
-                inc     hl
-                ld      (hl), 0
-                inc     hl
-                ld      (hl), 0
-                inc     hl
-                ld      (hl), 0
-                ld      de, CANVAS_W - 3
-                add     hl, de
-                djnz    mowipe
+                call    c1mowipe
 
                 call    setblock
                 call    floorpiece
@@ -1855,7 +1844,7 @@ lvflag:         db      LV_ARMED1
 
 nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
                 cp      2               ; has: LoadNextLevel, by way of the
-                jr      nz, cutchar     ; room change it is so much like --
+                jr      c, cutchar      ; room change it is so much like --
                 ld      a, 0x3f         ; once the tune up the stairs is heard
                 in      a, (254)        ; out, the torches burning on as it
                 rra                     ; plays, or ENTER or SPACE has cut it
@@ -2090,6 +2079,8 @@ rbdoortop:      ld      a, (preced)
                 ld      a, 4
                 ld      (rbh), a
                 ld      (dxonly), a     ; any value but zero
+                xor     a               ; what is there, the whole of it,
+                call    rb_fetch        ; out of the room
                 call    draw_mb
                 xor     a
                 ld      (dxonly), a
@@ -2228,51 +2219,80 @@ rbx1:           ld      a, (blockcol)   ; four bytes to a block
                 ld      (xco), a
                 ret
 
-rbwipe:         call    page_pixels
-                ld      a, (rbbot)
-                ld      (rbrow), a
-                ld      a, (rbh)
-                ld      b, a
-rbwipe1:        push    bc
-                ld      a, (rbrow)
-                cp      192
-                jr      nc, rbwipe2
+; The canvas is not kept while the game runs -- building a room is all it
+; is whole for, and the bank it is in has better uses the rest of the time
+; (see CODE1).  A band is laid in a slice at the canvas's start instead: its
+; groups of eight Apple bytes come back out of the room first, as they were
+; when it was built, since the room is the canvas repacked and nothing else
+; -- and the passes and the repacking then find the canvas they always did.
+; cvbasep is where the canvas would start for the band's top row to be the
+; slice's first: canvasrow counts from it.
+
+rbwipe:         ld      a, 1            ; all but the block's own four
+                call    rb_fetch        ; columns, and those wiped
+                jp      c1wipe
+
+; A = nought for the whole of the groups, or all but the block's own half.
+
+rb_fetch:       ld      (fmode), a
+                ld      a, (blockcol)   ; the groups rb_pack takes: the one
+                and     1               ; that holds the block, and the next
+                ld      b, a            ; if a piece runs on out of an odd
+                ld      a, (redwide)    ; block
+                and     b
+                ld      (rbwide), a
+                ld      a, (blockcol)   ; four bytes to a block, eight to a
+                srl     a               ; group: the column halved
+                ld      (rbgroup), a
+                ld      hl, CANVAS      ; the band's top row at the slice's
+                ld      (cvbasep), hl   ; start: CANVAS less forty rows for
+                ld      a, (bandtop)    ; each above it
                 call    canvasrow
-                ld      a, (xco)
+                ex      de, hl
+                ld      hl, 2 * CANVAS - 65536
+                or      a
+                sbc     hl, de
+                ld      (cvbasep), hl
+                call    page_art
+                ld      a, (bandtop)
+                call    roomrow
+                ld      a, (rbgroup)    ; seven room bytes to a group
+                ld      c, a
+                add     a, a
+                add     a, a
+                add     a, a
+                sub     c
                 ld      e, a
                 ld      d, 0
                 add     hl, de
-                ld      (hl), 0
-                inc     hl
-                ld      (hl), 0
-                inc     hl
-                ld      (hl), 0
-                inc     hl
-                ld      (hl), 0
-rbwipe2:        ld      hl, rbrow
-                dec     (hl)
+                ld      de, imgbuf
+                ld      a, (rbh)
+                ld      b, a
+rf1:            push    bc
+                push    hl
+                ld      bc, 7
+                ld      a, (rbwide)
+                or      a
+                jr      z, rf2
+                ld      c, 14
+rf2:            ldir
+                pop     hl
+                ld      c, ROOM_BYTES
+                add     hl, bc
                 pop     bc
-                djnz    rbwipe1
-
-                ret
-
-rb_pack:        ld      a, (blockcol)   ; a second group only if the piece
-                and     1               ; spills out of the block's own: from
-                ld      b, a            ; an even column it runs on into the
-                ld      a, (redwide)    ; other half of the same group, and
-                and     b               ; packing the next as well was 42000
-                ld      (rbwide), a     ; T for nothing
+                djnz    rf1
+                call    page_pixels
+                jp      c1unpack
 
 ; The groups of eight Apple bytes that cover it, repacked into the room.  A
 ; block starts on a multiple of four, so it is either the first half of a
 ; group or the second, and one group either side takes in whatever a piece
-; spilled.
+; spilled -- a second group only if the piece spills out of the block's own:
+; from an even column it runs on into the other half of the same group, and
+; packing the next as well was 42000 T for nothing.  rb_fetch has worked out
+; which.
 
-                ld      a, (blockcol)   ; the one group of eight Apple bytes
-                srl     a               ; that holds the block: four bytes to
-                ld      (rbgroup), a    ; a block, eight to a group, so it is
-                                        ; always the column halved
-                ld      a, (rbh)        ; only the band drawn goes back into
+rb_pack:        ld      a, (rbh)        ; only the band drawn goes back into
                 ld      b, a            ; the room
                 ld      a, (rbbot)
                 sub     b
@@ -2340,31 +2360,7 @@ rbb2:           ld      (rbbn), a
                 ld      de, imgbuf
                 ld      a, (rbbn)
                 ld      b, a
-rbcopy:         push    bc
-                ldi                     ; LDI counts BC down, so the stride
-                ldi                     ; is loaded after, not before
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ld      bc, CANVAS_W - 8
-                ld      a, (rbwide)
-                or      a
-                jr      z, rbc1
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ld      bc, CANVAS_W - 16
-rbc1:           add     hl, bc
-                pop     bc
-                djnz    rbcopy
+                call    c1copy
                 ld      (rbcanp), hl
 
                 call    page_art        ; and into the room
