@@ -276,11 +276,12 @@ def band(pix):
 
 def border(pix, story):
     band(pix)
-    # a line of the grid, then tile and line by turns all the way along: the
-    # same steps everywhere, which the eye goes by, and not the same at the
-    # two ends
+    # a line of the grid, then tile and line by turns out to the middle, and
+    # the same back from the other end: the band is the same either side of
+    # the middle, as the arch is, whose point takes the two lines that meet
+    # there
     for col in range(1, 31):
-        if col % 2:
+        if min(col, 31 - col) % 2:
             lay(pix, col * 8, 0, TOP_LINE, FRAME, BORDER_PAPER)
         else:
             lay(pix, col * 8, 0, TOP_TILE, BORDER_INK, BORDER_PAPER)
@@ -700,10 +701,94 @@ def sides(pix, cols):
     rect2(pix, 40, 152, 2, 16, zx(WHITE))
 
 
+# The palace itself, its outline first.  dusk() gives a cell the two colours
+# that cost least for all it holds, and a cell of the palace holds sky, pink,
+# white, the roof's blue and dark walls: the pair it gets leaves the edge
+# between palace and sky wherever it falls, and the arcade under the roof,
+# the domes and the towers run together.  So in the palace's own cells the
+# pair is the sky's colour there and the palace's -- whichever of its colours
+# the cell has most of -- and every pixel of the Apple's is sky or palace as
+# it is there: the outline pixel for pixel, the colours by the cell.  What
+# the Apple has for each pixel: its pink and purple, white and pale blue, the
+# roof's two blues, black, and brown in a run of brown and black (walls; a
+# brown dot on its own is the sky's).  Below the horizon the sky is the dark
+# ground.  The sky round it, the glow's dithered cells and the trees keep
+# what dusk() gave them.
+PALACE_CELLS = (9, 4, 21, 11)       # cell columns and rows, the end excluded
+PARTS = {A_PINK: MAGENTA, A_PURPLE: MAGENTA, A_WHITE: WHITE, A_LTBLUE: WHITE,
+         A_AQUA: WHITE, A_DKBLUE: BLUE, A_BLUE: BLUE, A_BLACK: BLACK,
+         A_BROWN: BLACK}
+PART_WEIGHT = {MAGENTA: 4, WHITE: 4, BLUE: 3, BLACK: 1}
+
+
+def palace_part(cols, x, y):
+    """What the palace is at Spectrum pixel (x, y): its colour, or None for
+    the sky."""
+    c = apple_col(x)[0]
+    v = cols[y][c]
+    part = PARTS.get(v)
+    if part is None or y >= HORIZON and v == A_BROWN:
+        return None
+    if v in (A_BROWN, A_BLACK):
+        lit = any(cols[yy][cc] in (A_PINK, A_PURPLE, A_WHITE, A_LTBLUE, A_AQUA,
+                                   A_DKBLUE, A_BLUE)
+                  for cc in (c - 1, c, c + 1) for yy in (y - 1, y, y + 1))
+        near = sum(cols[yy][cc] in PARTS
+                   for cc in range(c - 2, c + 3) for yy in (y - 1, y, y + 1))
+        if v == A_BROWN and (y < WALL_FROM or not lit and near < 8):
+            return None                 # the sky's speckle
+        if v == A_BLACK and not any(
+                cols[yy][cc] in PARTS for cc in (c - 1, c, c + 1)
+                for yy in (y - 1, y, y + 1) if (cc, yy) != (c, y)):
+            return None                 # a dark dot on its own
+    return part
+
+
+def palace(pix, cols):
+    cx0, cy0, cx1, cy1 = PALACE_CELLS
+    for cy in range(cy0, cy1):
+        for cx in range(cx0, cx1):
+            cell = [(x, y) for y in range(cy * 8, cy * 8 + 8)
+                    for x in range(cx * 8, cx * 8 + 8)]
+            if any(pix[y][x] in (zx(YELLOW), heavy(YELLOW)) for x, y in cell):
+                continue                # the glow's dither
+            part = {(x, y): palace_part(cols, x, y) for x, y in cell}
+            if not any(part.values()):
+                continue                # sky, and nothing else
+            sky = {(x, y): RED if y < HORIZON else BLACK for x, y in cell}
+            score = {}
+            for p, c in part.items():
+                if c is not None:
+                    score[c] = score.get(c, 0) + PART_WEIGHT[c]
+            skies = [sky[p] for p, c in part.items() if c is None]
+            back = max(set(skies), key=skies.count) if skies else None
+            order = sorted(score, key=lambda c: (-score[c], c))
+            if back is None:            # all palace: its two colours
+                a = order[0]
+                b = order[1] if len(order) > 1 else BLACK
+            else:
+                a = next((c for c in order if c != back), None)
+                b = back
+                if a is None:           # dark on the dark ground
+                    continue
+            for (x, y), c in part.items():
+                if c is None:
+                    v = b if back is not None else a
+                elif c in (a, b):
+                    v = c
+                elif back is None:
+                    v = min((a, b), key=lambda k: _dist(zx_rgb(k, 0),
+                                                        zx_rgb(c, 0)))
+                else:
+                    v = a               # the palace, whatever its colour
+                pix[y][x] = heavy(v)
+
+
 def splash_picture(pix, cols):
     find_arch(pix)
     smooth_arch()
     dusk(pix)
+    palace(pix, cols)
     dunes(pix)
     sides(pix, cols)
 
