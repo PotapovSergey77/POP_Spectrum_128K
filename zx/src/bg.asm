@@ -227,7 +227,7 @@ bgdop:          add     a, a
 bgrowloop:      push    bc
                 ld      a, (bgmask)     ; into a mask, or into the picture
                 or      a
-                jp      nz, bgmaskrow
+                jr      nz, bgmaskrow
                 ld      hl, (bgcanp)    ; where that row starts
                 jr      bgrowat
 bgmaskrow:      ld      a, (bgrow)      ; only the floor bands are kept
@@ -237,7 +237,7 @@ bgmaskrow:      ld      a, (bgrow)      ; only the floor bands are kept
                 add     hl, de
                 ld      a, (hl)
                 inc     a
-                jp      z, bgrowskip
+                jr      z, bgrowskip
                 dec     a
                 ld      l, a
                 ld      h, 0
@@ -347,8 +347,8 @@ bgdnone:        pop     hl              ; none of it lands -- and the canvas
                                         ; it: the callers draw on after
 
 
-bgcanp:         dw      0               ; the canvas row the draw is on
-bgn:            db      0               ; how many of the piece's rows land
+bgcanp          equ     SYSVARS + 27    ; the canvas row the draw is on
+bgn             equ     SYSVARS + 29    ; how many of the piece's rows land
 
 ; HL = A * E, both unsigned bytes.
 
@@ -407,7 +407,7 @@ bglay:          ld      (imgnum), a
 draw_c:         call    checkc
                 ret     nc
                 call    dodrawc
-                jp      mask_b
+                jr      mask_b
 
 ; checkc: carry set if the C section below and to the left shows at all.
 
@@ -455,7 +455,7 @@ dcgo:           or      a
                 ld      (yco), a
                 ld      a, c
                 ld      c, BG_ORA
-                jp      bglay
+                jr      bglay
 
 mask_b:         call    page_bg
                 ld      a, (preced)
@@ -740,7 +740,7 @@ dmc1:           rrca                    ; (state / 4) mod 8
 
 draw_mb:        ld      a, (preced)
                 cp      BG_GATE
-                jp      z, drawgateb
+                jr      z, drawgateb
                 cp      BG_SPIKES
                 jp      z, spike_mb
                 cp      BG_EXIT
@@ -993,7 +993,7 @@ fr_dx:          call    tab_frontx
                 add     a, c
                 ret
 
-frxfix:         db      0
+frxfix          equ     SYSVARS + 30
 frydy:          db      0
 
 
@@ -1063,8 +1063,8 @@ bshbyte:        ld      a, (hl)
                 jr      nz, bshpass
                 ret
 
-bgshift:        db      0               ; asked for, for the next bglay
-bgsh:           db      0               ; and taken by it
+bgshift         equ     SYSVARS + 31    ; asked for, for the next bglay
+bgsh            equ     SYSVARS + 32    ; and taken by it
 
 ; drawfrnt: what goes over the characters.  Stamped rather than ORed for the
 ; posts and the arches, so the neighbour's B section does not show through.
@@ -1128,14 +1128,8 @@ dfgo:           push    bc              ; C is the opacity and bgentry uses it
 setblock:       ld      a, (blockrow)
                 inc     a
                 jr      z, sbceil       ; row -1: the ceiling, kept aside
-                ld      a, (blockrow)
-                ld      b, a
                 ld      a, (blockcol)
-                ld      c, a
-                call    blockat
-                ld      hl, (blockptr)
-                ld      a, (hl)
-                and     0x1f            ; getobjid: the id is the low five bits
+                call    blockatr        ; getobjid: the id is the low five bits
                 ld      (objid), a
                 ld      de, 30
                 add     hl, de
@@ -1176,9 +1170,6 @@ sbhere:         dec     a
                 inc     a
                 ld      b, a
 sbat:           call    blockat
-                ld      hl, (blockptr)
-                ld      a, (hl)
-                and     0x1f
                 ld      (below), a
                 ld      de, 30
                 add     hl, de
@@ -1226,23 +1217,20 @@ prevblk:        ds      6
                                         ; loader now: the ceiling is the bottom
                                         ; row of the room above, D sections
 
-; B = row, C = column.  Out: (blockptr) = where that block's id sits.
+; B = row, C = column.  Out: HL = where that block's id sits, A = the id.
 
+blockatr:       ld      c, a            ; the row (blockrow), column A
+                ld      a, (blockrow)
+                ld      b, a
 blockat:        ld      a, b
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de          ; ten to the row
+                call    mul10           ; ten to the row
                 ld      e, c
                 ld      d, 0
                 add     hl, de
                 ld      de, roomids
                 add     hl, de
-                ld      (blockptr), hl
+                ld      a, (hl)         ; and A = the id, getobjid's five bits
+                and     0x1f
                 ret
 
 ; getobjid1: a plate that is down is not drawn as the piece the blueprint
@@ -1298,7 +1286,6 @@ blockrow        equ     LOWVARS + 18
 blockcol        equ     LOWVARS + 19
 LOWVARLEN       equ     20
 
-blockptr:       dw      0
 roomnum:        db      START_ROOM      ; the way into the level
 blockbot:       db      2, 65, 128, 191, 254
 imgbuf:         ds      384             ; the largest piece is 378 bytes
@@ -1503,13 +1490,13 @@ frontrec:       ld      a, (recfront)
                 inc     (hl)
                 ret
 
-frbodyx:        db      0
-frbodyw:        db      0
+frbodyx         equ     SYSVARS + 35
+frbodyw         equ     SYSVARS + 36
 
 ; Which rows the mask has anything on, and where each of them sits in it.
 
-recfront:       db      0
-frontok:        db      0               ; a room is being built, not redrawn
+recfront        equ     SYSVARS + 37
+frontok         equ     SYSVARS + 38    ; a room is being built, not redrawn
 nfront:         db      0
                                         ; frontlist is under the loader now:
                                         ; five bytes an entry, as frontrec
@@ -1642,11 +1629,9 @@ mbsetup:        ld      a, (blockcol)   ; four bytes to a block
                 add     a, a
                 ld      (xco), a
                 ld      a, (blockrow)
-                inc     a
+                ld      hl, blockbot + 1
+                add     a, l
                 ld      l, a
-                ld      h, 0
-                ld      de, blockbot
-                add     hl, de
                 ld      a, (hl)
                 ld      (dy), a
                 sub     3
@@ -1672,13 +1657,7 @@ mbsetup:        ld      a, (blockcol)   ; four bytes to a block
                 add     hl, de
                 jr      mbtake
 mbleft:         dec     a
-                ld      c, a
-                ld      a, (blockrow)
-                ld      b, a
-                call    blockat
-                ld      hl, (blockptr)
-                ld      a, (hl)
-                and     0x1f
+                call    blockatr
                 ld      (preced), a
                 ld      de, 30
                 add     hl, de
@@ -1789,11 +1768,11 @@ mocanrow:       ld      a, (morow)
                 add     hl, de
                 ret
 
-mocan:          dw      0
-mooff:          db      0
-momask:         dw      0
-mbband:         db      0
-mogrp:          db      0
+mocan           equ     SYSVARS + 39
+mooff           equ     SYSVARS + 41
+momask          equ     SYSVARS + 42
+mbband          equ     SYSVARS + 44
+mogrp           equ     SYSVARS + 45
 morow:          db      0
 
 ; Forty five rows of forty Apple bytes into forty five of thirty five.
@@ -1846,7 +1825,7 @@ nrcall:         or      a
                 ld      (nrwhich), a
                 jp      nrcut
 
-nrwhich:        db      0
+nrwhich         equ     SYSVARS + 46
 
 ; CUTCHAR in AUTO.S.  A cut is not a matter of getting near the edge: the
 ; picture itself has to have left the screen, by four of POP's units -- eight
@@ -1886,7 +1865,7 @@ nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
                 ret     nz
                 ld      c, 4
                 ld      a, c
-                jp      nrcall
+                jr      nrcall
 
 cutchar:        ld      a, (charact)    ; falling: only the bottom counts
                 cp      3
@@ -1897,12 +1876,12 @@ cutchar:        ld      a, (charact)    ; falling: only the bottom counts
                 jr      z, ccnotup
                 ld      a, (chary)
                 cp      TOPCUTPL
-                jp      c, nrup
+                jr      c, nrup
                 cp      TOPCUTMI
-                jp      nc, nrup
+                jr      nc, nrup
 ccnotup:        ld      a, (chary)
                 cp      BOTCUT
-                jp      nc, nrdown
+                jr      nc, nrdown
 
                 ld      a, (charact)    ; not while he turns
                 cp      7
@@ -1955,14 +1934,7 @@ panelahead:     ld      a, (blocky)
                 cp      3
                 ccf
                 ret     nc
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de          ; ten blocks to the row
+                call    mul10           ; ten blocks to the row
                 ld      de, roomids + 9
                 add     hl, de
                 ld      a, (hl)
@@ -2020,9 +1992,8 @@ ce2:            ld      hl, (charx)
                 pop     af
                 jp      pageset
 
-edgel:          dw      0
-edger:          dw      0
-
+edgel           equ     SYSVARS + 47
+edger           equ     SYSVARS + 49
 links:          ds      4
 
 ; ---------------------------------------------------------------- one block
@@ -2138,7 +2109,7 @@ rbdoorrows:     ld      a, (dy)         ; the band's rows reach up to them
                 ld      (redh), a
                 ret
 
-rbdoor:         db      0
+rbdoor          equ     SYSVARS + 51
 
 ; The rows of band A: RQBAND of them up from the floor line and each band
 ; above the last, the top one stopping where the block's own band does.
@@ -2186,11 +2157,9 @@ rbband0:        xor     a               ; the next whole room wants them all
 rb_setup:       xor     a               ; the room is built: note no more
                 ld      (frontok), a    ; front pieces
                 ld      a, (blockrow)
-                inc     a
+                ld      hl, blockbot + 1
+                add     a, l
                 ld      l, a
-                ld      h, 0
-                ld      de, blockbot
-                add     hl, de
                 ld      a, (hl)
                 ld      (dy), a
                 sub     3
@@ -2234,13 +2203,7 @@ rbsown:         ld      a, (blockcol)   ; the piece to its left, for drawc
                 ld      (spreced), a
                 jr      rbxco
 rbleft:         dec     a
-                ld      c, a
-                ld      a, (blockrow)
-                ld      b, a
-                call    blockat
-                ld      hl, (blockptr)
-                ld      a, (hl)
-                and     0x1f
+                call    blockatr
                 ld      (preced), a
                 ld      de, 30
                 add     hl, de
@@ -2338,9 +2301,7 @@ rbn1:           ld      (rbleftn), a
                 add     hl, de
                 ld      (rbcanp), hl
                 ld      a, (rbrow)
-                call    mul35
-                ld      de, room
-                add     hl, de
+                call    roomrow
                 ld      a, (rbgroup)
                 ld      c, a
                 add     a, a
@@ -2429,17 +2390,16 @@ rbconv:         push    bc
 
 rbdone:         jp      page_art        ; redshow reads the room
 
-redwide:        db      0
-
+redwide         equ     SYSVARS + 52
 rbrow:          db      0
-rbleftn:        db      0
-rbbn:           db      0               ; the rows in this batch
-rbwide:         db      0               ; two groups to pack, not one
-rbcanp:         dw      0               ; where the next batch starts in the
-rbroomp:        dw      0               ; canvas and in the room
-rbgroup:        db      0
-rbbot:          db      0               ; the band in hand: its bottom row
-rbh:            db      0               ; and how many
+rbleftn         equ     0x5C0B
+rbbn            equ     0x5C0C          ; the rows in this batch
+rbwide          equ     0x5C0D          ; two groups to pack, not one
+rbcanp          equ     0x5C0E          ; where the next batch starts in the
+rbroomp         equ     0x5C10          ; canvas and in the room
+rbgroup         equ     0x5C12
+rbbot           equ     0x5C13          ; the band in hand: its bottom row
+rbh             equ     0x5C14          ; and how many
 
 ; ------------------------------------------------------- gates and pressplates
 ;
@@ -2788,14 +2748,7 @@ cprow:          ld      a, (roomnum)    ; the row above the top one is the
 cprow1:         ld      a, b
                 cp      3
                 ret     nc              ; and off the screen is nothing
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de          ; ten blocks to the row
+                call    mul10           ; ten blocks to the row
                 ld      a, l
                 add     a, c
                 ld      (trloc), a
@@ -2870,14 +2823,7 @@ slrow1:         ld      a, c
 shakerow:       ld      a, 9
                 ld      (slcol), a
 slloop:         ld      a, (slrow2)
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de          ; ten blocks to the row
+                call    mul10           ; ten blocks to the row
                 ld      a, (slcol)
                 ld      e, a
                 ld      d, 0
@@ -2916,7 +2862,7 @@ ceilroom:       ld      a, (links + 2)
                 or      a
                 ret
 
-slrow2:         db      0
+slrow2          equ     SYSVARS + 53
 slcol:          db      0
 cpabove:        db      0
 
@@ -2972,14 +2918,7 @@ mobsave:        call    mobat
 ; trobtype and PUSHPP can work on the piece it is over.
 
 mobtrob:        ld      a, (moblevel)   ; ten blocks to a row
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de
+                call    mul10
                 call    mobcol
                 ld      e, a
                 ld      d, 0
@@ -3020,11 +2959,9 @@ mobstart:       call    trrowcol        ; UNINDEX: its row and its column
                 ld      (mobx), a
                 ld      a, (blockrow)
                 ld      (moblevel), a
-                inc     a
+                ld      hl, blockbot + 1
+                add     a, l
                 ld      l, a
-                ld      h, 0
-                ld      de, blockbot
-                add     hl, de
                 ld      a, (hl)
                 ld      (moby), a
                 ld      a, (trscrn)
@@ -3038,7 +2975,7 @@ addmob:         ld      a, (nummob)     ; and on to the list, if there is room
                 ld      c, a
                 inc     a
                 ld      (nummob), a
-                jp      mobsave
+                jr      mobsave
 
 ; ---- one step of everything falling ----
 
@@ -3113,11 +3050,9 @@ mbftv:          ld      b, a
                 cp      226             ; still above the top of the room
                 ret     nc
                 ld      a, (moblevel)   ; the floor line of its row
-                inc     a
+                ld      hl, blockbot + 1
+                add     a, l
                 ld      l, a
-                ld      h, 0
-                ld      de, blockbot
-                add     hl, de
                 ld      a, (hl)
                 sub     3               ; POP's BlockAy, the floor's own line
                 ld      b, a
@@ -3188,7 +3123,7 @@ mobknock:       call    mobtrob         ; that floor is space now
                 pop     af
                 ld      c, a
                 call    mobload
-                jp      mobmark
+                jr      mobmark
 
 ; It lands: the row it hit is shaken, it crumbles where it stopped, and what
 ; it landed on becomes rubble.
@@ -3201,11 +3136,9 @@ mobcrash:       ld      a, SND_LOOSECRASH
                 ld      (slrow2), a
                 call    shakerow
                 ld      a, (moblevel)
-                inc     a
+                ld      hl, blockbot + 1
+                add     a, l
                 ld      l, a
-                ld      h, 0
-                ld      de, blockbot
-                add     hl, de
                 ld      a, (hl)
                 sub     3
                 ld      (moby), a
@@ -3323,10 +3256,10 @@ pushpp:         ld      (pptype), a
                 call    redplate        ; waited behind shaking floors was
                 xor     a               ; drawn as it came back up
                 ld      (rqprio), a
-                jp      trigger
+                jr      trigger
 ppagain:        ld      a, PPTIMER
                 call    chgtimer
-                jp      trigger
+                jr      trigger
 
 ; And what the plate is wired to.  The chain runs on until an entry has the
 ; last flag set.
@@ -3617,7 +3550,7 @@ aosword:        call    onscreen
                 jr      z, aoswnew
                 ld      (trobst), a
                 cp      1
-                jp      nz, aodone
+                jr      nz, aodone
                 jr      aoswred
 aoswnew:        ld      a, r
                 and     0x3f
@@ -3629,8 +3562,8 @@ aoswred:        ld      a, 1
                 ld      (redh), a
                 jp      aodone
 
-redwant:        db      0
-mskwant:        db      0
+redwant         equ     SYSVARS + 54
+mskwant         equ     SYSVARS + 55
 
 ; A gate rises four pixels a frame, waits at the top while GATETIMER counts
 ; down through the states above GMAXVAL, and then falls under gatevel.
@@ -3722,7 +3655,7 @@ animexit:       ld      a, 1
                 ret     nz
                 ld      a, (trdirec)    ; 3 on: coming down fast, as a gate
                 cp      3               ; does -- the entrance closing
-                jp      nc, agfast
+                jr      nc, agfast
                 ld      a, SND_RAISINGEXIT
                 call    addsound
                 ld      a, (trobst)
@@ -3739,7 +3672,7 @@ animexit:       ld      a, 1
                 ld      (exitopen), a
                 jp      stopobj
 
-exitopen:       db      0
+exitopen        equ     SYSVARS + 56
 
 ; A plate stays down while its count runs out, and the count is in LINKMAP.
 
@@ -3811,7 +3744,7 @@ redplate:       call    onscreen
                 ret     nc
                 inc     a
                 ld      (blockcol), a
-                jp      rq_block
+                jr      rq_block
 
 ; The bottom row of the room above is this screen's ceiling, and POP marks it
 ; in topbuf, which RedDFast redraws as D sections alone.  Here it is a queue
@@ -3836,7 +3769,7 @@ rpceil:         ld      a, (links + 2)
                 ret     nc
                 inc     a
                 ld      (blockcol), a
-                jp      rq_block
+                jr      rq_block
 
 ; ---------------------------------------------------------------- the queue
 ;
@@ -4321,11 +4254,9 @@ rqsh1:          push    bc
                 inc     hl
                 push    hl
                 ld      a, (blockrow)   ; its floor line, and the band that
-                inc     a               ; far above it
+                ld      hl, blockbot + 1        ; far above it
+                add     a, l
                 ld      l, a
-                ld      h, 0
-                ld      de, blockbot
-                add     hl, de
                 ld      a, (redwide)
                 srl     a
                 ld      c, a
@@ -4346,12 +4277,12 @@ rqsh1:          push    bc
                 ld      (rqsn), a
                 ret
 
-rqn:            db      0               ; entries waiting
+rqn             equ     SYSVARS + 57    ; entries waiting
 rqflags:        db      0
-rqprio:         db      0               ; the next request goes first
-rqstart:        db      0               ; and the band it starts at
-rbfrz:          db      0               ; rb_setup: 1 take, 2 keep the state
-rqfrzv:         db      0               ; the state taken
+rqprio          equ     0x5C15          ; the next request goes first
+rqstart         equ     0x5C16          ; and the band it starts at
+rbfrz           equ     0x5C17          ; rb_setup: 1 take, 2 keep the state
+rqfrzv          equ     0x5C18          ; the state taken
 rqfrzr:         db      0               ; for this block
 rqfrzc:         db      0
 rqtmp:          ds      4               ; an entry, on its way up the line
@@ -4447,14 +4378,14 @@ numtrans:       db      0
 trlocs:         ds      MAXTR
 trscrns:        ds      MAXTR
 trdirecs:       ds      MAXTR
-trloc:          db      0
-trscrn:         db      0
-trdirec:        db      0
-trobst:         db      0
-aoid:           db      0
+trloc           equ     0x5C19
+trscrn          equ     0x5C1A
+trdirec         equ     0x5C1B
+trobst          equ     0x5C1C
+aoid            equ     0x5C1D
 linkindex:      db      0
-pptype:         db      0
-blueptr:        dw      0
+pptype          equ     0x5C1E
+blueptr         equ     0x5C1F
 tcsrc:          db      0
 tcdst:          db      0
 gateinc:        db      -1, 4, 4

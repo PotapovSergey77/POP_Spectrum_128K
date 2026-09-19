@@ -101,7 +101,7 @@ dckid:          call    dp_rect
                 ld      hl, newcol + OP ; a guard gone still has his last
                 call    rect_box        ; picture to rub out
                 ld      hl, newcol
-                call    rect_box
+                call    rect_still
                 ld      hl, boxcol + OP
                 call    eraseset
                 ld      hl, boxcol
@@ -114,7 +114,7 @@ dckid:          call    dp_rect
                 call    draw_mobs       ; behind the two of them
                 call    gd_swap
                 jr      z, dckid2
-                call    dp_pics
+                call    gd_pics
                 call    swapchar
 dckid2:         jp      dp_pics
 
@@ -198,7 +198,9 @@ hide_behind:    ld      hl, foremask
                 ldir
                 ld      b, a
                 ld      hl, frontlist
-hbloop:         push    bc
+hbloop:         call    hbseek          ; the next piece whose rows meet his
+                ret     z
+                push    bc
                 push    hl              ; the entry: byte column, bottom row,
                 inc     hl              ; body x, body width, height
                 ld      a, (hl)
@@ -265,8 +267,8 @@ hbnext:         pop     hl
                 ld      de, 5
                 add     hl, de
                 pop     bc
-                djnz    hbloop
-                ret
+                dec     b
+                jr      hbloop
 
 ; B..C, 64 up, against the run at HL -- its start, and two on its length.
 ; Out: carry when they do not meet; otherwise B = where they start, back
@@ -315,13 +317,6 @@ hbrows:         db      0
 hbtop:          db      0
 
 ; The floor and the front laid back over the guard, as over the kid.
-
-hide_guard:     call    gd_swap
-                ret     z
-                call    page_art
-                call    hide_floor
-                call    hide_behind
-                jp      swapchar
 
 ; ---------------------------------------------------------------- the rooms
 ;
@@ -453,7 +448,7 @@ acrel:          ld      (hl), a
 
                 ld      a, (charsword)  ; GuardProg: en garde already?
                 cp      2
-                jp      nc, ai_engarde
+                jr      nc, ai_engarde
 
 ; Alert.  The kid behind him turns him round; seeing him, he draws.
 
@@ -672,7 +667,7 @@ mayadvance:     ld      a, (guardprog)  ; guard 0 is too dumb to wait
 madumb:         ld      hl, advprob
                 call    chance
                 ret     nc
-                jp      pr_fwd
+                jr      pr_fwd
 
 maybeblock:     ld      a, (frame + OP)
                 cp      152             ; guy4
@@ -688,7 +683,7 @@ mb99:           ld      hl, blockprob
                 ld      hl, impblockprob
 mbtry:          call    chance
                 ret     nc
-                jp      pr_up
+                jr      pr_up
 
 maybestrike:    ld      a, (frame + OP)
                 cp      169
@@ -704,7 +699,7 @@ maybestrike:    ld      a, (frame + OP)
 msre:           ld      hl, restrikeprob
 mstry:          call    chance
                 ret     nc
-                jp      pr_strike
+                jr      pr_strike
 
 ; RNDP: a throw against his program's entry in table HL.  Carry when it comes
 ; in under it.
@@ -912,7 +907,7 @@ dbkid:          ld      a, (frame + OP)
                 jp      step_seq
 dbmiss:         ld      a, (charid)
                 or      a
-                jp      nz, do_retreat  ; a guard does not waste a block
+                jr      nz, do_retreat  ; a guard does not waste a block
 dbdo:        ld      a, SQ_READYBLOCK
 dbdoit:         push    af
                 ld      a, 1
@@ -2070,7 +2065,10 @@ tsready:        ld      a, 1
 ; CHECKSPIKES in CTRLSUBS.S: every block his picture spans, in his row, and
 ; down through open space below each one.
 
-checkspikes:    ld      a, (nowbank)
+checkspikes:    ld      a, (spkroom)    ; none in the room
+                or      a
+                ret     z
+                ld      a, (nowbank)
                 push    af
                 call    char_edges
                 ld      hl, (edger)
@@ -2137,7 +2135,10 @@ gsspring:       ld      a, 2
 ; CHECKIMPALE in CTRL.S: running on to springing spikes, or landing a jump
 ; on to spikes that are out.  Landing from a fall is land_spikes.
 
-checkimpale:    ld      hl, (charx)     ; CharBlockX, CharBlockY
+checkimpale:    ld      a, (spkroom)
+                or      a
+                ret     z
+                ld      hl, (charx)     ; CharBlockX, CharBlockY
                 call    blockcol_of
                 cp      10
                 ret     nc
@@ -2535,9 +2536,7 @@ bpm:            add     a, a
                 ld      (bpmask), a
                 call    page_art
                 ld      a, (rowy)
-                call    mul35
-                ld      de, room
-                add     hl, de
+                call    roomrow
                 ld      a, (bpcol)
                 ld      e, a
                 ld      d, 0
@@ -2787,8 +2786,8 @@ mmoff:          ld      a, (mmdrawn)
                 jr      nc, mmmode
 mmroom:         ld      a, (mmprev)     ; the room, if there was a bullet
                 cp      (hl)
-                jp      z, mmnext
-                jp      c, mmnext
+                jr      z, mmnext
+                jr      c, mmnext
                 ld      a, 2
 mmmode:         ld      (mmwhat), a
                 ld      a, METERTOP

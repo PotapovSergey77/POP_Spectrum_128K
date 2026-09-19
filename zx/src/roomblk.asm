@@ -28,10 +28,10 @@ mtc:            ld      a, (mtrow)
                 cp      BG_FLASK
                 jp      z, mtflask
                 cp      BG_TORCH
-                jp      nz, mtnext
+                jr      nz, mtnext
                 ld      a, (mtcol)
                 cp      9               ; the last column has no flame
-                jp      nc, mtnext
+                jr      nc, mtnext
 
                 ld      l, a            ; room pixel 28*col + 35, which
                 ld      h, 0            ; does not fit in eight bits
@@ -125,7 +125,7 @@ mtsword:        ld      de, roomids
                 ld      a, 1
                 ld      (trdirec), a
                 call    addtrob
-                jp      mtnext
+                jr      mtnext
 
 ; TRIGFLASK: a flask on the list, its bubbles from a random frame.
 
@@ -147,7 +147,7 @@ mtflask:        ld      de, roomids
                 ld      a, 1
                 ld      (trdirec), a
                 call    addtrob
-                jp      mtnext
+                jr      mtnext
 
 mtrow:          db      0
 mtcol:          db      0
@@ -274,9 +274,6 @@ cpcloop:        ld      a, (blockcol)   ; the ceiling block itself
                 ld      c, a
                 ld      b, 0
                 call    blockat
-                ld      hl, (blockptr)
-                ld      a, (hl)
-                and     0x1f
                 ld      (below), a
                 ld      de, 30
                 add     hl, de
@@ -517,6 +514,16 @@ rr_copy:        call    page_bg
                 ld      de, roomids + 30
                 ld      bc, 30
                 ldir
+                ld      hl, roomids     ; spikes anywhere in it?  checkspikes
+                ld      b, 30           ; and checkimpale look no further when
+rsspk:          ld      a, (hl)         ; there are none
+                and     0x1f
+                cp      BG_SPIKES
+                jr      z, rsspk1       ; A = BG_SPIKES: not nought
+                inc     hl
+                djnz    rsspk
+                xor     a
+rsspk1:         ld      (spkroom), a
                 ret
 
 ; ---------------------------------------------------------------- storage
@@ -592,7 +599,7 @@ bfmark2:        inc     b
                 jr      nz, bfmark1
                 ld      hl, fleft
                 dec     (hl)
-                jp      nz, bfmark
+                jr      nz, bfmark
 
                 ld      hl, foreband    ; number the rows that are marked
                 ld      b, 192
@@ -743,7 +750,7 @@ bfrownext:      ld      hl, frow
                 inc     (hl)
                 ld      hl, frows
                 dec     (hl)
-                jp      nz, bfrow
+                jr      nz, bfrow
                 ld      hl, fleft
                 dec     (hl)
                 jp      nz, bfpaint
@@ -989,7 +996,7 @@ nrcut:          ld      a, (nrwhich)    ; the stub has the room already: all
                 dec     a
                 jr      z, nrcleft
                 dec     a
-                jp      nz, levelgo
+                jr      nz, levelgo
 
                 ld      hl, (charx)     ; right
                 ld      de, -280
@@ -1327,7 +1334,7 @@ leave_room:     ld      (lrroom), a
                 call    gd_field_in
                 ld      a, (hl)
                 or      a
-                jp      z, lrleave
+                jr      z, lrleave
 lrnonew:        ld      a, (lrdir)
                 or      a
                 jr      z, lrup
@@ -1339,14 +1346,14 @@ lrnonew:        ld      a, (lrdir)
                 ld      de, -2 * (140 + 25 - SCRNLEFT)
                 add     hl, de
                 bit     7, h
-                jp      nz, lrleave
+                jr      nz, lrleave
                 ld      de, -280
                 jr      lrsideways
 lrleft:         ld      hl, (charx + OP) ; left: ShadX under 256 - ScrnWidth - 25
                 ld      de, -2 * (256 - 140 - 25 - SCRNLEFT)
                 add     hl, de
                 bit     7, h
-                jp      z, lrleave
+                jr      z, lrleave
                 ld      de, 280
 lrsideways:     ld      hl, (charx + OP)
                 add     hl, de
@@ -1381,7 +1388,7 @@ lrtake:         ld      de, 0           ; TRANSFERGUARD: out of both rooms'
                 jp      pageset
 lrleave:        pop     af
                 call    pageset
-                jp      update_guard
+                jr      update_guard
 
 lrroom:         db      0
 lrdir:          db      0

@@ -50,9 +50,10 @@ for line in open('build/pop.sym'):
         sym[m.group(1)] = int(m.group(2), 16)
 json.dump(sym, open('build/sym.json', 'w'))
 work = sym['work'] + 6144
-print('код %04X..%04X, рабочий буфер %04X..%04X, до него свободно %d байт'
+print('код %04X..%04X, рабочий буфер %04X..%04X, до него свободно %d байт,'
+      ' и %d перед таблицами сдвигов'
       % (sym['stubs'], sym['codeend'], sym['work'], work,
-         sym['work'] - sym['codeend']))
+         sym['work'] - sym['codeend'], sym['shifthi'] - sym['flamemask'] - 6))
 print('пуск %04X..%04X, в рабочем буфере' % (sym['start'], sym['initend']))
 assert sym['initend'] <= 0xC000, 'пуск не влез'
 rb = sym['roomend'] - sym['roomblk']
@@ -68,6 +69,8 @@ print('буферы под загрузчиком %04X..%04X, %d байт'
 assert sym['LOWTOP'] <= sym['stubs'], 'буферы под загрузчиком налезли на код'
 assert sym['LOWSTACK'] >= 23755, 'буферы под загрузчиком залезли в переменные ПЗУ'
 assert sym['blockbot'] & 0xff <= 0xff - 4, 'blockbot не на одной странице'
+assert sym['SYSVARS'] >= 23675 and sym['SYSVARS'] + sym['SYSVARLEN'] <= sym['LOWVARS'], 'переменные в системных налезли'
+assert sym['gdlast'] + 10 <= sym['LOWSTACK'], 'гдласт залез в стек'
 assert sym['LOWVARS'] + sym['LOWVARLEN'] <= 23755, 'переменные рисования налезли на стек'
 assert work <= sym['HICODE'], 'рабочий буфер налез на код боя'
 PY

@@ -83,6 +83,14 @@ MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 
 LOWVARS         equ     23734
 
+; Below that, from just past FRAMES, system variables the 48K ROM has no use
+; for once BASIC is gone -- its interrupt keeps to KSTATE, LAST_K, REPDEL,
+; REPPER, FLAGS, MODE, FLAGS2 and FRAMES -- and the colder of the fixed
+; code's variables live there; start makes them nought with LOWVARS'.
+
+SYSVARS         equ     23675
+SYSVARLEN       equ     58
+
 SCREEN          equ     16384
 FRAMES          equ     23672           ; the ROM's own count of interrupts,
                                         ; kept by the handler at 0x38
@@ -129,7 +137,6 @@ start2:         call    repaint
                 call    page_art
                 call    hide_floor
                 call    hide_behind
-                call    hide_guard
                 ld      a, (FRAMES)
                 ld      (frstart), a
                 ei
@@ -196,11 +203,17 @@ mainrun:        ld      a, (FRAMES)
                 call    page_art
                 call    hide_floor
                 call    hide_behind
-                call    hide_guard
                 call    kid_death
                 call    rq_run          ; and the redrawing, as time allows
                 call    vw_fill         ; and the view ahead, to the very end
                 jp      main
+
+; The background's code comes next, ahead of the rest of the fixed half: it
+; is little of what a frame runs, and the low end of the map, up to 0x8000,
+; is the memory the ULA holds up.  What a frame spends its time in -- the
+; blits, the torches, the rubbing out and the showing -- goes above it.
+
+                include "bg.asm"
 
 ; ---------------------------------------------------------------- paging
 ;
@@ -231,50 +244,38 @@ mul35:          ld      l, a
 
 ; HL = the room's row under screen column zero.
 
-roomwin:        call    mul35
-                ld      de, room
-                add     hl, de
+roomwin:        call    roomrow
                 ld      a, (cam)
                 ld      e, a
                 ld      d, 0
                 add     hl, de
                 ret
 
-; Thirty two bytes, HL to DE.  Unrolled, because ldir spends a fifth of its
-; time counting and this runs over the whole screen when the view moves.
+; A = a number.  Out: HL = ten of it, DE = two.
 
-copy32:         ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
-                ldi
+mul10:          ld      l, a
+                ld      h, 0
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de
+                ret
+
+; A = a room byte column.  Out: A = the screen's, B = the room's.
+
+subcam:         ld      b, a
+                ld      a, (cam)
+                neg
+                add     a, b
+                ret
+
+; A = a row.  Out: HL = the room's first byte on it.
+
+roomrow:        call    mul35
+                ld      de, room
+                add     hl, de
                 ret
 
 ; The end of a room change, and it has to be here rather than in the block
@@ -289,7 +290,9 @@ nrfinish:       call    repaint
 ; The working copy starts out as the room, once.  After that it is only ever
 ; right where the sprite has been, which is all anything reads of it.
 
-repaint:        xor     a
+repaint:        ld      a, 1
+                ld      (gddirty), a
+                xor     a
                 ld      (rowy), a
                 call    roomwin         ; the room walks forward a row at a
                 ld      (roomp), hl     ; time, so it is not worked out again
@@ -615,9 +618,7 @@ vbs5:           ld      a, b
                 ld      (vwn), a
                 call    page_art
                 ld      a, (vwfirst)    ; the room's first row, for the view
-                call    mul35
-                ld      de, room
-                add     hl, de
+                call    roomrow
                 ld      a, (vwcam)
                 add     a, l
                 ld      l, a
@@ -670,7 +671,7 @@ vbb2:           push    bc
                 ex      de, hl
                 pop     bc
                 djnz    vbb2
-                jp      page_art
+                jr      page_art
 
 ; The room's code back where it runs, from the two banks it is kept in: see
 ; roomblk.  Only ever with the screen black and the working copy unwritten.
@@ -681,7 +682,7 @@ roomrest:       ld      a, BANK_CVS
                 ld      de, roomblk
                 ld      bc, RB1LEN
                 ldir
-                jp      page_art
+                jr      page_art
 
 ; Which screen the ULA shows: bank 5, the ordinary one at 0x4000, or bank 7,
 ; the 128's second.  A new view is made in the one not shown and shown with
@@ -889,7 +890,7 @@ isalive:        call    stun_tick
                 call    read_input
                 call    facejstk
                 call    ctrl
-                jp      facejstk
+                jr      facejstk
 
 ; GENCTRL.  Falling and being bumped are not under control; otherwise what he
 ; does next depends on what he is doing now, which CTRL.S reads off CharPosn,
@@ -903,7 +904,7 @@ ctrl:           ld      a, (charlife)   ; dead, and standing: he drops
                 jr      z, ctrlclr
                 cp      4               ; or falling: not under control, and
                 jr      nz, ctrlon      ; forget whatever was pressed
-ctrlclr:        jp      clrall
+ctrlclr:        jr      clrall
 
 ctrldead:       ld      a, (frame)
                 cp      15
@@ -925,23 +926,23 @@ ctrlon:         ld      a, (charsword)  ; en garde: FightCtrl
                 jp      nc, guard_ctrl
                 ld      a, (frame)
                 cp      15
-                jp      z, standing
+                jr      z, standing
                 cp      48
                 jp      z, turning
                 cp      50
-                jp      c, ctrl0
+                jr      c, ctrl0
                 cp      53
-                jp      c, standing     ; turn 7-8-9 and the crouch
+                jr      c, standing     ; turn 7-8-9 and the crouch
 ctrl0:          cp      4
                 jp      c, starting     ; run 4-5-6
                 cp      67              ; 6502 carry is the other way round:
-                jp      c, ctrl4        ; bcc means below, which is jr c here
+                jr      c, ctrl4        ; bcc means below, which is jr c here
                 cp      70
                 jp      c, stjumpup
 ctrl4:          cp      15
                 jp      c, running      ; run 8-17
                 cp      87
-                jp      c, ctrl1
+                jr      c, ctrl1
                 cp      100
                 jp      c, hanging      ; hanging, and swinging on the ledge
 ctrl1:          cp      109
@@ -957,7 +958,7 @@ stback:         call    kid_engarde     ; an enemy in range: en garde
                 ret     nz
                 ld      a, (btn)
                 or      a
-                jp      z, stnobtn
+                jr      z, stnobtn
 
                 ld      a, (clrb)       ; button down
                 or      a
@@ -991,7 +992,7 @@ stnobtn:        ld      a, (clrf)       ; button up
                 ld      a, (jstkx)      ; or simply held forward
                 or      a
                 ret     p
-                jp      do_startrun
+                jr      do_startrun
 
 ; No point starting a run into a wall, or he twitches on the spot.
 
@@ -1146,7 +1147,7 @@ stgrab:         ld      a, (btn)
                 ret
 
 crgrab:         call    try_pickup
-                jp      z, crback
+                jr      z, crback
                 ret
 
 ; Out: Z when he does nothing about it.
@@ -1202,14 +1203,7 @@ mpc0:
 take_sword:     ld      a, (roomnum)
                 ld      (trscrn), a
                 ld      a, (blocky)     ; ten blocks to the row, as checkpress
-                ld      l, a            ; works it out
-                ld      h, 0
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de
+                call    mul10           ; works it out
                 ld      a, (fwdinx)
                 add     a, l
                 ld      (trloc), a
@@ -1319,7 +1313,7 @@ do_up:          call    stairs_up       ; in front of open stairs: up them
                 ld      (blockid), a
                 call    abovefront_flags
                 call    check_ledge
-                jp      nz, do_jumphang
+                jr      nz, do_jumphang
 
                 call    abovebehind_flags
                 ld      (blockid), a
@@ -1336,7 +1330,7 @@ do_up:          call    stairs_up       ; in front of open stairs: up them
                 call    get_dist
                 sub     14
                 call    move_by
-                jp      do_jumphang
+                jr      do_jumphang
 
 ; His back is to the ledge, so he jumps backwards on to it.
 
@@ -1668,9 +1662,9 @@ seqloop:        ld      a, (hl)
                 cp      SEQ_DOWN
                 jr      z, sqrowdn
                 cp      SEQ_CHX
-                jp      z, sqchx
+                jr      z, sqchx
                 cp      SEQ_CHY
-                jp      z, sqchy
+                jr      z, sqchy
                 cp      SEQ_ACT
                 jp      z, sqact
                 cp      SEQ_SETFALL
@@ -1678,15 +1672,15 @@ seqloop:        ld      a, (hl)
                 cp      SEQ_IFWTLESS
                 jp      z, sqwtless
                 cp      SEQ_JARU
-                jp      z, sqjaru
+                jr      z, sqjaru
                 cp      SEQ_JARD
-                jp      z, sqjard
+                jr      z, sqjard
                 cp      SEQ_EFFECT
                 jp      z, sqeffect
                 cp      SEQ_TAP
-                jp      z, sqtap
+                jr      z, sqtap
                 cp      SEQ_FIRSTOP     ; nextlevel: GoneUpstairs
-                jp      nz, seqloop     ; die: no data
+                jr      nz, seqloop     ; die: no data
                 push    hl
                 ld      hl, lvflag      ; inc NextLevel, if there is one
                 sla     (hl)
@@ -1694,7 +1688,7 @@ seqloop:        ld      a, (hl)
                 ld      c, 25
                 call    cue_song
                 pop     hl
-                jp      seqloop
+                jr      seqloop
 
 seqframe:       ld      (frame), a
                 ld      (seqptr), hl
@@ -1705,24 +1699,24 @@ sqgoto:         ld      e, (hl)
                 ld      d, (hl)
                 ld      hl, seqs
                 add     hl, de
-                jp      seqloop
+                jr      seqloop
 
 sqface:         push    hl
                 ld      a, (facing)
                 xor     1
                 ld      (facing), a
                 pop     hl
-                jp      seqloop
+                jr      seqloop
 
 ; A jump or a hard landing jars the floorboards -- jaru those in the row
 ; above him, jard those in his own.  TOPCTRL.S acts on it once a frame.
 
 sqjaru:         ld      a, 1
                 ld      (jarabove), a
-                jp      seqloop
+                jr      seqloop
 sqjard:         ld      a, 0xff
                 ld      (jarabove), a
-                jp      seqloop
+                jr      seqloop
 
 sqrowup:        push    hl
                 ld      hl, blocky
@@ -2435,14 +2429,7 @@ tile_at:        ld      b, a            ; B = the column, C = the row, both
                 ld      a, (roomnum)
                 ld      (tempscrn), a
                 ld      a, c
-                ld      l, a
-                ld      h, 0            ; thirty are already in hand
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, de          ; ten tiles to the row
+                call    mul10           ; ten tiles to the row
                 ld      e, b
                 ld      d, 0
                 add     hl, de
@@ -2461,27 +2448,37 @@ tile_at:        ld      b, a            ; B = the column, C = the row, both
 ; HL = a room x.  Out: A = the block column, signed, -2 to 11.  The table
 ; runs from -64 to 319 so an index just off either side still resolves.
 
-blockcol_of:    ld      de, -ANGLE_PX   ; GETBLOCKXP takes `angle` off first
-                add     hl, de
-                ld      b, 0            ; B, not C: the caller keeps the row
-bcup:           bit     7, h            ; there, and tile_in_row wants it
-                jr      z, bcdown
-                ld      de, 28
-                add     hl, de
-                dec     b
-                jr      bcup
-bcdown:         ld      a, h            ; then down a block at a time
-                or      a
-                jr      nz, bcsub
-                ld      a, l
-                cp      28
-                jr      c, bcgot
-bcsub:          ld      de, -28
-                add     hl, de
-                inc     b
-                jr      bcdown
-bcgot:          ld      a, b
-                ret
+blockcol_of:    ld      de, 2 * BLOCK_PX - ANGLE_PX     ; GETBLOCKXP takes
+                add     hl, de          ; `angle` off first; two blocks on,
+                bit     7, h            ; so as not to be negative -- and
+                jr      z, bcpos        ; further left than that is two off
+                ld      hl, 0
+bcpos:          srl     h               ; a quarter, then a seventh: times
+                rr      l               ; 147 and over 1024, which is exact
+                srl     h               ; this far.  Taking off a block at a
+                rr      l               ; time was 460 T a call, and a frame
+                ld      a, l            ; makes a dozen or more
+                ld      h, 0
+                add     hl, hl
+                ld      e, a
+                ld      d, 0
+                add     hl, de          ; three
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, de          ; nine
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                add     hl, de          ; 147
+                ld      a, h
+                rrca
+                rrca
+                and     0x3f
+                sub     2
+                ld      b, a            ; B too, not C: the caller keeps the
+                ret                     ; row there, and tile_in_row wants it
 
 ; The handler of RDBLOCK in CTRLSUBS.S.  A block index outside the screen
 ; belongs to the room next door; a room that is not there at all reads as
@@ -2589,7 +2586,7 @@ tirstep:        ld      a, (tirroom)
                 ld      (tirroom), a
                 ret
 
-tirroom:        db      0
+tirroom         equ     SYSVARS + 0
 tirsteps:       db      0
 
 ; ---------------------------------------------------------------- flames
@@ -2642,10 +2639,7 @@ ffnext:         inc     a
 ; screen row -- and the Spectrum's next byte along is the start of a row
 ; eight lines further down, so the flame came out again at the left edge.
 
-flvis:          ld      b, a
-                ld      a, (cam)
-                neg
-                add     a, b            ; the screen column
+flvis:          call    subcam          ; the screen column
                 cp      32
                 jr      nc, flvnone
                 neg
@@ -2666,6 +2660,7 @@ draw_flames:    ld      a, (torches)
                 ld      hl, flstate
                 ld      (flst), hl
 flnext:         call    flame_one
+                call    gs_flame
                 ld      hl, flleft
                 dec     (hl)
                 jr      nz, flnext
@@ -2728,9 +2723,6 @@ flgot:          ld      a, (nowbank)    ; the flames are in the background
                 ldir
                 pop     af
                 call    pageset
-                ld      hl, flbuf
-                ld      (flsrc), hl
-
                 ld      a, (flrect)     ; how much of it is in view
                 call    flvis
                 or      a
@@ -2738,15 +2730,27 @@ flgot:          ld      a, (nowbank)    ; the flames are in the background
 
 ; The flame's three bytes of mask are the same on every one of its rows, so
 ; they go into the three ANDs below; its pixels are walked in the alternate
-; HL, and the room and the working copy are worked out at its top row and
-; walked from there.  With all four kept in memory and every row's
-; addresses worked out afresh, two torches were a fifth of a frame.
+; HL, what the view cut off each row skipped with the alternate BC, and the
+; room and the working copy are worked out at its top row and walked from
+; there in HL and DE.  With all four kept in memory and every row's
+; addresses worked out afresh, two torches were a fifth of a frame; with the
+; two walked in memory and nextline called, still a tenth.
 
                 ld      (flwid + 1), a  ; the bytes the view shows
                 ld      b, a
+                cp      3               ; the room goes a byte on after each
+                jr      c, flst1        ; but the third: 35 less that, a row
+                dec     a
+flst1:          neg
+                add     a, ROOM_BYTES
+                ld      (flstep + 1), a
                 ld      a, (flrect + 2)
-                sub     b
-                ld      (flskp + 1), a  ; and those it cut off, past each row
+                sub     b               ; and those it cut off, past each row
+                exx
+                ld      c, a
+                ld      b, 0
+                ld      hl, flbuf
+                exx
                 ld      hl, (flmbase)
                 ld      a, (hl)         ; what the room keeps: not the mask
                 cpl
@@ -2759,33 +2763,24 @@ flgot:          ld      a, (nowbank)    ; the flames are in the background
                 ld      a, (hl)
                 cpl
                 ld      (flm2 + 1), a
-                ld      a, (flrect + 1) ; the room at its top row
-                call    mul35
-                ld      de, room
-                add     hl, de
-                ld      a, (flrect)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                ld      (flroom), hl
-                ld      a, (flrect)     ; and the working copy, the camera
-                ld      b, a            ; saying where that lands
-                ld      a, (cam)
-                neg
-                add     a, b
+                ld      a, (flrect)     ; the working copy, the camera saying
+                call    subcam          ; where that lands
                 ld      e, a
                 ld      a, (flrect + 1)
                 call    scraddr
                 ld      de, work - SCREEN
                 add     hl, de
-                ld      (flwork), hl
-                ld      hl, flbuf
-                exx
+                push    hl
+                ld      a, (flrect + 1) ; and the room at its top row
+                call    roomrow
+                ld      a, (flrect)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                pop     de
                 ld      a, (flrect + 3)
                 ld      b, a
-flrow:          push    bc
-                ld      de, (flwork)
-                ld      hl, (flroom)
+flrow:          push    de
 flwid:          ld      c, 0            ; patched: the bytes shown
 flm0:           ld      a, 0xff         ; patched: what the room keeps
                 and     (hl)
@@ -2817,19 +2812,28 @@ flm2:           ld      a, 0xff
                 exx
                 ld      (de), a
 flrend:         exx                     ; past what the view cut off
-flskp:          ld      bc, 0           ; patched
                 add     hl, bc
                 exx
-                ld      hl, (flroom)    ; and a row down, in the room and in
-                ld      de, ROOM_BYTES  ; the working copy
-                add     hl, de
-                ld      (flroom), hl
-                ld      hl, (flwork)
-                call    nextline
-                ld      (flwork), hl
-                pop     bc
-                djnz    flrow
+                ld      a, l            ; the room a row down
+flstep:         add     a, 0            ; patched
+                ld      l, a
+                jr      nc, fl1
+                inc     h
+fl1:            pop     de              ; and the working copy a line down,
+                inc     d               ; as nextline does it
+                ld      a, d
+                and     7
+                jr      z, flnl
+fldn:           djnz    flrow
                 ret
+flnl:           ld      a, e
+                add     a, 32
+                ld      e, a
+                jr      c, fldn
+                ld      a, d
+                sub     8
+                ld      d, a
+                jr      fldn
 
 
 ; Colour, which the Spectrum keeps in cells of eight pixels by eight.  The
@@ -2861,10 +2865,7 @@ set_attrs_at:   ld      a, 1            ; the meters' colours go with it
 
 sanext:         ld      hl, (flrec)
                 ld      a, (hl)         ; its column, less the camera
-                ld      b, a
-                ld      a, (cam)
-                neg
-                add     a, b
+                call    subcam
                 ld      (sacol), a
                 inc     hl
                 ld      a, (hl)         ; the top of it, in cells
@@ -2986,10 +2987,10 @@ btboth:         ex      de, hl          ; union4 grows DE
                 pop     hl
                 ret
 
-dmsrc:          dw      0
-dmcol:          db      0
-dmtop:          db      0
-dmw:            db      0
+dmsrc           equ     SYSVARS + 1
+dmcol           equ     SYSVARS + 3
+dmtop           equ     SYSVARS + 4
+dmw             equ     SYSVARS + 5
 dmrect:         ds      4
 meterdirty:     db      1               ; something went over the meters
 dmslot:         dw      0
@@ -3035,7 +3036,7 @@ dmloop:         push    bc              ; one box was most of the screen to
                 call    box_two
                 ld      hl, mbshow + 4
                 ld      de, mbold + 4
-                jp      box_two
+                jr      box_two
 
 draw_mob:       ld      a, (mobvel)
                 inc     a
@@ -3280,9 +3281,9 @@ kddead:         ld      a, 1
 kdsong:         ld      c, 255
                 jp      cue_song
 
-sacol:          db      0
-sarow:          db      0
-sacolr:         db      0               ; this row's colour
+sacol           equ     SYSVARS + 6
+sarow           equ     SYSVARS + 7
+sacolr          equ     SYSVARS + 8     ; this row's colour
 flcolour:       db      INK_FLAME_TOP, INK_FLAME_MID, INK_FLAME_LOW
 flcells:        dw      FLCELLS0, FLCELLS1, FLCELLS2  ; shift three
                 dw      FLCELLS3, FLCELLS4, FLCELLS5  ; shift seven
@@ -3310,10 +3311,7 @@ sfnext:         ld      hl, (flrec)
                 call    flvis           ; nothing with a width of none
                 ld      (shw), a
                 ld      a, (shcol)
-                ld      b, a
-                ld      a, (cam)
-                neg
-                add     a, b
+                call    subcam
                 ld      (shcol), a
                 call    showgo
                 ld      hl, flleft
@@ -3493,7 +3491,7 @@ frame_check:    ld      a, (nowbank)
 mfix4:
                 org     mpc3              ; into the canvas bank: see MODORG
 under_flags:    call    base_x
-                jp      tile_flags
+                jr      tile_flags
 
 ; Out: A = the flags of the block one along, the way he faces or the way he
 ; came -- GETINFRONT and GETBEHIND.  Off the map reads as space, which is
@@ -3505,11 +3503,11 @@ front_flags:    ld      a, (facing)
 fffwd:          call    base_x
                 ld      de, BLOCK_PX
                 add     hl, de
-                jp      tile_flags
+                jr      tile_flags
 ffback:         call    base_x
                 ld      de, -BLOCK_PX
                 add     hl, de
-                jp      tile_flags
+                jr      tile_flags
 mpc4:
                 org     mfix4
 ffnone:         xor     a
@@ -4018,9 +4016,9 @@ cmp_wall:       cp      BLK_BLOCK
                 cp      BG_PANELWOF
                 ret
 
-sfframe:        db      0
-fosave:         dw      0
-rjcol:          db      0
+sfframe         equ     SYSVARS + 9
+fosave          equ     SYSVARS + 10
+rjcol           equ     SYSVARS + 12
 rjblocks:       db      0
 stunned:        db      0
 
@@ -4265,10 +4263,7 @@ shoff:          ld      hl, (charx)
                 sra     h
                 rr      l
                 ld      a, l
-                ld      b, a            ; the room's byte column; the camera
-                ld      a, (cam)        ; says where that is on screen
-                neg
-                add     a, b
+                call    subcam          ; the room's byte column, on screen
 
                 ld      (newcol), a     ; unclipped: dp_clip clips it
 
@@ -4354,7 +4349,9 @@ dp_image:       call    dp_place
                 ld      a, (newtop)
                 ld      c, a            ; C = the row in hand
                 ld      hl, (curdat)    ; HL = its pairs
-                ld      de, (dfrowlen)
+                ld      a, (dfstep + 1)
+                ld      e, a
+                ld      d, 0
 
 ; The rows above the screen, and those above the floor that cuts him off,
 ; are passed over first; then the rows are walked with their addresses in
@@ -4396,20 +4393,42 @@ dpfit:          push    hl
                 add     hl, de
                 ex      de, hl
                 pop     hl
-drawrow:        push    bc
-                push    de
+                ld      c, b            ; the rows, in C, which the row
+                exx                     ; routines leave alone; and in the
+                ld      c, REVTAB / 256 ; alternate C the page of the table
+                exx                     ; that turns a byte about
+
+; A row: the routine dfsetup chose lays it, then the pairs go a row on and
+; the working copy a line down.  All a row asks of itself -- what the left
+; edge cut off, how many bytes, whether the last one spills onto the screen
+; -- dfsetup has patched into the routine once for the picture; they were a
+; third of every row's time asked afresh.
+
+drawrow:        push    de
                 push    hl
-dfcall:         call    0               ; dfleft or dfmirror
+dfcall:         call    0               ; patched: the row's routine
                 pop     hl
                 pop     de
-                ld      bc, (dfrowlen)  ; on to the next row of pairs
-                ex      de, hl
-                add     hl, bc
-                ex      de, hl
-                call    nextline
-                pop     bc
-                djnz    drawrow
+                ld      a, e
+dfstep:         add     a, 0            ; patched: a row of pairs
+                ld      e, a
+                jr      nc, dr1
+                inc     d
+dr1:            inc     h               ; a line down, as nextline does it
+                ld      a, h
+                and     7
+                jr      z, drnext
+drdn:           dec     c
+                jr      nz, drawrow
                 ret
+drnext:         ld      a, l
+                add     a, 32
+                ld      l, a
+                jr      c, drdn
+                ld      a, h
+                sub     8
+                ld      h, a
+                jr      drdn
 
 ; A row of him goes straight from its (mask, data) pairs into the working
 ; copy: each byte through the shift's two tables, the part that stays OR'd
@@ -4419,21 +4438,23 @@ dfcall:         call    0               ; dfleft or dfmirror
 ; only then blitted -- and that was half of all a frame did.
 ;
 ; The alternate registers carry what a row needs from pair to pair: D and E
-; the pages of the two tables, B and C what the mask and the data spilled.
+; the pages of the two tables, B what the data spilled, C the page of REVTAB.
 ;
 ; The edges come out of CROPCHAR's clipping: spskip bytes cut off at the
-; left, neww bytes shown.  Worked out once a frame --
+; left, neww bytes shown.  Worked out once a picture --
 ;   dfsrc    how far into a row the first byte to read is
-;   dfcnt    how many whole bytes are laid down
-;   dfspill  whether the byte the last one spills into is on the screen
+;   the count of whole bytes laid down, into the four routines
+;   whether the byte the last one spills into is on the screen, into dfend
 ; A byte the left edge cut off still spills into the first byte shown, so
 ; with spskip set the row starts one byte early and reads it for that alone.
+; With nothing but that byte on the screen the picture is not drawn at all:
+; a few pixels at the edge, for a frame.
 
 dfsetup:        ld      a, (neww)
                 ld      c, a
                 ld      a, (curw)
                 ld      b, a
-                ld      (dfrowlen), a
+                ld      (dfstep + 1), a
                 ld      d, 0
                 ld      a, (spskip)
                 ld      e, a
@@ -4444,9 +4465,18 @@ dfsetup:        ld      a, (neww)
                 jr      nz, dfnospill
                 dec     a
                 inc     d
-dfnospill:      ld      (dfcnt), a
-                ld      a, d
-                ld      (dfspill), a
+dfnospill:      or      a
+                jr      nz, dfsome
+                pop     hl              ; none whole: out of dp_image too
+                ret
+dfsome:         ld      (dfl0n + 1), a
+                ld      (dfm0n + 1), a
+                ld      (dfln + 1), a
+                ld      (dfmn + 1), a
+                ld      a, d            ; the spill: nop to lay it, ret not to
+                dec     a
+                and     0xc9
+                ld      (dfend), a
                 ld      a, e            ; the pair read first, counted from
                 or      a               ; the left of the picture as shown:
                 jr      nz, dfskip1     ; the one before the first shown
@@ -4458,14 +4488,23 @@ dfskip1:        ld      e, a
                 ld      a, e            ; facing left, rows run as stored
                 dec     a
                 ld      hl, dfleft
-                ld      bc, dfleft0
+                ld      bc, dfleft0 + 1
                 jr      dfset
 dfsetm:         ld      a, b            ; facing right, from the end of the
                 sub     e               ; row back
                 ld      hl, dfmirror
-                ld      bc, dfmirror0
+                ld      bc, dfmirror0 + 1
 dfset:          ld      (dfsrc), a
-                ld      a, (curshift)   ; no shift: the loops that need no
+                ld      a, (spskip)     ; a byte cut off: the routines that
+                or      a               ; read it, or step past it
+                jr      z, dfcut0
+                dec     bc
+                ld      a, (facing)
+                or      a
+                ld      hl, dflcut
+                jr      z, dfcut0
+                ld      hl, dfmcut
+dfcut0:         ld      a, (curshift)   ; no shift: the loops that need no
                 or      a               ; tables
                 jr      nz, dfshift
                 ld      h, b
@@ -4485,16 +4524,12 @@ dfshift:        ld      (dfcall + 1), hl
                 exx
                 ret
 
-; No shift at all: the byte is the byte, and nothing spills.
+; No shift at all: the byte is the byte, and nothing spills.  The first
+; instruction steps past a byte the left edge cut off; dfsetup calls the one
+; after it when there is none.
 
-dfleft0:        ld      a, (spskip)
-                or      a
-                jr      z, dfl0go
-                inc     de              ; the byte cut off spills nothing
-dfl0go:         ld      a, (dfcnt)
-                or      a
-                ret     z
-                ld      b, a
+dfleft0:        inc     de
+dfl0n:          ld      b, 0            ; patched: the bytes laid
 dfl0pair:       ld      a, (de)
                 inc     de
                 or      (hl)
@@ -4503,14 +4538,8 @@ dfl0pair:       ld      a, (de)
                 djnz    dfl0pair
                 ret
 
-dfmirror0:      ld      a, (spskip)
-                or      a
-                jr      z, dfm0go
-                dec     de
-dfm0go:         ld      a, (dfcnt)
-                or      a
-                ret     z
-                ld      b, a
+dfmirror0:      dec     de
+dfm0n:          ld      b, 0            ; patched
                 exx
                 ld      h, REVTAB / 256
                 exx
@@ -4526,26 +4555,21 @@ dfm0pair:       ld      a, (de)
                 djnz    dfm0pair
                 ret
 
-; In: DE = the first pair to read, HL = where its byte goes.
+; In: DE = the first pair to read, HL = where its byte goes.  dflcut and
+; dfmcut read the byte cut off for its spill first.
 
-dfleft:         ld      a, (spskip)
-                or      a
-                jr      nz, dflcut
-                exx                     ; nothing cut off: nothing spilled in
-                ld      b, 0
-                exx
-                jr      dflgo
-dflcut:         ld      a, (de)         ; the byte cut off, for its spill
+dflcut:         ld      a, (de)
                 inc     de
                 exx
                 ld      l, a
                 ld      h, e
                 ld      b, (hl)
                 exx
-dflgo:          ld      a, (dfcnt)
-                or      a
-                jr      z, dfend
-                ld      b, a
+                jr      dfln
+dfleft:         exx                     ; nothing cut off: nothing spilled in
+                ld      b, 0
+                exx
+dfln:           ld      b, 0            ; patched: the bytes laid
 dflpair:        ld      a, (de)         ; the byte, and only it: the mask is
                 inc     de              ; its complement and the blit is an OR
                 exx
@@ -4565,31 +4589,25 @@ dflpair:        ld      a, (de)         ; the byte, and only it: the mask is
 ; Facing right: the pairs from the end of the row back, and every byte with
 ; its bits turned about on the way to the shift.
 
-dfmirror:       ld      a, (spskip)
-                or      a
-                jr      nz, dfmcut
-                exx
-                ld      b, 0
-                exx
-                jr      dfmgo
 dfmcut:         ld      a, (de)
                 dec     de
                 exx
                 ld      l, a
-                ld      h, REVTAB / 256
+                ld      h, c
                 ld      l, (hl)
                 ld      h, e
                 ld      b, (hl)
                 exx
-dfmgo:          ld      a, (dfcnt)
-                or      a
-                jr      z, dfend
-                ld      b, a
+                jr      dfmn
+dfmirror:       exx
+                ld      b, 0
+                exx
+dfmn:           ld      b, 0            ; patched
 dfmpair:        ld      a, (de)
                 dec     de
                 exx
                 ld      l, a
-                ld      h, REVTAB / 256
+                ld      h, c            ; REVTAB
                 ld      l, (hl)
                 ld      h, d
                 ld      a, (hl)
@@ -4603,12 +4621,10 @@ dfmpair:        ld      a, (de)
                 djnz    dfmpair
 
 ; The byte the last one spills into: what came over, laid on the room the
-; same way.  The spill lives in the alternate B, the screen address in the
-; main HL -- and A is A in both sets.
+; same way -- or, patched to a ret, not on the screen.  The spill lives in
+; the alternate B, the screen address in the main HL, and A is A in both.
 
-dfend:          ld      a, (dfspill)
-                or      a
-                ret     z
+dfend:          nop                     ; patched: ret with no spill shown
                 exx
                 ld      a, b
                 exx
@@ -4671,7 +4687,7 @@ hide_floor:     call    quickfloor
                 ld      (coverm), hl
                 ld      hl, floorband
                 ld      (coverb), hl
-                jp      cover_rows
+                jr      cover_rows
 
 ; Putting the foreground back over him is hide_behind, with the fight.
 
@@ -4806,7 +4822,11 @@ eraseset:       ld      de, ercol       ; col, top, width, height, in order
                 ld      a, (erw)
                 or      a
                 ret     z
-                ld      (erwid + 1), a
+                call    chainat         ; the row's copy, and past it the room
+                ld      (ercall + 1), hl        ; a row on: 35 less the width
+                neg
+                add     a, ROOM_BYTES
+                ld      (erskip + 1), a
                 ld      a, (erh)
                 or      a
                 ret     z
@@ -4814,40 +4834,249 @@ eraseset:       ld      de, ercol       ; col, top, width, height, in order
                 ld      a, (ertop)
                 call    cliprows
                 ret     c
-                call    rowcount
-                ld      a, c            ; the room's row, under the view
-                call    mul35
-                ld      de, room
-                add     hl, de
-                ld      a, (ercol)
-                call    mastercol
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                push    hl
-                ld      a, (ercol)      ; and the working copy's
+                push    bc              ; B = rows, C = the first
+                ld      a, (ercol)      ; the working copy's
                 ld      e, a
                 ld      a, c
                 call    scraddr
                 ld      de, work - SCREEN
                 add     hl, de
+                ex      (sp), hl
+                push    hl
+                ld      a, l            ; the room's row, under the view
+                call    roomrow
+                ld      a, (ercol)
+                call    mastercol
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                pop     bc
+                pop     de
+
+; A row: DE the working copy, HL the room.  LDI counts in BC, and C starts
+; each row at 255 so that B, the rows, is never touched.  Walking the room
+; and the working copy on in place, instead of pushing and popping them and
+; calling nextline, and the LDIs instead of LDIR, took a third off a row.
+
+eraserow:       push    de
+                ld      c, 255
+ercall:         call    copy32          ; patched: the last (erw) of them
+                ld      a, l
+erskip:         add     a, 0            ; patched: 35 less the width
+                ld      l, a
+                jr      nc, er1
+                inc     h
+er1:            pop     de              ; the working copy a line down, as
+                inc     d               ; nextline does it
+                ld      a, d
+                and     7
+                jr      z, ernext
+erdn:           djnz    eraserow
+                ret
+ernext:         ld      a, e
+                add     a, 32
+                ld      e, a
+                jr      c, erdn
+                ld      a, d
+                sub     8
+                ld      d, a
+                jr      erdn
+
+; A guard standing still -- waiting for him en garde, or dead -- is the same
+; picture in the same place frame after frame, and rubbing him out, drawing
+; him and putting the floor and the front back over him was a third of a
+; frame for nothing: it slowed the prince down all the way across a guard's
+; room.  He is left as he is when his rectangle and everything his picture
+; comes from are as they were when he was last drawn -- where he is, the
+; frame, the way he faces, where his feet are cut -- and nothing else is
+; drawn over his box this frame: the prince's box, a torch, a floor falling,
+; a block redrawn, the whole working copy laid again.  His box is then
+; emptied, so that nothing rubs him out and nothing shows him.
+
+gdlast          equ     LOWVARS + LOWVARLEN     ; charx, chary, facing,
+                                        ; frame; charcu and his rectangle: ten,
+                                        ; up to the deepest the stack goes
+gdskip          equ     0x5C6F          ; 1: left as he is this frame
+gddirty         equ     0x5C70          ; something wrote over him
+spkroom         equ     0x5C71          ; the room has spikes: see roomblk
+
+; draw_chars' ways in.  The guard's picture has the floor and the front put
+; back over it straight after, while he is still the character in hand --
+; one exchange of the two records less, and the prince, drawn after, is put
+; right the same way over his own.
+
+gd_pics:        ld      a, (gdskip)
+                or      a
+                ret     nz
+                call    dp_pics
+                call    page_art
+                call    hide_floor
+                jp      hide_behind
+
+rect_still:     call    rect_box        ; the prince's box, then the question
+gd_still:       ld      hl, gdskip
+                ld      (hl), 0
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      hl, charx + OP  ; as when last drawn -- and this frame's
+                ld      de, gdlast      ; kept, whatever the answer
+                ld      bc, 5 * 256
+                call    gs_cmp
+                ld      hl, charcu + OP ; and his rectangle
+                ld      b, 5
+                call    gs_cmp
+                ld      a, c
+                ld      hl, gddirty
+                or      (hl)
+                ld      (hl), b
+                ld      hl, mbold + 2   ; nothing falling, nor anything that
+                or      (hl)            ; fell last frame to rub out
+                ld      hl, mbold + 6
+                or      (hl)
+                ld      hl, nummob
+                or      (hl)
+                ld      de, boxcol      ; and not the prince's box: a torch
+                jr      nz, gsmove      ; over him gs_flame sees to
+                call    gs_meet
+                jr      c, gsjoin
+gsstill:        ld      hl, gdskip
+                inc     (hl)
+gsempty:        xor     a
+                ld      (boxw + OP), a
+                ret
+
+; Drawn again, and the prince's box meets him: the two boxes are one, rubbed
+; out and shown once -- in a fight they are much the same place, and the
+; rows the two have in common went to the screen twice.
+
+gsmove:         call    gs_meet
+                ret     nc
+gsjoin:         ld      hl, boxcol + OP
+                ld      de, boxcol
+                call    union4
+                jr      gsempty
+
+; A torch just drawn over a guard left as he is: he goes down again on top
+; of it, as he would have -- only the torch's rectangle has changed, and that
+; is shown with the torch.
+
+gs_flame:       ld      a, (gdskip)
+                or      a
+                ret     z
+                ld      a, (cam)        ; its rectangle on the screen
+                ld      c, a
+                ld      a, (flrect)
+                sub     c
+                ld      (flrect), a
+                ld      de, flrect
+                call    gs_meet
+                ret     nc
+                xor     a
+                ld      (gdskip), a
+                ret
+
+; B bytes at HL against the copy at DE, which takes them: C gathers what
+; differs.
+
+gs_cmp:         ld      a, (de)
+                xor     (hl)
+                or      c
+                ld      c, a
+                ld      a, (hl)
+                ld      (de), a
+                inc     hl
+                inc     de
+                djnz    gs_cmp
+                ret
+
+; DE = a rectangle.  Out: carry if it meets the guard -- his rectangle,
+; which is his box while he is still, and stays whole when the box is emptied.
+
+gs_meet:        ld      a, (neww + OP)  ; none of him in view: nothing meets
+                or      a               ; him, carry clear
+                ret     z
+                ld      hl, newcol + OP
+                call    ov1             ; the columns
+                ret     nc
+                inc     hl              ; and the rows
+                inc     de
+
+; Along one of them: A and B meet where either starts inside the other --
+; the differences taken round, so that a top above the screen (192 and up)
+; still compares.
+
+ov1:            ld      a, (de)
+                sub     (hl)
+                inc     hl
+                inc     hl
+                cp      (hl)
+                dec     hl
+                dec     hl
+                ret     c
+                ld      a, (hl)
                 ex      de, hl
-                pop     hl
-eraserow:       push    hl
-                push    de
-                ld      b, 0
-erwid:          ld      c, 0            ; patched with the width
-                ldir
-                pop     hl              ; the working copy walks as the screen
-                call    nextline        ; does: it is the screen, moved up
+                sub     (hl)
+                inc     hl
+                inc     hl
+                cp      (hl)
+                dec     hl
+                dec     hl
                 ex      de, hl
-                pop     hl
-                ld      bc, ROOM_BYTES
-                add     hl, bc
-                exx
-                dec     b
-                exx
-                jr      nz, eraserow
+                ret
+
+; For hide_behind: from the front list's entry at HL, B of them left, on to
+; the first whose rows meet the character's, with B counting it.  Out: Z
+; when there is none.  Most are wholly above or below him, and turning them
+; away here, two bytes and a sum each, saved asking the whole question of
+; every one: rows meet where his bottom less its top, round, is less than
+; the two heights less one.
+
+hbseek:         ld      a, (newtop)
+                ld      d, a
+                ld      a, (newh)
+                dec     a
+                ld      e, a
+hbs1:           ld      a, b
+                or      a
+                ret     z
+                inc     hl
+                ld      a, (hl)         ; its bottom row
+                sub     d               ; less his top, round
+                ld      c, a
+                inc     hl
+                inc     hl
+                inc     hl
+                ld      a, (hl)         ; its height, and his less one
+                dec     hl
+                dec     hl
+                dec     hl
+                dec     hl
+                add     a, e
+                cp      c
+                jr      z, hbs2
+                ret     nc              ; they meet: NZ
+hbs2:           ld      a, 5
+                add     a, l
+                ld      l, a
+                jr      nc, hbs3
+                inc     h
+hbs3:           dec     b
+                jr      hbs1
+
+; A = a width of 1 to 32.  Out: HL = the place in copy32 that copies that
+; many, A still the width.
+
+chainat:        ld      l, a
+                add     a, a
+                neg
+                add     a, (copy32 + 64) & 255
+                ld      h, a
+                ld      a, l
+                ld      l, h
+                ld      h, (copy32 + 64) / 256
+                ret     c
+                dec     h
                 ret
 
 ; The rows of a rectangle that are on the screen.  A top of 192 or more is
@@ -4877,15 +5106,6 @@ crcut:          ld      a, 192
                 sub     c
                 ld      b, a
 crfit:          or      a
-                ret
-
-; The row count goes into the alternate B, which the tight loops count on,
-; so that the whole of BC is theirs for LDIR.
-
-rowcount:       ld      a, b
-                exx
-                ld      b, a
-                exx
                 ret
 
 startrows:      ld      hl, 0
@@ -5082,9 +5302,11 @@ show_one:       ld      de, shcol       ; col, top, width, height, in order
                 ld      bc, 4
                 ldir
 
-showgo:         ld      a, (shw)        ; none of him on screen: LDIR would
-                or      a               ; read a width of zero as 65536 and
-                ret     z               ; take the stack with it
+showgo:         ld      a, (shw)        ; none of him on screen
+                or      a
+                ret     z
+                call    chainat
+                ld      (shcall + 1), hl
                 ld      (shwid + 1), a
                 ld      a, (shh)
                 or      a
@@ -5099,29 +5321,50 @@ showgo:         ld      a, (shw)        ; none of him on screen: LDIR would
                 jr      c, shabove
                 ld      a, 1
                 ld      (meterdirty), a
-shabove:        call    rowcount
-                ld      a, (shcol)
+shabove:        ld      a, (shcol)
                 ld      e, a
                 ld      a, c
                 call    scraddr
-showrow:        push    hl
                 ld      a, h            ; DE = the screen shown: 0x80 up when
 scrsel:         or      0               ; that is bank 7
                 ld      d, a
                 ld      e, l
                 ld      a, h            ; HL = working copy, the same place
                 add     a, (work - SCREEN) / 256        ; a whole number
-                ld      h, a                            ; of pages up
-                ld      b, 0
-shwid:          ld      c, 0            ; patched with the width
-                ldir
-                pop     hl
-                call    nextline
-                exx
-                dec     b
-                exx
-                jr      nz, showrow
+                ld      h, a                            ; of thirds up
+
+; A row, as eraserow does one: the two addresses share their low byte, and
+; the working copy's line within its cell is the screen's.  A screen row
+; never crosses a page, but the address past its last byte does.
+
+showrow:        ld      c, 255
+shcall:         call    copy32          ; patched
+                ld      a, e
+shwid:          sub     0               ; patched: the width
+                ld      e, a
+                ld      l, a
+                jr      nc, shsame      ; a box out to column 31: past its
+                dec     h               ; last byte the LDIs carried into
+                dec     d               ; the next page
+shsame:         inc     h
+                inc     d
+                ld      a, h
+                and     7
+                jr      z, shnext
+shdn:           djnz    showrow
                 ret
+shnext:         ld      a, l
+                add     a, 32
+                ld      l, a
+                ld      e, a
+                jr      c, shdn
+                ld      a, h
+                sub     8
+                ld      h, a
+                ld      a, d
+                sub     8
+                ld      d, a
+                jr      shdn
 
 ; A block that has just been redrawn, from the room to the working copy and
 ; on to the screen.
@@ -5179,10 +5422,7 @@ rsright:        ld      a, b
                 ld      (rdw), a
 
                 ld      a, (rdstart)    ; where that lands on screen
-                ld      b, a
-                ld      a, (cam)
-                neg
-                add     a, b
+                call    subcam
                 ld      (linecol), a
                 ld      a, (redh)
                 ld      b, a
@@ -5194,9 +5434,7 @@ rsright:        ld      a, b
                 call    dirty_add       ; and the blit takes it from there
                 push    bc
                 ld      a, (rowy)       ; the room's row, stepped by 35 from
-                call    mul35           ; here on rather than multiplied out
-                ld      de, room        ; for every one
-                add     hl, de
+                call    roomrow         ; here on, not multiplied out afresh
                 ld      a, (rdstart)
                 ld      e, a
                 ld      d, 0
@@ -5228,7 +5466,7 @@ rsnext:         ld      hl, (rsroomp)
                 djnz    rsrow
                 ret
 
-rsroomp:        dw      0
+rsroomp         equ     SYSVARS + 13
 
 ; The rectangle a block redraw left behind, queued for the top of the next
 ; frame -- before his own two, so that he wins.  One rectangle each, never
@@ -5242,7 +5480,9 @@ rsroomp:        dw      0
 
 DIRTYMAX        equ     6
 
-dirty_add:      ld      a, (dirtyn)
+dirty_add:      ld      a, 1            ; the guard drawn afresh: see gd_still
+                ld      (gddirty), a
+                ld      a, (dirtyn)
                 cp      DIRTYMAX
                 jr      c, dirtyset
                 ld      a, 1            ; more than a frame ever has: the whole
@@ -5270,11 +5510,11 @@ dirtyset:       ld      l, a            ; four bytes to a rectangle, in the
                 ld      (hl), a
                 ret
 
-rdcol:          db      0
-rdstart:        db      0
-rdw:            db      0
+rdcol           equ     SYSVARS + 15
+rdstart         equ     SYSVARS + 16
+rdw             equ     SYSVARS + 17
 redh:           db      63
-dirtyn:         db      0               ; rectangles waiting for the blit
+dirtyn          equ     SYSVARS + 18    ; rectangles waiting for the blit
 
 ; Remember where the sprite went, so the next frame can rub it out.
 
@@ -5315,7 +5555,43 @@ scraddr:        ld      l, a            ; 010 t t l l l -- the third, and the
                 ld      l, a
                 ret
 
-                include "bg.asm"
+
+; Thirty two bytes, HL to DE.  Unrolled, because ldir spends a fifth of its
+; time counting and this runs over the whole screen when the view moves.
+
+copy32:         ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ldi
+                ret
 
 ; ---------------------------------------------------------------- data
 
@@ -5361,7 +5637,7 @@ CHRECLEN        equ     $ - chrec
 oprec:          ds      CHRECLEN
 OP              equ     oprec - chrec
 
-jarabove:       db      0               ; 1 the row above, -1 his own
+jarabove        equ     SYSVARS + 19    ; 1 the row above, -1 his own
 jstkx:          db      0
 jstky:          db      0
 btn:            db      0
@@ -5370,55 +5646,55 @@ clrb:           db      0
 clru:           db      0
 clrd:           db      0
 clrbtn:         db      0
-atemp:          db      0
-fwdkind:        db      0
-blockid:        db      0
+atemp           equ     0x5C21
+fwdkind         equ     0x5C22
+blockid         equ     0x5C23
 fchary:         db      0
-curleft:        dw      0
-croprow:        db      0
-croptop:        db      0
+curleft         equ     0x5C24
+croprow         equ     0x5C26
+croptop         equ     0x5C27
 kidstr:         db      3               ; initmaxstr in TOPCTRL.S
 
-curw:           db      0
-curh:           db      0
-curoff:         db      0
-curshift:       db      0
-curdat:         dw      0
-curbank:        db      0
-curent:         dw      0
+curw            equ     0x5C28
+curh            equ     0x5C29
+curoff          equ     0x5C2A
+curshift        equ     0x5C2B
+curdat          equ     0x5C2C
+curbank         equ     0x5C2E
+curent          equ     0x5C2F
 rowy:           db      0
 
-spskip:         db      0               ; and what the left edge cut off
+spskip          equ     0x5C31          ; and what the left edge cut off
 frstart:        db      0               ; the interrupt this frame began on
-tilestate:      db      0               ; the state of the tile last read
+tilestate       equ     0x5C32          ; the state of the tile last read
 gotsword:       db      START_SWORD               ; he has picked the sword up: CTRL.S
                                         ; asks it before he may draw on anyone
 rbody:          ds      4               ; where his own picture goes
 runion:         ds      4               ; and the frame's, with the sword
-curfdy:         db      0               ; SETUPCHAR's Fdy for this frame
-collidel:       db      0               ; CHECKBARR and its helpers
-collider:       db      0
-collx:          db      0
-collface:       db      0
-bythis:         db      0
+curfdy          equ     0x5C33          ; SETUPCHAR's Fdy for this frame
+collidel        equ     0x5C34          ; CHECKBARR and its helpers
+collider        equ     0x5C35
+collx           equ     0x5C36
+collface        equ     0x5C37
+bythis          equ     0x5C38
 bylast:         db      0
-begrange:       db      0
+begrange        equ     0x5C39
 endrange:       db      0
 cdleft:         db      0               ; CDLeftEj and CDRightEj, 140 wide
 cdright:        db      0
-cbrow:          db      0
-cbidx:          db      0
-cbedge:         db      0               ; blockedge
-cccode:         db      0               ; the barrier code in hand
-cbcd:           dw      0
-cbsn:           dw      0
-tempbx:         db      0               ; RDBLOCK's tempblockx, tempblocky
-tempby:         db      0               ; and tempscrn
-tempscrn:       db      0
-dbcol:          db      0
-fwdbx:          db      0               ; CharBlockX, the block in front, and
-fwdinx:         db      0               ; what is in it
-fwdid:          db      0
+cbrow           equ     0x5C3A
+cbidx           equ     0x5C42
+cbedge          equ     0x5C43          ; blockedge
+cccode          equ     0x5C44          ; the barrier code in hand
+cbcd            equ     0x5C45
+cbsn            equ     0x5C49
+tempbx          equ     0x5C47          ; RDBLOCK's tempblockx, tempblocky
+tempby          equ     0x5C4B          ; and tempscrn
+tempscrn        equ     0x5C4C
+dbcol           equ     0x5C4D
+fwdbx           equ     0x5C4E          ; CharBlockX, the block in front, and
+fwdinx          equ     0x5C4F          ; what is in it
+fwdid           equ     0x5C50
 barl:           db      0, 12, 2, 0, 0  ; BarL and BarR, 140 wide
 barr:           db      0, 0, 9, 11, 0
 snlast:         db      255, 255, 255, 255, 255, 255, 255, 255, 255, 255
@@ -5432,34 +5708,32 @@ vwcam:          db      0xff            ; the view being made, or none
 vwatt:          db      0               ; its colours still to do
 vwrow:          db      0               ; where to look for its next row
 vwcnt:          db      0               ; how many rows it still wants
-vwfirst:        db      0               ; the run in hand: its first row
-vwn:            db      0               ; and how many
+vwfirst         equ     0x5C51          ; the run in hand: its first row
+vwn             equ     0x5C52          ; and how many
 flipnow:        db      0               ; show it at the top of the next frame
 nohalt:         db      0               ; the fill ran up to the interrupt
-vwwait:         db      0               ; a step is due: the queue waits
+vwwait          equ     0x5C53          ; a step is due: the queue waits
 vwstop:         db      0               ; the one it runs up to
 vwmin:          db      0               ; rows still owed it this frame
 vwhung:         db      0               ; frames since it last had a run
-atbase:         dw      0               ; the colours set_attrs writes
-masterc:        db      0
-coverm:         dw      0
-covm:           dw      0               ; cover_rows' three: the mask's row,
-covr:           dw      0               ; the room's and the working copy's,
-covw:           dw      0               ; and which row of the mask that is
-covi:           db      0
-coverb:         dw      0
-roomp:          dw      0
-rowptr:         dw      0
+atbase          equ     0x5C54          ; the colours set_attrs writes
+masterc         equ     0x5C56
+coverm          equ     0x5C57
+covm            equ     0x5C59          ; cover_rows' three: the mask's row,
+covr            equ     0x5C5B          ; the room's and the working copy's,
+covw            equ     0x5C5D          ; and which row of the mask that is
+covi            equ     0x5C5F
+coverb          equ     SYSVARS + 20
+roomp           equ     SYSVARS + 22
+rowptr          equ     SYSVARS + 24
 rndseed:        db      37
-fstate:         db      0
-flleft:         db      0
-flrec:          dw      0
-flst:           dw      0
-flsrc:          dw      0
-flstride:       db      0
-flmbase:        dw      0
-flroom:         dw      0
-flwork:         dw      0
+fstate          equ     SYSVARS + 26
+flleft          equ     0x5C60
+flrec           equ     0x5C61
+flst            equ     0x5C63
+flsrc           equ     0x5C65
+flstride        equ     0x5C67
+flmbase         equ     0x5C68
 flrect:         ds      4
 linecol:        db      0
 ercol:          db      0
@@ -5471,10 +5745,7 @@ shtop:          db      0
 shw:            db      0
 shh:            db      0
 
-dfrowlen:       dw      0               ; bookkeeping: see dfsetup
-dfsrc:          dw      0
-dfcnt:          db      0
-dfspill:        db      0
+dfsrc:          dw      0               ; bookkeeping: see dfsetup
 
 
 ; The guards' programs, AUTO.S: kept here, where there is room for them.
@@ -5523,9 +5794,9 @@ hiend:
 start:          di
                 ld      sp, stack
 
-                ld      hl, LOWVARS     ; the drawing's bytes, nought
-                ld      de, LOWVARS + 1
-                ld      bc, LOWVARLEN - 1
+                ld      hl, SYSVARS     ; the variables under the loader,
+                ld      de, SYSVARS + 1 ; nought
+                ld      bc, LOWVARS + LOWVARLEN - SYSVARS - 1
                 ld      (hl), 0
                 ldir
 
@@ -5636,7 +5907,7 @@ check_banks:    ld      a, BANK_ART
                 ld      de, SIG_ART
                 or      a
                 sbc     hl, de
-                jp      nz, badload
+                jr      nz, badload
                 ld      hl, sigtab
                 ld      b, 3
 cbloop:         push    bc
@@ -5657,7 +5928,7 @@ cbloop:         push    bc
                 sbc     hl, de
                 pop     hl
                 pop     bc
-                jp      nz, badload
+                jr      nz, badload
                 djnz    cbloop
                 ld      a, BANK_ART
                 jp      pageset

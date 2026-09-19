@@ -34,6 +34,33 @@ ROM_INT_TSTATES = 1500
 FRAME_TSTATES = 70908
 
 
+# What each unprefixed instruction takes, in T-states, the way the book has
+# it -- a conditional jump, call or return at its not-taken time, TAKEN below
+# what it adds when it goes; CB and ED count their own on top of the four of
+# the prefix.  Every instruction was four once, which made the frames here
+# look half what they are on the machine and hid every one that ran late.
+
+TSTATES = [
+    4, 10, 7, 6, 4, 4, 7, 4, 4, 11, 7, 6, 4, 4, 7, 4,
+    8, 10, 7, 6, 4, 4, 7, 4, 12, 11, 7, 6, 4, 4, 7, 4,
+    7, 10, 16, 6, 4, 4, 7, 4, 7, 11, 16, 6, 4, 4, 7, 4,
+    7, 10, 13, 6, 11, 11, 10, 4, 7, 11, 13, 6, 4, 4, 7, 4,
+] + [7 if (op & 7 == 6 or op >> 3 & 7 == 6) and op != 0x76 else 4
+     for op in range(0x40, 0xC0)] + [
+    5, 10, 10, 10, 10, 11, 7, 11, 5, 10, 10, 4, 10, 17, 7, 11,
+    5, 10, 10, 11, 10, 11, 7, 11, 5, 4, 10, 11, 10, 4, 7, 11,
+    5, 10, 10, 19, 10, 11, 7, 11, 5, 4, 10, 4, 10, 4, 7, 11,
+    5, 10, 10, 4, 10, 11, 7, 11, 5, 6, 10, 4, 10, 4, 7, 11,
+]
+# op: (its length, what it adds when taken)
+TAKEN = {0x10: (2, 5)}
+for _op in (0x20, 0x28, 0x30, 0x38):
+    TAKEN[_op] = (2, 5)
+for _y in range(8):
+    TAKEN[0xC0 | _y << 3] = (1, 6)                      # ret cc
+    TAKEN[0xC4 | _y << 3] = (3, 7)                      # call cc
+
+
 class Z80:
     def __init__(self, mem=None):
         self.mem = bytearray(65536) if mem is None else mem
@@ -64,6 +91,9 @@ class Z80:
         # slow ones there -- the room's among them -- and the pattern is
         # 1, 0, 7, 6, 5, 4, 3, 2 from T 14365.
         self._acc = 0
+        # POP_FREELOW: where the slow half of the low 32K ends, for asking
+        # what code moved out of it would gain
+        self._clo = int(os.environ.get('POP_FREELOW', '0x4000'), 0)
         mode = os.environ.get('POP_CONTEND', '')
         if mode:
             self.rb = self._rb_c
@@ -155,7 +185,7 @@ class Z80:
     def _contend(self, addr):
         t = self.cycles + self._acc
         self._acc += 3
-        if 0x4000 <= addr < 0x8000 or (addr >= 0xC000 and self.page in self._cbanks):
+        if self._clo <= addr < 0x8000 or (addr >= 0xC000 and self.page in self._cbanks):
             t = t % FRAME_TSTATES - self._cfirst
             if 0 <= t < 192 * 228:
                 lt = t % 228
@@ -300,6 +330,15 @@ class Z80:
             self.tick_frames()
 
     def _step(self):
+        pc = self.pc
+        op = self.mem[pc]
+        self._exec()
+        self.cycles += TSTATES[op] - 4
+        t = TAKEN.get(op)
+        if t and self.pc != (pc + t[0]) & 0xffff:
+            self.cycles += t[1]
+
+    def _exec(self):
         self.halted_now = False
         op = self.fetch()
         self.cycles += 4
@@ -539,6 +578,7 @@ class Z80:
     def cb(self):
         op = self.fetch()
         z, y, kind = op & 7, (op >> 3) & 7, op >> 6
+        self.cycles += 4 if z != 6 else 8 if kind == 1 else 11
         v = self.get_r(z)
         if kind == 0:
             c = 1 if self.f & CF else 0
@@ -594,11 +634,15 @@ class Z80:
                 self.cycles += 21 if repeat else 16
                 if not repeat:
                     break
+            self.cycles -= 4                            # the prefix's, counted
             self.f &= SF | ZF | CF
             self.f |= PF if self.bc else 0
             return
         if not 0x40 <= op < 0x80:                       # the rest is undefined
             return
+        self.cycles += (8, 8, 11, 16, 4, 10, 4, 5)[z]    # the prefix's four on
+        if op in (0x67, 0x6F):                          # rrd, rld
+            raise NotImplementedError('ED %02X at %04X' % (op, self.pc - 2))
         if op in (0x44, 0x4C, 0x54, 0x5C, 0x64, 0x6C, 0x74, 0x7C):   # neg
             self.a = self.sub8(0, self.a)
             return
