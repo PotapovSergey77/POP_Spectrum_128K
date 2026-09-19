@@ -104,7 +104,9 @@ def tape_levels(cpu, path, levels):
     The levels after the first are bare blocks on the tape after the banks,
     which the game loads itself through the ROM's LD-BYTES in tapeload --
     and there is no ROM here, so tapeload is done here: the next block of
-    the tape, in order, into the background bank at the blueprint.
+    the tape, in order, into the background bank at the blueprint.  With
+    tapeblk, which any block goes through, the block goes where HL says in
+    the bank tapeblk has paged -- PlayCut1's into the art bank.
     """
     for sym in (os.path.splitext(path)[0] + '.sym.json',
                 os.path.join(os.path.dirname(path), 'sym.json')):
@@ -127,7 +129,17 @@ def tape_levels(cpu, path, levels):
             cpu.banks[bank][at:at + len(data)] = data
         cpu.f |= 1                      # carry: loaded
         cpu.iff1 = cpu.iff2 = 1         # LD-BYTES leaves them on
-    cpu.traps[s['tapeload']] = load
+    def load_at(cpu):
+        data = open(queue.pop(0), 'rb').read()
+        assert len(data) == cpu.de, (len(data), cpu.de)
+        cpu.mem[cpu.hl:cpu.hl + len(data)] = data
+        cpu.f |= 1
+        cpu.iff1 = cpu.iff2 = 1
+        cpu.push(s['tbdone'])           # where the trap's return goes
+    if 'tbagain' in s:
+        cpu.traps[s['tbagain']] = load_at
+    else:
+        cpu.traps[s['tapeload']] = load
 
 
 def skip_intro(cpu, path):

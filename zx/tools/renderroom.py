@@ -18,6 +18,7 @@ import os
 import sys
 
 import bgdata as bg
+import bgexport
 import pngwrite
 import popimg
 import poplevel
@@ -49,6 +50,8 @@ def shifted(img, n, keep):
 class Room:
     def __init__(self, bgset='DUN', edges=True):
         self.tab1 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB1.' + bgset))
+        if bgset == 'DUN':
+            bgexport.edge_shafts(self.tab1)
         self.tab2 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB2.' + bgset))
         self.palace = (bgset == 'PAL')
         self.canvas = [bytearray(WIDTH_BYTES) for _ in range(HEIGHT)]

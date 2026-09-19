@@ -92,6 +92,13 @@ class Char:
                 return
 
 
+# Two and a half seconds of the first frame before the scene moves, the
+# torches burning (SPEED 12 frames, eight and an eighth fiftieths each in
+# cutplay.asm): the music, which starts from the first of them, came too
+# late for what it goes with.
+LEAD = 15
+
+
 def cut0():
     """[state per frame]: speed, vizier and princess (posn, x, y, face) or
     None, the hourglass state or None, whether the sand flows, flash."""
@@ -108,10 +115,11 @@ def cut0():
     prn.jumpseq(PSTAND)
     prn.animchar()
 
-    def play(n):
+    def play(n, still=False):
         for _ in range(n):
-            viz.animchar()
-            prn.animchar()
+            if not still:
+                viz.animchar()
+                prn.animchar()
             frames.append({
                 'speed': speed[0],
                 'vizier': (viz.posn, viz.x, viz.y, viz.face),
@@ -120,10 +128,13 @@ def cut0():
             if flash[0]:
                 flash[0] -= 1
 
+    # The CPC's tunes run ahead of the Apple's scene: they start where
+    # they would have without the frames put in front of it.
     def tune():
-        tunes.append(len(frames))
+        tunes.append(len(frames) - LEAD)
 
     tunes = []
+    play(LEAD, still=True)
     play(2)
     tune()
     play(8)                 # s_Princess: the CPC's tune 2
@@ -166,6 +177,40 @@ def cut0():
     play(20)                # s_StTimer
     for n in tunes:
         frames[n]['tune'] = True
+    return frames
+
+
+# The hourglass PlayCut1 has: GETGLASS's state for more than forty minutes
+# left, which is what there is after level one -- the Spectrum keeps no
+# clock yet.  GAMEBG.S's glassimg[3], and its sandht cuts the flow short.
+CUT1_GLASS = 3
+
+
+def cut1():
+    """PlayCut1, the princess waiting between levels one and two: INITIT,
+    the hourglass and its sand (GETGLASS, ADDGLASS), STARTP1 -- STARTP0
+    turned to face right -- two frames of PLAY, and PlaySongX's s_Timer,
+    the CPC's tune 6, for which the last frame is held (see 'hold')."""
+    seq = popseq.load()
+    frames = []
+    prn = Char(seq, 120, FLOOR_Y, -1)
+    prn.jumpseq(PSTAND)
+    prn.animchar()
+    prn.face = 0
+
+    def play(n):
+        for _ in range(n):
+            prn.animchar()
+            frames.append({
+                'speed': 12, 'vizier': None,
+                'princess': (prn.posn, prn.x, prn.y, prn.face),
+                'glass': CUT1_GLASS, 'sand': True, 'flash': False})
+
+    play(2)
+    play(1)
+    frames[-1]['tune'] = True           # s_Timer, and the song plays out
+    play(1)
+    frames[-1]['hold'] = True           # over this frame, shown until then
     return frames
 
 

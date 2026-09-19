@@ -95,9 +95,43 @@ def front_body(imgnum, t1, t2):
 
 SHAFTS = (0x48, 0x49)           # fronti of pillarbottom and pillartop
 
+# The long pillar's shaft is a thin line, a gap and two bands of three: on
+# the Apple the line is a colour and the bands white, and on the Spectrum,
+# all of it one ink, the line was too thin to read as the pillar's edge.  So
+# it is two pixels thick, along the shaft -- on the two pieces behind him
+# (pieceb of pillarbottom and pillartop) and the two in front, whose mask
+# (front_body) widens with them.
+EDGED = (26, 28) + SHAFTS
+
+
+def edge_shafts(table):
+    """The dungeon's first image table, the long pillars' edge thickened:
+    wherever a row has the shaft -- line, gap, band -- the pixel left of
+    the line is lit too."""
+    for n in EDGED:
+        img = table.images[n]
+        rows = [list(r) for r in img.pixels()]
+        # the line: the column lit in most rows with a gap after it
+        x = min(i for i in range(1, img.px_width - 4)
+                if sum(r[i] and not r[i + 1] and r[i + 2] for r in rows) * 2
+                >= len(rows))
+        data = bytearray(img.data)
+        for y, r in enumerate(rows):
+            if not r[x - 1] and r[x] and not r[x + 1] and all(r[x + 2:x + 5]):
+                data[y * img.width + (x - 1) // 7] |= 1 << ((x - 1) % 7)
+        table.images[n] = popimg.Image(img.index, img.width, img.height,
+                                       bytes(data))
+    return table
+
+
+def dungeon_table(n):
+    """IMG.BGTAB1.DUN or 2, as this port draws them."""
+    t = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB%d.DUN' % n))
+    return edge_shafts(t) if n == 1 else t
+
 
 def piece_tables():
-    t1 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB1.DUN'))
+    t1 = dungeon_table(1)
     t2 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'))
     body = [front_body(n, t1, t2) for n in bg.fronti]
     bg.frontmx = [b[0] for b in body]
@@ -164,6 +198,8 @@ def flask_images(t):
 def image_table(path, extra=False):
     """count, count 2-byte offsets, then the records -- bottom row first."""
     t = popimg.Table(path)
+    if os.path.basename(path) == 'IMG.BGTAB1.DUN':
+        edge_shafts(t)
     if extra:
         t.images.update(flask_images(t))
     top = max(t.images) if t.images else 0

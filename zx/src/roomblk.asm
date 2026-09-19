@@ -1151,18 +1151,23 @@ levelgo:        xor     a
                 ld      a, (lvflag)     ; a death: RESTART, the level as it
                 cp      3               ; began, and the strength he began it
                 jr      z, lgagain      ; with
-                ld      hl, msgstart    ; the next level off the tape: the
-                call    tapemsg         ; player told to start it, and to
-                call    tapeload        ; stop it again once it has loaded --
-                ld      hl, msgstop     ; for a few seconds, or until ENTER or
-                call    tapemsg         ; SPACE
-                ld      b, 150
-lgwait:         halt
-                ld      a, 0x3f
-                in      a, (254)
-                rra
-                jr      nc, lgwent
-                djnz    lgwait
+                call    page_pixels     ; the next level off the tape: the
+                call    c1start         ; player told to start it, and to
+                ld      a, (curlev)     ; stop it again once it has loaded
+                or      a               ; (c1stop) -- and before level two
+                jr      nz, lgnocut     ; the princess's room, which comes
+                ld      hl, 0xC000      ; first on the tape, into the art
+cut1len:        ld      de, 0           ; bank: its length is build.sh's
+                ld      a, BANK_ART
+                call    tapeblk
+lgnocut:        call    tapeload
+                call    page_pixels
+                call    c1stop
+                ld      a, (curlev)     ; PlayCut1: see cut1.asm
+                or      a
+                jr      nz, lgwent
+                call    page_art
+                call    0xC000
 lgwent:         ld      hl, curlev      ; kept as it begins
                 inc     (hl)
                 call    lvkeep
@@ -1256,55 +1261,29 @@ lgseq:          push    bc
                 call    step_seq
                 jp      nrcgo
 
-; A line of the ROM's letters across the middle of the black screen: HL = the
-; column, then the text, nought at its end.
-
-tapemsg:        ld      a, (hl)
-                inc     hl
-                add     a, 0x60         ; cell row 11: the middle third's
-                ld      e, a            ; fourth
-                ld      d, 0x48
-tm1:            ld      a, (hl)
-                or      a
-                ret     z
-                push    hl
-                push    de
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl
-                ld      bc, 0x3C00      ; the ROM's letters, space at 0x3D00
-                add     hl, bc
-                ld      b, 8
-tm2:            ld      a, (hl)
-                ld      (de), a
-                inc     hl
-                inc     d
-                djnz    tm2
-                pop     de
-                pop     hl
-                inc     hl
-                inc     e
-                jr      tm1
-
-msgstart:       db      9, "START THE TAPE", 0
-msgstop:        db      9, "STOP THE TAPE ", 0
-
 ; LD-BYTES in the 48K ROM, which is what is paged: the blueprint and its head
-; into the background bank.  Until it loads -- a tape not playing is waited
+; into the background bank, or the princess's room into the art bank.  Until it loads -- a tape not playing is waited
 ; for, and one that went wrong is tried again.  The border it leaves is
 ; BASIC's, and the game's is black.
 
-tapeload:       ld      a, BANK_BG
-                call    pageset
-                ld      ix, level
+tapeload:       ld      hl, level
                 ld      de, LEVEL_LEN
+                ld      a, BANK_BG
+
+; A block, whichever: HL where, DE how long, A the bank.
+
+tapeblk:        call    pageset
+tbagain:        push    hl
+                push    de
+                push    hl
+                pop     ix
                 ld      a, 0xff
                 scf
                 call    0x0556
-                jr      nc, tapeload
-                xor     a
+                pop     de
+                pop     hl
+                jr      nc, tbagain
+tbdone:         xor     a
                 out     (254), a
                 ret
 

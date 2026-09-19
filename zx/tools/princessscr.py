@@ -250,7 +250,8 @@ TORCHES = [(13 * 7 + 0 + TORCH_MOVE[0][1], 113),      # ptorchx/off/y, and
            (25 * 7 + 6 + TORCH_MOVE[1][1], 113)]      # moved as above
 TORCH_FLAMES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 3, 5, 7, 1, 4, 9, 2, 8, 6]
 GLASS_X, GLASS_Y = 19 * 7, 151
-GLASS_IMAGES = [0x15, 0x0d]         # glassimg: states 0 and 1, all cut 0 uses
+GLASSIMG = [0x15, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14]
+SANDHT = [0, 1, 2, 3, 4, 5, 6, 7]   # FLOW stops short of the sand by these
 FLOW_X, FLOW_Y = 20 * 7, 149
 FLOW_IMAGES = [0x16, 0x17, 0x18]
 POST_X, POST_Y, POST_IMAGE = 31 * 7, 152, 0x0c
@@ -279,15 +280,20 @@ MIRROR = 0x80
 NONE = 0xFF
 
 
-def scene():
+def scene(frames=None):
     """(sprites, frames): the pictures in the order their ids give, each
-    (posn, c0, r0, w, h, data, pmask); and a frame's record per frame."""
-    frames = princess.cut0()
+    (posn, c0, r0, w, h, data, pmask); and a frame's record per frame.
+    PlayCut0's unless the frames of another scene are given."""
+    if frames is None:
+        frames = princess.cut0()
     ids, sprites = {}, []
     out = []
     for st in frames:
         rec = []
         for who in ('vizier', 'princess'):
+            if st[who] is None:             # nobody in that slot
+                rec.append((NONE, 0))
+                continue
             posn, x, y, face = st[who]
             left, bottom, img, mir = princess.place(posn, x, y, face)
             assert bottom == FLOOR_Y, (who, bottom)
@@ -320,10 +326,17 @@ def sprite_top(img, r0):
     return FLOOR_Y - img.height + 1 + r0
 
 
-def build_blobs():
+def build_blobs(scene_frames=None):
     """(bank blob pieces, fixed blob, equates)."""
-    sprites, frames = scene()
+    sprites, frames = scene(scene_frames)
     eq = {}
+    # the hourglass's states the scene has, the first of them CUT_GL0
+    states = sorted({st['glass'] for st, _ in frames if st['glass'] is not None})
+    assert 1 <= len(states) <= 2, states
+    flowing = {st['glass'] for st, _ in frames if st['sand']}
+    botcut = {min(FLOW_Y + 1, GLASS_Y - SANDHT[s]) for s in flowing}
+    assert len(botcut) == 1, botcut     # one flow picture for the scene
+    botcut = botcut.pop()
 
     # the characters' pictures and their table: per id the address of its
     # rows, width, height, top band row, and the pmask's place or NONE
@@ -368,7 +381,7 @@ def build_blobs():
     eq['CUT_FLTAB'] = None
     put('CUT_FLTAB', bytes(n - 1 for n in TORCH_FLAMES))
 
-    for s, n in enumerate(GLASS_IMAGES):
+    for s, n in enumerate(GLASSIMG[g] for g in states):
         im = ch6(n)
         col, w, d, ext = aligned([list(l) for l in im.pixels()], GLASS_X)
         eq['CUT_GL_AT'] = band_row(GLASS_Y - im.height + 1) * 32 + col
@@ -379,9 +392,12 @@ def build_blobs():
     data = bytearray()
     for n in FLOW_IMAGES:
         im = ch6(n)
-        col, w, d, ext = aligned([list(l) for l in im.pixels()], FLOW_X)
-        eq['CUT_FW_AT'] = band_row(FLOW_Y - im.height + 1) * 32 + col
-        eq['CUT_FW_W'], eq['CUT_FW_H'] = w, im.height
+        rows = [list(l) for l in im.pixels()]
+        top = FLOW_Y - im.height + 1        # BOTCUT: the lines from the
+        rows = rows[:max(0, botcut - top)]  # sand's top down are not drawn
+        col, w, d, ext = aligned(rows, FLOW_X)
+        eq['CUT_FW_AT'] = band_row(top) * 32 + col
+        eq['CUT_FW_W'], eq['CUT_FW_H'] = w, len(rows)
         data += d
     put('CUT_FW_EXT', ext)
     put('CUT_FW', data)
@@ -438,7 +454,7 @@ def build_blobs():
         if st['flash']:
             f |= 2
         if st['glass'] != last_glass:
-            f |= 4 | (8 if st['glass'] else 0)
+            f |= 4 | (8 if states.index(st['glass']) else 0)
             last_glass = st['glass']
         if st['sand'] and not sand:
             f |= 16
@@ -505,6 +521,15 @@ def in_place(data, at):
     return True
 
 
+def placed(table, count, base):
+    """The pictures' table, each entry told where its rows are once the
+    table, the pictures and the script are unpacked at base."""
+    for i in range(count):
+        a = base + len(table) + sum(table[j * 6 + 2] * table[j * 6 + 3]
+                                    for j in range(i))
+        table[i * 6:i * 6 + 2] = a.to_bytes(2, 'little')
+
+
 def build(bank_base, bank_room):
     """The bank blob, to go at bank_base, with bank_room bytes free there;
     the fixed blob; and the lines of the include file."""
@@ -516,11 +541,7 @@ def build(bank_base, bank_room):
     # room, unpacked from its bottom up -- the room's own packing, which
     # the pictures overwrite, has been used by then.
     tab_at = 0
-    pics_at = len(table)
-    for i in range(count):
-        a = bank_base + pics_at + sum(table[j * 6 + 2] * table[j * 6 + 3]
-                                      for j in range(i))
-        table[i * 6:i * 6 + 2] = a.to_bytes(2, 'little')
+    placed(table, count, bank_base)
     plain = bytes(table) + bytes(pics) + script
     script_at = len(table) + len(pics)
     packed = titlescr.pack(plain)
@@ -547,6 +568,52 @@ def build(bank_base, bank_room):
         inc.append('%-11s equ cutfixed + %d' % (k, v))
     stats = (len(room_packed), len(packed), len(plain), len(fixed))
     return blob, bytes(fixed), inc, stats
+
+
+# ---------------------------------------------------------------- PlayCut1
+#
+# The princess waiting, between levels one and two: cut1.asm, which the game
+# loads off the tape with the level and runs in the art bank's place -- the
+# whole bank is free while a level changes.  The tape block goes to 0xC000:
+# a few bytes that put the code where it runs (see build.sh), the room and
+# the pictures packed, the CPC's tune, and the code.  Unpacked at the top,
+# under the interrupt's way in: the room's code kept (the band is composed
+# where it runs), the clean band, and the pictures and the script.
+
+CUT1_STUB = 14
+
+
+def build1(tune, rb_len):
+    """(data after the stub, fixed blob, include lines)."""
+    table, pics, script, fixed, at, eq, count = build_blobs(princess.cut1())
+    room_packed = titlescr.pack(room())
+    top = 0x10000 - 12
+    rbsave = top - rb_len
+    clean = rbsave - BAND_ROWS * 32
+    plain_len = len(table) + len(pics) + len(script)
+    plain_at = clean - plain_len
+    placed(table, count, plain_at)
+    plain = bytes(table) + bytes(pics) + script
+    packed = titlescr.pack(plain)
+    assert unpack(packed, len(plain)) == plain
+    base = 0xC000 + CUT1_STUB
+    data = room_packed + packed + tune
+    inc = ['CUT_ROOM    equ %d' % base,
+           'CUT_PACKED  equ %d' % (base + len(room_packed)),
+           'CUT_SPRTAB  equ %d' % plain_at,
+           'CUT_SCRIPT  equ %d' % (plain_at + len(table) + len(pics)),
+           'CUT_CLEAN   equ %d' % clean,
+           'CUT_BAND_TOP equ %d' % BAND_TOP,
+           'CUT_BAND_ROWS equ %d' % BAND_ROWS,
+           'CUT1_RBSAVE equ %d' % rbsave,
+           'CUT1_TUNE   equ %d' % (base + len(room_packed) + len(packed)),
+           'CUT1_TUNEND equ %d' % (base + len(data)),
+           'CUT1_CODE   equ %d' % (base + len(data))]
+    for k, v in eq.items():
+        inc.append('%-11s equ %d' % (k, v))
+    for k, v in at.items():
+        inc.append('%-11s equ cutfixed + %d' % (k, v))
+    return data, bytes(fixed), inc, plain_at
 
 
 # ---------------------------------------------------------------- to look at

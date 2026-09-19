@@ -4178,7 +4178,7 @@ rqtime:         ld      hl, rqdid
                 sub     (hl)
                 ex      de, hl
                 jr      z, rqtyes       ; still the first period
-                cp      FRAME_WAIT - 1
+rqcp:           cp      FRAME_WAIT - 1
                 ret     nc              ; the last: nothing more
                 bit     1, (hl)         ; the middle one: a single step
                 ret     nz

@@ -163,7 +163,7 @@ main:           ld      hl, nohalt      ; the view being made ran right up to
 mainwait:       ld      a, (FRAMES)     ; border above the room, so a frame
                 ld      hl, frstart     ; always begins on an interrupt -- but
                 sub     (hl)            ; on the FIRST one that leaves the slot
-                cp      FRAME_WAIT      ; full, which a frame that overran has
+mwcp:           cp      FRAME_WAIT      ; full, which a frame that overran has
                 jr      nc, mainrun     ; left behind already
                 halt
                 jr      mainwait
@@ -512,9 +512,9 @@ vw_fill:        ld      a, (vwcam)
                 inc     a
                 ret     z               ; no view in hand
                 call    vwdue
-                cp      FRAME_WAIT
+vwcp:           cp      FRAME_WAIT
                 jr      nc, vwgoal
-                ld      a, FRAME_WAIT - 1
+vwld:           ld      a, FRAME_WAIT - 1
 vwgoal:         inc     a
                 ld      (vwstop), a
                 ld      hl, vwhung      ; gone hungry: runs owed, and
@@ -883,7 +883,21 @@ facejstk:       ld      a, (facing)
                 ld      (clrb), a
                 ret
 
-input_step:     ld      a, (charlife)   ; PLAYERCTRL: no strength left, no
+; En garde a frame is a period longer: the Apple, which draws as fast as it
+; can, slows down with two of them fighting, and three periods made the
+; fight run away.  The frame's slot -- mainwait, the view and the redraw
+; all count it -- is FRAME_WAIT, or one more with his sword out.
+
+input_step:     ld      a, (charsword)
+                and     2
+                rrca
+                add     a, FRAME_WAIT
+                ld      (mwcp + 1), a
+                ld      (vwcp + 1), a
+                dec     a
+                ld      (vwld + 1), a
+                ld      (rqcp + 1), a
+                ld      a, (charlife)   ; PLAYERCTRL: no strength left, no
                 or      a               ; life -- once
                 jp      p, isalive
                 ld      a, (kidstr)
@@ -5797,7 +5811,8 @@ hiend:
 ; What works on the canvas bank with it paged in, and on nothing else but
 ; the fixed half of the map, lives in that bank: past the canvas, where a
 ; room being built never writes.  Assembled in place, cut out of pop.bin by
-; build.sh into c1img, and put there by start.
+; build.sh and put on the end of the art bank's tape block, past the titles'
+; music (C1ART), and put in place by start.
 
 c1fix:
                 org     CODE1
@@ -6072,6 +6087,57 @@ cd1:            ld      a, 0x3f         ; ENTER or SPACE
                 ld      (lvflag), a
                 jp      page_art
 
+; The tape, while a level changes: a line of the ROM's letters across the
+; middle of the black screen asks for it to be started, and once the level
+; is in, stopped -- for a few seconds, or until ENTER or SPACE.
+
+c1start:        ld      hl, msgstart
+                jr      tapemsg
+c1stop:         ld      hl, msgstop
+                call    tapemsg
+                ld      b, 150
+c1sw:           halt
+                ld      a, 0x3f
+                in      a, (254)
+                rra
+                ret     nc
+                djnz    c1sw
+                ret
+
+; HL = the column, then the text, nought at its end.
+
+tapemsg:        ld      a, (hl)
+                inc     hl
+                add     a, 0x60         ; cell row 11: the middle third's
+                ld      e, a            ; fourth
+                ld      d, 0x48
+tm1:            ld      a, (hl)
+                or      a
+                ret     z
+                push    hl
+                push    de
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                ld      bc, 0x3C00      ; the ROM's letters, space at 0x3D00
+                add     hl, bc
+                ld      b, 8
+tm2:            ld      a, (hl)
+                ld      (de), a
+                inc     hl
+                inc     d
+                djnz    tm2
+                pop     de
+                pop     hl
+                inc     hl
+                inc     e
+                jr      tm1
+
+msgstart:       db      9, "START THE TAPE", 0
+msgstop:        db      9, "STOP THE TAPE ", 0
+
 c1end:
                 org     c1fix
 C1LEN           equ     c1end - CODE1
@@ -6081,8 +6147,6 @@ C1LEN           equ     c1end - CODE1
 ; What runs once, before the working copy is first written, sits where the
 ; working copy goes: it comes in with the program and the first repaint goes
 ; over it, so the fixed half of the map keeps its room for the game.
-
-c1img:          ds      C1LEN           ; CODE1, put here by build.sh
 
 start:          di
                 ld      sp, stack
@@ -6147,21 +6211,26 @@ stubbank:       push    bc
                 call    ststop          ; and the game's sounds its own
                 ld      a, BANK_CVS
                 ld      (sfxbank), a
-                call    page_art        ; and they are gone from the art bank:
-                ld      hl, 0xC000 + 2  ; the room is composed into a bank of
+                call    page_art        ; the canvas bank's code, from the art
+                ld      hl, C1ART       ; bank by way of where the room's code
+                ld      de, roomblk     ; goes, which is free until it is put
+                ld      bc, C1LEN       ; back
+                ldir
+                ld      hl, 0xC000 + 2  ; and the titles are gone from the art
+                                        ; bank: the room is composed into a bank of
                 ld      de, 0xC000 + 3  ; noughts, past the signature and up
                 ld      bc, 0x4000 - 2 - ISRSTUBLEN - 1 ; to the interrupt's
                 ld      (hl), 0         ; way in
                 ldir
-                ld      a, BANK_CVS     ; the room's code back, the princess's
-                call    pageset         ; band having been there, and the
-                ld      hl, RBINTRO     ; canvas bank's own code in
-                ld      de, roomblk
-                ld      bc, RB1LEN
-                ldir
-                ld      hl, c1img
+                ld      a, BANK_CVS     ; the canvas bank's code in, and the
+                call    pageset         ; room's back, the princess's band
+                ld      hl, roomblk     ; having been there
                 ld      de, CODE1
                 ld      bc, C1LEN
+                ldir
+                ld      hl, RBINTRO
+                ld      de, roomblk
+                ld      bc, RB1LEN
                 ldir
                 call    newroom         ; and the room is composed, not loaded:
                 call    lvkeep          ; the level as it begins, kept
