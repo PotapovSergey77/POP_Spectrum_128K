@@ -2137,9 +2137,9 @@ ck1:            ld      (tempby), a
                 ld      (cccode), a
                 ld      a, c
                 cp      BG_SLICER       ; a slicer is in his way only while
-                jr      nz, cknotsl     ; its jaws are shut
+                jr      nz, cknotsl     ; its jaws are shut on the screen
                 ld      a, (tilestate)
-                cp      SLICEREXT
+                cp      SLICERSHUT
                 jr      nz, ccno
                 jr      ckyes
 cknotsl:        cp      BG_GATE
@@ -6378,7 +6378,20 @@ aoslicer:       ld      a, (aoid)
                 jp      m, asdone       ; stopped: only the redraw is left
                 call    aspending       ; its picture not yet drawn: the jaws
                 jp      nz, aoquiet     ; wait for it
-                ld      a, (trobst)     ; the next frame, round and round,
+
+; And the frame before they shut they wait for any other slicer to be done
+; with the queue.  A room with three of them had all three standing shut at
+; once while the queue crawled through their three blocks -- and shut is the
+; one position they must not be caught waiting in, since it both bars him
+; and cuts him.  Waiting open costs nothing and is safe.
+
+                ld      a, (trobst)
+                and     0x7f
+                cp      SLICEREXT - 1
+                jr      nz, asframe
+                call    asother
+                jp      nz, aoquiet
+asframe:        ld      a, (trobst)     ; the next frame, round and round,
                 ld      b, a            ; the blood kept
                 and     0x7f
                 inc     a
@@ -6391,7 +6404,7 @@ as1:            ld      c, a
                 or      c
                 ld      (trobst), a
                 ld      a, c
-                cp      SLICEREXT       ; the jaws meeting
+                cp      SLICERSHUT      ; the jaws meeting, seen and heard
                 jr      nz, as2
                 ld      a, SND_SLICER   ; the CPC's, for JawsClash
                 call    addsound
@@ -6418,19 +6431,27 @@ asoff:          ld      a, (trobst)     ; retracted, it comes off the list
                 cp      SLICERRET
                 jr      c, asdone
                 call    stopobj
-asdone:         ld      a, (trobst)     ; and retracted there is nothing to
-                and     0x7f            ; draw
-                cp      SLICERRET
-                jp      nc, aodone
+asdone:         ld      a, (trobst)     ; with two pictures and nothing between
+                and     0x7f            ; them, only the two frames that swap
+                sub     SLICEREXT       ; one for the other are ever drawn:
+                cp      2               ; the jaws meeting, and their opening
+                jp      nc, aodone      ; again the frame after
+; And it goes first in the line.  The view being made comes before the queue,
+; and walking across a room puts a view due on seven frames in eight, so a
+; slicer that waited its turn took thirty frames to lay its four bands and
+; stood shut for all of them.  That is only affordable because the wait above
+; lets one slicer chop at a time: three of them jumping the queue at once was
+; the whole frame gone.
+
                 ld      a, 1
                 ld      (redwant), a
-                ld      (rqprio), a     ; and first in the line, like a plate:
-                ld      a, SLICERWIPE   ; the view being made comes before the
-                ld      (redh), a       ; queue, and a walk across the room is
-                ld      hl, aodone      ; a view due almost every frame, so a
-                call    c1far           ; slicer that waited its turn was drawn
-                xor     a               ; once in eight frames and its jaws
-                ld      (rqprio), a     ; stood still
+                ld      (rqprio), a
+                ld      a, SLICERWIPE
+                ld      (redh), a
+                ld      hl, aodone
+                call    c1far
+                xor     a
+                ld      (rqprio), a
                 jp      page_pixels
 
 ; A block's redraw is not done where it is asked for: it is queued, and the
@@ -6470,6 +6491,49 @@ asp2:           inc     hl              ; four bytes to an entry
                 xor     a
                 ret
 aspyes:         ld      a, 1
+                or      a
+                ret
+
+; Another slicer's block waiting in the queue?  It is slicers that are looked
+; for and not a queue that is busy: the queue is shared with gates, plates,
+; the exit door and a flask's bubbles, and screen five of level three has a
+; gate and a slicer in it -- a gate takes forty frames to rise, and the jaws
+; would have stood open for all of them.
+;
+; Out: NZ when another slicer is waiting.  Its own block is never one of
+; them: aspending has already found nothing of its own in the queue.
+
+asother:        ld      a, (rqn)
+                or      a
+                ret     z
+                ld      b, a
+                ld      hl, rqq
+aso1:           push    bc
+                push    hl
+                ld      a, (hl)         ; the row, and the ceiling's is -1
+                cp      3
+                jr      nc, aso2
+                inc     hl
+                ld      c, (hl)         ; and the column
+                call    mul10           ; ten blocks to a row
+                ld      b, 0
+                add     hl, bc
+                ld      bc, roomids
+                add     hl, bc
+                ld      a, (hl)
+                and     0x1f
+                cp      BG_SLICER
+                jr      z, aso3
+aso2:           pop     hl
+                ld      bc, 4           ; four bytes to an entry
+                add     hl, bc
+                pop     bc
+                djnz    aso1
+                xor     a
+                ret
+aso3:           pop     hl
+                pop     bc
+                ld      a, 1
                 or      a
                 ret
 
@@ -6582,7 +6646,7 @@ cksl1:          ld      hl, cdthis
                 jr      nz, cksl3
                 ld      a, (tilestate)
                 and     0x7f
-                cp      SLICEREXT       ; shut?
+                cp      SLICERSHUT      ; shut on the screen?
                 jr      nz, cksl3
                 pop     bc
                 jr      c1slice

@@ -219,9 +219,11 @@ class Room:
 
     @staticmethod
     def _slicer_frame(state):
-        """drawslicera and drawslicerf: which of the five pictures the state
-        is, fully retracted from slicerRet on."""
-        return bg.slicerseq[min(state & 0x7f, bg.slicerRet)] - 1
+        """drawslicera and drawslicerf: which picture the state is.  Two of
+        them here, shut and open, where POP has five -- see slicer_x."""
+        s = state & 0x7f
+        return bg.slicerseq[bg.slicerExt if s == bg.slicerExt
+                            else bg.slicerRet] - 1
 
     def _drawslicera(self, st):
         """drawslicera: the jaws, the bottom one at Ay -- smeared once it

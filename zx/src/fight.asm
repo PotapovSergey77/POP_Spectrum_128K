@@ -1986,6 +1986,17 @@ SPIKEWIPE       equ     31
 ; open again from slicerRet; bit 7 is the blood, once it has cut someone.
 
 SLICEREXT       equ     2
+
+; A block's picture is laid a band a frame and shown when the last of them is
+; in, so the jaws the state asks for at slicerExt only reach the screen four
+; frames later -- and the state waits for them (aspending), so it steps to
+; slicerExt + 1 in the very frame they appear.  That, and not slicerExt, is
+; the state the jaws are shut ON THE SCREEN, and it is what bars him, what
+; cuts him and what the clash is heard at.  Reading slicerExt for those had
+; the blade cutting him while the way still looked open, and standing shut
+; and harmless after.
+
+SLICERSHUT      equ     SLICEREXT + 1
 SLICERRET       equ     6
 SLICETIMER      equ     15
 SLICERWIPE      equ     63
@@ -2028,14 +2039,22 @@ smtop:          pop     bc
                 ld      c, BG_ORA
                 jp      bglay
 
-; Which of the five pictures the state is: slicerseq, fully retracted from
-; slicerRet on.  Out: C = it, 0 to 4, and the background bank in.
+; Which picture the state is, out of slicerseq.  POP has five of them and
+; moves the jaws every frame; this port has two, shut and open, and nothing
+; in between.  The three middle pictures cost three more whole-block redraws
+; a cycle than a room with three slicers in it can pay for -- a block is
+; 237000 T and a frame 212724 -- and their whole effect is the jaws being
+; seen part way.  The two that are left are the two that matter: the state
+; the jaws cut at, and everything else.
+;
+; Out: C = the picture, 0 to 4, and the background bank in.
 
 slicer_x:       call    page_bg
                 ld      a, (state)
                 and     0x7f
-                cp      SLICERRET
-                jr      c, sx1
+                cp      SLICEREXT
+                ld      a, SLICEREXT
+                jr      z, sx1
                 ld      a, SLICERRET
 sx1:            ld      hl, bgtables + T_SLICERSEQ
                 call    bgentry
