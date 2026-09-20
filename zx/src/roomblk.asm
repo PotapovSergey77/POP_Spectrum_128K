@@ -218,6 +218,7 @@ compcol:        call    setblock
                 call    draw_md
                 call    draw_a
                 call    draw_front
+                call    slicerfront
 
                 ld      a, (objid)      ; on to the next block
                 ld      (preced), a
@@ -238,6 +239,40 @@ compcol:        call    setblock
                 jr      z, cproof
                 dec     (hl)
                 jr      comprow
+
+; drawfrnt notes the whole rectangle of a front piece as what stands in front
+; of him, since a dither he showed through is worse than a few pixels he does
+; not.  A slicer's is the exception: with its jaws up the piece is the empty
+; middle of the block and nothing else but the plinth at its foot, and sixty
+; rows of rectangle rubbed a slab out of him as he walked through an open
+; one.  So the entry it has just made is cut back to the rows the picture at
+; rest actually has something on -- slicerfrh, out of the piece tables.
+
+slicerfront:    ld      a, (objid)
+                cp      BG_SLICER
+                ret     nz
+                ld      a, (nfront)
+                or      a
+                ret     z
+                dec     a               ; five bytes to an entry
+                ld      l, a
+                ld      h, 0
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, de
+                ld      de, frontlist
+                add     hl, de
+                ld      a, (xco)        ; and it is this block's, not one that
+                cp      (hl)            ; was noted and this one lost
+                ret     nz
+                ld      de, 4
+                add     hl, de
+                call    page_bg
+                ld      a, (bgtables + T_SLICERFRH)
+                ld      (hl), a
+                ret
 
 ; The last pass of SURE: the bottom row of the room above, D sections alone,
 ; with Dy at 2 and Ay at -1, so what shows along the top of the screen is the
@@ -600,6 +635,8 @@ lvkeep:         ld      a, 1
                 ld      (pristok), a
                 ld      a, (maxkidstr)  ; and origstrength
                 ld      (origstr), a
+                xor     a               ; a level begins short of its
+                ld      (milestone), a  ; milestone
                 ld      hl, level
                 ld      de, PRISTINE
                 ld      bc, BANK_BG * 256 + BANK_CVS
@@ -1107,6 +1144,12 @@ nrcgo:          xor     a               ; nothing of the last room's still
                 call    setvis          ; screen was
                 call    newroom         ; this block is already back, so the
                 call    readlinks       ; room itself is all that is left
+                ld      hl, c1addsl     ; ADDSLICERS in CUT: walking into a
+                call    c1call          ; room starts the slicers of the row
+                                        ; he walks in on, the same as stepping
+                                        ; up or down one does.  Without it a
+                                        ; slicer woke only for the side he
+                                        ; happened to arrive at falling
                 call    camhome         ; the view is already where he is
                 call    add_guard       ; and the new room's guard stands up
                 xor     a
@@ -1161,7 +1204,17 @@ cut1len:        ld      de, 0           ; bank: its length is build.sh's
                 ld      a, BANK_ART
                 call    tapeblk
 lgnocut:        call    tapeload
-                call    page_pixels
+                call    page_bg         ; and the character set it carries,
+                ld      hl, (level + LV_HEAD + 6)       ; if it is not the
+                ld      a, h            ; one the tape started with
+                or      l
+                jr      z, lgnochs
+                ex      de, hl
+                ld      hl, 0xC000      ; into the art bank, whose room is
+                ld      a, BANK_ART     ; built again after this
+                call    tapeblk
+                call    chset_put
+lgnochs:        call    page_pixels
                 call    c1stop
                 ld      a, (curlev)     ; PlayCut1: see cut1.asm
                 or      a
@@ -1197,6 +1250,35 @@ lghead:         call    page_bg         ; where he starts, and whether a
                 ld      a, (level + LV_KIDSCRN)
                 ld      (roomnum), a
 
+                ld      a, (curlev)     ; STARTKID's :special3: past level
+                cp      2               ; three's first gate he begins again
+                jr      nz, lgnomile    ; just inside it, and the loose floor
+                ld      a, (milestone)  ; he broke on the way is gone
+                or      a
+                jr      z, lgnomile
+                ld      hl, MS3_X
+                ld      (charx), hl
+                ld      a, MS3_Y
+                ld      (chary), a
+                ld      a, MS3_ROW
+                ld      (blocky), a
+                ld      a, MS3_FACE
+                ld      (facing), a
+                ld      a, MS3_ROOM
+                ld      (roomnum), a
+                ld      a, MS3_LOOSE
+                ld      (trloc), a
+                ld      a, MS3_LOOSESCRN
+                ld      (trscrn), a
+                call    trobat
+                ld      a, BG_SPACE
+                call    trobtype
+                call    page_bg
+lgnomile:
+                ld      a, (roomnum)    ; the room he starts in: the milestone
+                                        ; above reads curlev and the flag into
+                                        ; A, and the ENTRANCE below used to
+                                        ; take what LV_KIDSCRN had left there
                 ld      c, a            ; ENTRANCE: the exit in his room, open,
                 dec     a               ; and coming down fast -- CLOSEEXIT
                 ld      l, a
@@ -1260,6 +1342,89 @@ lgseq:          push    bc
                 call    page_canvas
                 call    step_seq
                 jp      nrcgo
+
+; rdch4 in MASTER.S: the fourth character table the level carries, when its
+; opponent is not the one the tape started with.  The block is in the art
+; bank at 0xC000 -- a count of pieces, each one's bank, where it goes and
+; how long it is, and then the bytes of them all.  Two banks are never in
+; together, so every piece goes through the working copy, a chunk at a time.
+
+CHSBUF          equ     work
+CHSCHUNK        equ     2048
+
+chset_put:      ld      a, BANK_ART
+                call    pageset
+                ld      hl, 0xC000
+                ld      a, (hl)
+                ld      (chsleft), a
+                or      a
+                ret     z
+                inc     hl
+                ld      (chshdr), hl
+                ld      d, 0
+                ld      e, a            ; five bytes an entry, and the bytes
+                add     hl, de          ; themselves past the lot of them
+                add     hl, de
+                add     hl, de
+                add     hl, de
+                add     hl, de
+                ld      (chssrc), hl
+chsone:         ld      a, BANK_ART
+                call    pageset
+                ld      hl, (chshdr)
+                ld      a, (hl)
+                ld      (chsbank), a
+                inc     hl
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                ld      (chsdst), de
+                inc     hl
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      (chshdr), hl
+                ld      (chslen), de
+chspart:        ld      hl, (chslen)
+                ld      a, h
+                or      l
+                jr      z, chsnext
+                ld      de, CHSCHUNK
+                or      a
+                sbc     hl, de
+                jr      nc, chsbig
+                ld      de, (chslen)
+                ld      hl, 0
+chsbig:         ld      (chslen), hl
+                push    de              ; DE = how many bytes this round
+                ld      a, BANK_ART
+                call    pageset
+                ld      hl, (chssrc)
+                ld      de, CHSBUF
+                pop     bc
+                push    bc
+                ldir
+                ld      (chssrc), hl
+                ld      a, (chsbank)
+                call    pageset
+                ld      hl, CHSBUF
+                ld      de, (chsdst)
+                pop     bc
+                ldir
+                ld      (chsdst), de
+                jr      chspart
+chsnext:        ld      hl, chsleft
+                dec     (hl)
+                jr      nz, chsone
+                ret
+
+chsleft:        db      0
+chsbank:        db      0
+chshdr:         dw      0
+chssrc:         dw      0
+chsdst:         dw      0
+chslen:         dw      0
 
 ; LD-BYTES in the 48K ROM, which is what is paged: the blueprint and its head
 ; into the background bank, or the princess's room into the art bank.  Until it loads -- a tape not playing is waited
@@ -1356,17 +1521,28 @@ agface:         ld      (facing), a
                 jr      c, agprog
                 ld      a, 3            ; the default
 agprog:         ld      (guardprog), a
+                ld      a, (curlev)     ; level three's guard is the
+                cp      2               ; skeleton
                 ld      a, 2
-                ld      (charid), a
+                jr      nz, agid
+                ld      a, 4
+agid:           ld      (charid), a
                 ld      de, GDSEQH
                 call    gd_field
                 ld      a, (hl)
                 or      a
                 jr      nz, agseq
-                xor     a               ; 0 is a fresh start
-                ld      (charsword), a
+                ld      a, (charid)     ; 0 is a fresh start: a guard stands
+                cp      4               ; on the alert, the skeleton lands
+                ld      b, SQ_ALERTSTAND        ; en garde
+                ld      a, 0
+                jr      nz, agsword
+                ld      b, SQ_LANDENGARDE
+                ld      a, 2
+agsword:        ld      (charsword), a
+                push    bc
                 call    page_canvas
-                ld      a, SQ_ALERTSTAND
+                pop     af
                 call    jumpseq
                 jr      aganim
 agseq:          ld      d, a
@@ -1426,7 +1602,19 @@ agnone:         pop     af
 leave_room:     ld      (lrroom), a
                 ld      a, c
                 ld      (lrdir), a
-                ld      a, (gdhere)
+                cp      2               ; milestone3 in AUTO.S: going left
+                jr      nz, lrnomile    ; out of the room right of level
+                ld      a, (curlev)     ; three's first gate, he begins
+                cp      2               ; again from there
+                jr      nz, lrnomile
+                ld      a, (roomnum)
+                cp      MS3_SCRN
+                jr      nz, lrnomile
+                ld      a, 1
+                ld      (milestone), a
+                ld      a, (maxkidstr)
+                ld      (origstr), a
+lrnomile:       ld      a, (gdhere)
                 or      a
                 ret     z
                 ld      a, (charlife + OP)
@@ -1507,7 +1695,12 @@ lrleave:        pop     af
 
 lrroom:         db      0
 lrdir:          db      0
-gdkeep:         db      0
+
+; gdkeep is not here, where it used to be.  This block is put back in its
+; bank by newroom, which runs BEFORE add_guard clears the flag, so a guard
+; who once came along left it set in the bank for good -- and from then on
+; add_guard took the "he is already here" way out in every room of the level
+; and no guard was ever made again.  It lives beside gdhere now.
 
 ; UPDATEGUARD: leaving him behind.  A live guard starts over when the kid
 ; comes back; a dead one keeps the sequence that laid him down.

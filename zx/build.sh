@@ -103,7 +103,7 @@ print('управление %04X..%04X, %d байт в банке 7, свобо�
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'
 assert sym['modend'] <= 0x10000 - 12 and sym['modend'] > sym['MODORG'], 'the control code does not fit under the interrupt stub'
 PY
-python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin L:build/bin/cut1.bin $(ls build/bin/level*.bin 2>/dev/null | sort -V | sed 's/^/L:/')
+python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin L:build/bin/cut1.bin $(tr -d '\r' < build/bin/tape.lst | sed 's/^/L:/')
 python - <<'PY'
 import re, json, os
 sym = {}

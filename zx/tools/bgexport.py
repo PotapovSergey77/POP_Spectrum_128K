@@ -50,13 +50,14 @@ FIXED = (('blockb', 2), ('blockc', 2), ('blockd', 2), ('blockfr', 2),
          ('loosea', 11), ('looseby', 11), ('loosed', 11),
          ('spikea', 10), ('spikeb', 10),
          ('slicertop', 5), ('slicerbot', 5), ('slicerfrnt', 5),
+         ('slicerbot2', 5), ('slicergap', 5), ('slicerseq', 7),
          ('gate8b', 8), ('gate8c', 8))
 
 # Single values, in one block, in this order.
 SINGLES = ('looseb', 'panelb0', 'panelc0', 'archpanel', 'CUmask', 'CUpiece',
            'CUpost', 'gatebotSTA', 'gatebotORA', 'gateB1', 'gatecmask',
            'stairs', 'door', 'doormask', 'toprepair', 'archtop3sp',
-           'specialflask', 'numblox', 'numpans', 'numbpans')
+           'specialflask', 'numblox', 'numpans', 'numbpans', 'slicerfrh')
 
 
 def front_body(imgnum, t1, t2):
@@ -94,6 +95,22 @@ def front_body(imgnum, t1, t2):
 
 
 SHAFTS = (0x48, 0x49)           # fronti of pillarbottom and pillartop
+
+
+def foot_rows(imgnum, t1, t2):
+    """How many rows up from the foot of a picture have anything on them.
+
+    For a slicer's front piece with its jaws up that is the plinth it stands
+    on, and nothing else: the rest of the rectangle is the empty middle of
+    the block.
+    """
+    img = (t2 if imgnum & 0x80 else t1).get(imgnum & 0x7f)
+    n = 0
+    for row in reversed(list(img.pixels())):
+        if not any(row):
+            break
+        n += 1
+    return n
 
 # The long pillar's shaft is a thin line, a gap and two bands of three: on
 # the Apple the line is a colour and the bands white, and on the Spectrum,
@@ -134,6 +151,17 @@ def piece_tables():
     t1 = dungeon_table(1)
     t2 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'))
     body = [front_body(n, t1, t2) for n in bg.fronti]
+    # drawfrnt puts a slicer's front piece down itself, one of slicerfrnt
+    # by its state, and fronti has none for it: all five are the one size,
+    # and it stands in front of him like any other.  But only the foot of it
+    # is solid once the jaws are up -- the rest of the rectangle is the empty
+    # middle of the block -- and standing all sixty rows of it in front of
+    # him rubbed a slab out of him as he walked through an open slicer.  So
+    # the mask is the picture at rest, and only the rows of it that have
+    # anything on them: slicerfrh, which drawfrnt gives frontrec.
+    rest = bg.slicerfrnt[bg.slicerseq[bg.slicerRet] - 1]
+    body[bg.slicer] = front_body(rest, t1, t2)
+    bg.slicerfrh = foot_rows(rest, t1, t2)
     bg.frontmx = [b[0] for b in body]
     bg.frontmw = [b[1] for b in body]
     out = bytearray()

@@ -402,8 +402,21 @@ shadctrl:       ld      a, (charlife)
 sccont:         call    autoctrl
                 jp      ctrl
 
+; The skeleton's own room and the one it lands in, from BONESRISE in MISC.S
+; and CUTGUARD in AUTO.S: the bones lie in screen one, block five of the
+; second row, and it falls from there into screen three.
+
+SKELSCRN        equ     1
+SKELX           equ     5
+SKELY           equ     1
+SKELTRIG        equ     2
+SKELPROG        equ     2
+SKELLAND        equ     3
+SKELLANDX       equ     0x85            ; ShadX where it lands
+SKELLANDBLK     equ     10              ; and its block, as indexblock has it
+
 ; CUTGUARD in AUTO.S: a guard fallen out of the bottom of the room is gone
-; for good.
+; for good -- except the skeleton, which picks itself up in the room below.
 
 cutguard:       ld      a, (gdhere)
                 or      a
@@ -413,7 +426,13 @@ cutguard:       ld      a, (gdhere)
                 ret     c
                 cp      TOPCUTMI        ; not wrapped round past the top
                 ret     nc
-                ld      a, (nowbank)
+                ld      a, (charid + OP)        ; a skeleton that falls into
+                cp      4                       ; the room it belongs in gets
+                jr      nz, gd_off              ; up again there
+                ld      a, (links + 3)
+                cp      SKELLAND
+                jp      z, skel_down
+gd_off:         ld      a, (nowbank)
                 push    af
                 call    page_bg
                 ld      de, 0
@@ -446,7 +465,12 @@ acrel:          ld      (hl), a
                 ld      hl, refract     ; the refractory period after a hit
                 call    dec_nz
 
-                ld      a, (charsword)  ; GuardProg: en garde already?
+                ld      a, (charid)     ; SkelProg: the skeleton is always
+                cp      4               ; en garde
+                jr      nz, acsword
+                ld      a, 2
+                ld      (charsword), a
+acsword:        ld      a, (charsword)  ; GuardProg: en garde already?
                 cp      2
                 jr      nc, ai_engarde
 
@@ -1147,21 +1171,6 @@ hfcheck:        ld      a, (kidstr)
 hurton:         db      0
 lastkidstr:     db      0
 
-; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
-
-addsfx:         ld      a, (frame)
-                cp      167             ; blocked strike
-                ld      a, SND_SWORDCLASH1
-                jp      z, addsound
-                ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      a, (frame + OP)
-                cp      167
-                ret     nz
-                ld      a, SND_SWORDCLASH2
-                jp      addsound
-
 mpc6:
                 org     mfix6
 
@@ -1272,6 +1281,9 @@ stabchar:       ld      a, (charlife)
                 ld      a, (charsword)
                 cp      2
                 jr      nz, scdefenceless
+                ld      a, (charid)     ; the skeleton has no life points
+                cp      4
+                jr      z, scwounded
                 ld      a, 1
                 call    decstr
                 jr      nz, scwounded
@@ -1967,6 +1979,70 @@ SPIKERET        equ     9
 SPIKETIMER      equ     15 + 128
 SPIKEWIPE       equ     31
 
+; ---------------------------------------------------------------- slicers
+;
+; A slicer's state, as MOVER.S keeps it: nought at rest, and from its
+; trigger 1 to slicetimer round and round, the jaws shut at slicerExt and
+; open again from slicerRet; bit 7 is the blood, once it has cut someone.
+
+SLICEREXT       equ     2
+SLICERRET       equ     6
+SLICETIMER      equ     15
+SLICERWIPE      equ     63
+
+; DRAWSLICERA in FRAMEADV.S: the jaws as the state has them -- the bottom
+; one at Ay, smeared once it has cut, and the top one slicergap over it.
+
+slicer_ma:      call    slicer_x
+                ld      hl, bgtables + T_SLICERBOT
+                ld      a, (state)
+                or      a
+                jp      p, smclean
+                ld      hl, bgtables + T_SLICERBOT2
+smclean:        ld      a, c
+                push    bc
+                call    bgentry
+                or      a
+                jr      z, smtop
+                ld      c, a
+                ld      a, (ay)
+                ld      (yco), a
+                ld      a, c
+                ld      c, BG_ORA
+                call    bglay
+                call    page_bg
+smtop:          pop     bc
+                ld      a, c
+                push    af
+                ld      hl, bgtables + T_SLICERGAP
+                call    bgentry
+                ld      c, a
+                ld      a, (ay)
+                sub     c
+                ld      (yco), a
+                pop     af
+                ld      hl, bgtables + T_SLICERTOP
+                call    bgentry
+                or      a
+                ret     z
+                ld      c, BG_ORA
+                jp      bglay
+
+; Which of the five pictures the state is: slicerseq, fully retracted from
+; slicerRet on.  Out: C = it, 0 to 4, and the background bank in.
+
+slicer_x:       call    page_bg
+                ld      a, (state)
+                and     0x7f
+                cp      SLICERRET
+                jr      c, sx1
+                ld      a, SLICERRET
+sx1:            ld      hl, bgtables + T_SLICERSEQ
+                call    bgentry
+                dec     a
+                ld      c, a
+                ret
+
 ; DRAWSPIKEA and DRAWSPIKEB in FRAMEADV.S: the blades, out as far as the
 ; state says, a row above Ay, the A half over the block and the B half in
 ; the block to its right.
@@ -2276,78 +2352,11 @@ lscol:          db      0
 
 ; ---------------------------------------------------------------- potions
 ;
-; POTIONEFFECT in MISC.S, on the effect in the sequence the kid drinks in.
-; lastpotion is what RemoveObj left: -1 the sword, 1 a refresh of one point,
-; 2 one more point for good, 3 weightlessness, 5 poison.  The lightning is
-; the Apple's whole screen gone to one colour for a frame; the border here.
-; The upside down potion, 4, is not done: the screen cannot turn over.
+; What a potion does is potion_effect's, in CODE1; the flashes' colours are
+; the meters' too.
 
 RED             equ     2
 GREEN           equ     4
-
-potion_effect:  ld      a, (charid)
-                or      a
-                ret     nz
-                ld      a, (lastpotion)
-                or      a
-                ret     z
-                inc     a
-                jr      nz, penotsword
-                ld      a, SONG_SWORD
-                ld      c, 25
-                call    cue_song
-                ld      a, 1            ; the sword: three green flashes
-                ld      (gotsword), a
-                ld      bc, GREEN * 256 + 3
-                jr      peflash
-penotsword:     dec     a
-                cp      1
-                jr      nz, pe2
-                ld      a, (maxkidstr)  ; a point back, if one is missing
-                ld      hl, kidstr
-                cp      (hl)
-                ret     z
-                inc     (hl)
-                ld      a, SONG_SHORTPOT
-                ld      c, 25
-                call    cue_song
-                ld      bc, RED * 256 + 2
-                jr      peflash
-pe2:            cp      2
-                jr      nz, pe3
-                ld      a, (maxkidstr)  ; BOOSTMETER, then RECHARGEMETER
-                cp      MAXKIDMETER
-                jr      nc, pe2full
-                inc     a
-                ld      (maxkidstr), a
-pe2full:        ld      (kidstr), a
-                ld      a, SONG_POTION
-                ld      c, 25
-                call    cue_song
-                ld      bc, RED * 256 + 5
-                jr      peflash
-pe3:            cp      3
-                jr      nz, pe5
-                ld      a, 200          ; wtlesstimer
-                ld      (weightless), a
-                ld      a, SONG_SHORTPOT
-                ld      c, 25
-                jp      cue_song
-pe5:            cp      5
-                ret     nz
-                ld      a, SND_SPLAT
-                call    addsound
-                ld      hl, kidstr      ; yecch: a point off
-                ld      a, (hl)
-                or      a
-                ret     z
-                dec     (hl)
-                ret
-peflash:        ld      a, b
-                ld      (lightcolor), a
-                ld      a, c
-                ld      (lightning), a
-                ret
 
 ; DRAWFLASKA and SETUPFLASK: the bubbles over the bottle, a frame of them for
 ; the low five bits of its state, two bytes in and two pixels on -- three for
@@ -2652,11 +2661,8 @@ smwt:           call    page_canvas     ; bank 7, in case it is the one shown
 ; has been put on the screen over them -- a rectangle reaching their row, a
 ; view turned round, the whole screen or its colours redone.
 
-                ld      a, (gdhere)     ; C = his opponent's, as shown
-                or      a
-                jr      z, smopp0
-                ld      a, (oppstr)
-smopp0:         ld      c, a
+                call    oppshown        ; C = his opponent's, as shown
+                ld      c, a
                 cp      1
                 jr      z, smdraw       ; flashing
                 ld      a, (kidstr)
@@ -2711,18 +2717,28 @@ smkid:          ld      (kiddrawn), a
                 ld      (mmdrawn), a    ; the room again, once
                 ld      a, (oppdrawn)
                 ld      (mmprev), a
-                ld      c, 0
-                ld      a, (gdhere)
-                or      a
-                jr      z, smopp
-                ld      a, (oppstr)
+                call    oppshown
                 ld      c, a
-smopp:          ld      hl, bullet + BULLETH
+                ld      hl, bullet + BULLETH
                 ld      b, MAXOPPMETER
                 ld      de, 0xff1f      ; from the right, a byte back each time
                 call    meter
                 ld      a, (mmlast)
                 ld      (oppdrawn), a
+                ret
+
+; DRAWOPPMETER: what his opponent's meter shows -- nothing at all for the
+; skeleton, which has no strength to lose.
+
+oppshown:       ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (charid + OP)
+                cp      4
+                jr      z, oppnone
+                ld      a, (oppstr)
+                ret
+oppnone:        xor     a
                 ret
 
 ; The screen shown with green in place of its black ground, ink kept.  A is
@@ -2888,6 +2904,9 @@ bullet:         incbin  "bullet.bin"
 
 gdhere:         db      0               ; a guard in this room: ShadFace <> 86
 guardprog:      db      0
+gdkeep:         db      0               ; and one who followed him in: see
+                                        ; leave_room, whose block is put by
+                                        ; and brought back a room at a time
 oppstr:         db      0               ; OppStrength
 enemyalert:     db      0               ; EnemyAlert
 alertguard:     db      0

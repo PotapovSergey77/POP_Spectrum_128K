@@ -88,7 +88,7 @@ ALT_FRAMES = 40                 # ALTSET1: frames 150 to 189
 BLOCK_PX = 28
 TILE_FLOOR, TILE_SOLID = 1, 2
 
-ROOM = ('LEVEL1', 1)
+ROOM = ('LEVEL%s' % os.environ.get('POP_LEVEL', '1'), 1)
 
 # The Apple's room is 280 pixels wide and the Spectrum's screen is 256, so
 # the room is carried whole -- 35 bytes to a scanline, laid out plainly -- and
@@ -156,7 +156,13 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 2
+LEVELS = 3
+
+# chset in MISC.S: the level's own opponent, the fourth character table --
+# LOADLEVEL reads it off the disk with the blueprint when it is not the one
+# in memory already.  Level three's is the skeleton's; one and two have the
+# guard the tape starts with.
+CHSET = {3: 'IMG.CHTAB4.SKEL'}
 
 
 def level_path(n):
@@ -164,21 +170,34 @@ def level_path(n):
                         '01 POP Source', 'Levels', 'LEVEL%d' % n)
 
 
-def level_head(n):
-    """
-    STARTKID's normal start worked out here, where the tables are: CharX,
-    CharY and the block row of KidStartBlock, CharFace the other way from
-    KidStartFace -- the turn he starts with brings him round to it -- and
-    whether another level follows this one on the tape.
-    """
-    scrn, block, face = poplevel.Level(level_path(n)).kid_start
+def kid_place(block, face):
+    """STARTKID's start on a block: CharX, CharY and the block row, and
+    CharFace the other way from KidStartFace -- the turn he starts with
+    brings him round to it."""
     x = popframe.screen_x(popframe.char_x(block % 10)) & 0xffff
     return bytes([x & 0xff, x >> 8, popframe.char_y(block // 10),
-                  block // 10, 1 if face == 0xff else 0,
-                  1 if n < LEVELS else 0])
+                  block // 10, 1 if face == 0xff else 0])
 
 
-LEVEL_HEAD = 6
+def level_head(n, chset_len=0):
+    """
+    STARTKID's normal start worked out here, where the tables are, whether
+    another level follows this one on the tape, and how long the block of
+    its character set is that follows it there, nought for none.
+    """
+    scrn, block, face = poplevel.Level(level_path(n)).kid_start
+    return (kid_place(block, face) + bytes([1 if n < LEVELS else 0])
+            + chset_len.to_bytes(2, 'little'))
+
+
+LEVEL_HEAD = 8
+
+# STARTKID's :special3 and milestone3 in AUTO.S: level three's milestone is
+# passed when he goes left out of the room right of the first gate, and from
+# then on he begins again just inside it -- room 2, block 6, facing left --
+# with the loose floor of room 7 already gone.
+MILESTONE3 = kid_place(6, 0xff)
+MS3_SCRN, MS3_ROOM, MS3_LOOSE, MS3_LOOSESCRN = 7, 2, 4, 7
 
 # Level one's drop lands him with his face in the first torch's colours; two
 # POP units back, and he stands in the cell before them.
@@ -347,6 +366,57 @@ def sword_table():
 # the room shows through -- which is exactly the mask the blitter wants.
 
 FF_ROWS = 16                    # the foot's row and fifteen above it
+
+
+def chset_block(tabname, alt, alt_base, spans, tables, fdy_at):
+    """
+    rdch4 in MASTER.S, for the tape: another fourth character table in place
+    of the guard's -- the skeleton's, for level three.  The opponent is
+    drawn out of ALTSET1's frames 150 to 189, and those name the table's
+    pictures by number, so the one set of frames serves every table; what
+    changes is the pictures, and with them each frame's record and its Fdy,
+    which the rows cut off a picture's foot move.
+
+    The pictures go where the guard's lay, in the banks the tape filled, and
+    the records and Fdy over his in the canvas bank.  The block says where:
+    a count of pieces, each one's bank, address and length, then the bytes
+    of them all, one after another -- for levelgo to put where they go.
+    """
+    t = popimg.Table(os.path.join(popframe.IMAGES, tabname))
+    room = [[b, lo, hi, bytearray()] for b, lo, hi in spans]
+    at = {}                     # a picture laid once, however many use it
+    recs = bytearray(6 * ALT_FRAMES)
+    fdy = bytearray(ALT_FRAMES)
+    for i in range(ALT_FRAMES):
+        f = alt.get(150 + i)
+        if f is None:
+            continue
+        below = 0
+        if f.index:
+            w, h, data = sprite_bytes(t.get(f.index), 0)
+            cut, below, w, h, data = trim_frame(w, h, data)
+            if f.index not in at:
+                for r in room:
+                    if r[1] + len(r[3]) + len(data) <= r[2]:
+                        at[f.index] = (r[0] << BANK_SHIFT) | (r[1] + len(r[3]))
+                        r[3] += data
+                        break
+                else:
+                    raise SystemExit('%s: no room where the guard was' % tabname)
+            dx = 2 * f.dx
+            recs[6 * i:6 * i + 6] = (bytes([w, h, (-dx + cut * 8) & 0xff,
+                                            (dx - (cut + w) * 8) & 0xff])
+                                     + at[f.index].to_bytes(2, 'little'))
+        fdy[i] = (f.dy - below) & 0xff
+    parts = [(BANK_SPR[b], PAGE_WINDOW + lo, bytes(data))
+             for b, lo, hi, data in room if data]
+    parts += [(BANK_CANVAS, tables + 6 * alt_base, bytes(recs)),
+              (BANK_CANVAS, fdy_at + alt_base, bytes(fdy))]
+    head = bytearray([len(parts)])
+    for bank, addr, data in parts:
+        head += (bytes([bank]) + addr.to_bytes(2, 'little')
+                 + len(data).to_bytes(2, 'little'))
+    return bytes(head) + b''.join(p[2] for p in parts)
 
 
 def falling_floor(shift=0):
@@ -659,10 +729,18 @@ def main(argv):
     alt_base = len(table) // 6
     alt = popframe.load_altset1()
     table += bytes(6 * ALT_FRAMES)
+    alt_spans = []              # where they went, for another set to go
     for i in range(ALT_FRAMES):
         f = alt.get(150 + i)
         if f is not None and f.index:
             lay_frame(table, blobs, trims, alt_base + i, f)
+            e = (alt_base + i) * 6
+            b, end = len(blobs) - 1, len(blobs[-1])
+            start = end - table[e] * table[e + 1]
+            if alt_spans and alt_spans[-1][0] == b and alt_spans[-1][2] == start:
+                alt_spans[-1][2] = end
+            else:
+                alt_spans.append([b, start, end])
 
     # SETUPSWORD in CTRLSUBS.S: the sword in his hand is not in his picture
     # but a picture of its own out of chtable3, laid over him at SWORDTAB's
@@ -754,9 +832,6 @@ def main(argv):
     # levels come off the tape as blueprint and head together, over it.
     assert bgat['level'] + 2304 == len(bgblob)
     bgblob = bytes(bgblob) + level_head(1)
-    for n in range(2, LEVELS + 1):
-        blob = bgexport.level_blob(level_path(n)) + level_head(n)
-        open(os.path.join(binout, 'level%d.bin' % n), 'wb').write(blob)
     # The torch flames go in after the level.  They are read a frame at a
     # time, into a buffer, before they are laid over the room -- which is
     # in the art bank, so they could not be read from here directly -- and
@@ -774,6 +849,22 @@ def main(argv):
     # last of the sprites leave half empty.
     tables = PAGE_WINDOW + 6912
     assert tables + len(spare) <= 0x10000, 'the canvas bank is full'
+    # The levels after the first, each with the character set it wants
+    # after it on the tape if it is not the one the tape started with: the
+    # tape's blocks in order, for build.sh.
+    fdy_at = tables + len(table) + len(code) + len(entry) + 2 * top
+    tape = []
+    for n in range(2, LEVELS + 1):
+        chset = (chset_block(CHSET[n], alt, alt_base, alt_spans,
+                             tables, fdy_at) if n in CHSET else b'')
+        blob = bgexport.level_blob(level_path(n)) + level_head(n, len(chset))
+        open(os.path.join(binout, 'level%d.bin' % n), 'wb').write(blob)
+        tape.append('build/bin/level%d.bin' % n)
+        if chset:
+            open(os.path.join(binout, 'chset%d.bin' % n), 'wb').write(chset)
+            tape.append('build/bin/chset%d.bin' % n)
+            print('chset%d.bin  %d байт: %s' % (n, len(chset), CHSET[n]))
+    open(os.path.join(binout, 'tape.lst'), 'w', newline='').write('\n'.join(tape) + '\n')
     # The sounds go after the last of the sprites, in the canvas's bank:
     # which CPC effect each of POP's sounds and tunes is, the effects' table
     # and their data, read with that bank paged in for a moment.
@@ -877,7 +968,7 @@ def main(argv):
     for n in ('space', 'floor', 'posts', 'gate', 'panelwif', 'pillartop',
               'loose', 'panelwof', 'block', 'spikes', 'archtop1', 'archtop2',
               'torch', 'dpressplate', 'pressplate', 'upressplate',
-              'rubble', 'sword', 'flask', 'slicer'):
+              'rubble', 'sword', 'flask', 'slicer', 'mirror', 'bones'):
         inc.append('BG_%-8s equ %d' % (n.upper(), getattr(renderroom.bg, n)))
     inc.append('BG_EXIT     equ %d' % renderroom.bg.exit_)
     inc.append('BG_NUMBLOX  equ %d' % renderroom.bg.numblox)
@@ -1025,6 +1116,14 @@ def main(argv):
         f.write('LV_ARMED1   equ %d\n' % (1 if LEVELS > 1 else 0))
         f.write('LV_KIDSCRN  equ %d\n' % (poplevel.INFO + poplevel.KidStartScrn))
         f.write('LV_HEAD     equ 2304\n')
+        f.write('MS3_X       equ %d\n' % (MILESTONE3[0] | MILESTONE3[1] << 8))
+        f.write('MS3_Y       equ %d\n' % MILESTONE3[2])
+        f.write('MS3_ROW     equ %d\n' % MILESTONE3[3])
+        f.write('MS3_FACE    equ %d\n' % MILESTONE3[4])
+        f.write('MS3_SCRN    equ %d\n' % MS3_SCRN)
+        f.write('MS3_ROOM    equ %d\n' % MS3_ROOM)
+        f.write('MS3_LOOSE   equ %d\n' % MS3_LOOSE)
+        f.write('MS3_LOOSESCRN equ %d\n' % MS3_LOOSESCRN)
         # And a tape for the fight can start him with the sword already his.
         f.write('START_SWORD equ %d\n' % int(os.environ.get('POP_GOTSWORD', 0)))
         for n, name in enumerate(SOUNDS):

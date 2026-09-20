@@ -11,18 +11,23 @@ compares the result with what renderroom.py draws.  They have to be identical:
 the host renderer is the reference the port was written against, and it is
 checked against the original's own output in turn.
 
-    roomcheck.py <tap>
+    roomcheck.py <tap> [level]
+
+A level after the first is put in the background bank over the first, as
+levelgo would have it loaded -- its blueprint and its gates as the game
+keeps them.
 """
 import json
 import os
 import sys
 
+import bgexport
 import poplevel
 import renderroom
 import runtap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LEVEL = os.path.join(HERE, '..', '..', '01 POP Source', 'Levels', 'LEVEL1')
+LEVELS = os.path.join(HERE, '..', '..', '01 POP Source', 'Levels')
 SENTINEL = 0x0010               # somewhere the game never runs
 
 
@@ -83,9 +88,21 @@ def main(argv):
         print(__doc__)
         return 1
     sym = json.load(open(os.path.join(HERE, '..', 'build', 'sym.json')))
-    level = poplevel.Level(LEVEL)
+    num = int(argv[2]) if len(argv) > 2 else 1
+    path = os.path.join(LEVELS, 'LEVEL%d' % num)
+    level = poplevel.Level(path)
+    # the gates as GETINITOBJ leaves them, which the host does not do
+    level.data = bgexport.gates_set(level.data)
     cpu = runtap.boot(argv[1])
     runtap.game_frame(cpu, sym['main'], [])
+    if num > 1:
+        blob = open(os.path.join(HERE, '..', 'build', 'bin',
+                                 'level%d.bin' % num), 'rb').read()
+        at = sym['level'] - 0xC000
+        if cpu.page == sym['BANK_BG']:
+            cpu.mem[0xC000 + at:0xC000 + at + len(blob)] = blob
+        else:
+            cpu.banks[sym['BANK_BG']][at:at + len(blob)] = blob
 
     bad = badm = 0
     for n in range(1, 25):

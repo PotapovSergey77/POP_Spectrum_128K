@@ -28,6 +28,7 @@ KEYS = {
     'down': (0xEFFE, 4),        # key 6
     'space': (0x7FFE, 0),
     'shift': (0xFEFE, 0),
+    'q': (0xFBFE, 0),           # the test key: on to the next level
 }
 
 

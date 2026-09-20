@@ -24,8 +24,12 @@ LINKLOC, LINKMAP, MAP, INFO = 1440, 1696, 1952, 2048
 # Offsets within INFO
 KidStartScrn, KidStartBlock, KidStartFace = 64, 65, 66
 SwStartScrn, SwStartBlock = 68, 69
-GdStartBlock, GdStartFace, GdStartX = 72, 96, 120
-GdStartSeqL, GdStartProg, GdStartSeqH = 144, 168, 192
+# EQ.S counts INFO as 64 spare, KidStartScrn, KidStartBlock, KidStartFace, a
+# spare, SwStartScrn, SwStartBlock, a spare -- so the guard arrays begin at
+# 71, not 72.  bgexport's GDINFO and the game's have it right; these were a
+# byte out and read every screen's guard as the next screen's.
+GdStartBlock, GdStartFace, GdStartX = 71, 95, 119
+GdStartSeqL, GdStartProg, GdStartSeqH = 143, 167, 191
 
 
 class Level:

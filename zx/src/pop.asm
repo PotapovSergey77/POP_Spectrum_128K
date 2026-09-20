@@ -194,20 +194,18 @@ mainrun:        ld      a, (FRAMES)
                 call    page_canvas
                 call    checkstrike
                 call    checkstab
-                call    page_canvas     ; the sounds' code is in its bank
-                call    addsfx
                 call    cutguard
                 call    page_art
                 call    nextroom        ; before anything reads his row again
                 call    checkpress
                 call    shakeloose
-                call    animtrans
+                ld      hl, c1anim      ; the trans list, and the rest of
+                call    c1jp            ; NextFrame that lives in CODE1
                 call    animmobs
                 call    draw_chars
                 call    page_art
                 call    hide_floor
                 call    hide_behind
-                call    kid_death
                 call    rq_run          ; and the redrawing, as time allows
                 call    vw_fill         ; and the view ahead, to the very end
                 jp      main
@@ -727,6 +725,38 @@ pgbits:         or      0x10            ; another bank can put this one back
                 pop     bc
                 ret
 
+; CODE1, the canvas bank's own code, from the rest of the program.  c1jp
+; goes in at HL with that bank paged, for a caller that pages what it wants
+; afterwards; c1call puts back the bank that was in -- the control code's
+; own, say.  And c1far is CODE1's way out: a routine of the fixed half at
+; HL, which may page what it likes, and the canvas bank back after it.
+
+c1call:         ld      a, (nowbank)
+                push    af
+                call    c1jp
+                pop     af
+                jr      pageset
+c1jp:           call    page_pixels
+jphl:           jp      (hl)
+c1far:          call    jphl
+                push    af
+                call    page_pixels
+                pop     af
+                ret
+
+; And the same for the control code, which lives in the canvas bank: HL its
+; routine, A whatever that routine takes -- paging has A, so it is kept --
+; and the canvas bank back after it.
+
+c1mod:          push    af
+                call    page_canvas
+                pop     af
+                call    jphl
+                push    af
+                call    page_pixels
+                pop     af
+                ret
+
 ; [0] where the tape left the first bank of sprites, [1] the rest of them,
 ; [2] the room and its mask.
 banktab:        db      BANK_SPR1, BANK_SPR2, BANK_SPR3
@@ -1218,54 +1248,12 @@ swyes:          or      a
 
 mpc0:
                 org     mfix0
-take_sword:     ld      a, (roomnum)
-                ld      (trscrn), a
-                ld      a, (blocky)     ; ten blocks to the row, as checkpress
-                call    mul10           ; works it out
-                ld      a, (fwdinx)
-                add     a, l
-                ld      (trloc), a
-
-                call    trobat          ; which it is: the sword, or a flask
-                ld      (takeid), a     ; whose potion is the top three bits
-                ld      a, (trobst)
-                rlca
-                rlca
-                rlca
-                and     7
-                ld      (lastpotion), a
-                call    trobat          ; and it is floor from now on
-                ld      a, BG_FLOOR
-                call    trobtype
-                xor     a
-                ld      (trobst), a
-                call    trobsave
-
-                ld      a, (takeid)     ; the space it stood in, redrawn at
-                cp      BG_SWORD        ; once, as RemoveObj marks it: at the
-                ld      a, SWORDWIPE    ; a flask's bubbles are a band higher
-                jr      z, tkwipe
-                ld      a, FLASKWIPE
-tkwipe:         ld      (redh), a
-                ld      a, 1            ; back of the queue it lay there on
-                ld      (rqprio), a     ; the floor while he held it
-                call    redplate
-                xor     a
-                ld      (rqprio), a
-                call    ao_masks        ; and its floor masks, a flask's not
-                                        ; being a floor's
-                call    unfront         ; and the bottle is not in front of
-                                        ; him any more
-                call    shown_attrs     ; and a flask's colour goes with it,
-                ld      a, (vwcam)      ; from a view being made as well
-                inc     a
-                ld      (vwatt), a
-
-                ld      a, 1            ; RemoveObj: the press is spent
-                ld      (clrbtn), a
-                call    page_canvas     ; trobat and redplate paged the level
-                ld      a, (takeid)     ; in, and jumpseq and step_seq after
-                cp      BG_SWORD        ; it read the sequences from here
+take_sword:     ld      hl, c1take      ; RemoveObj: see c1take
+                call    c1call          ; and the control code's bank back,
+                ld      a, 1            ; where jumpseq and step_seq after it
+                ld      (clrbtn), a     ; read the sequences: the press is
+                ld      a, (takeid)     ; spent
+                cp      BG_SWORD
                 ld      a, SND_DRINK    ; the CPC's, drinking
                 call    nz, addsound
                 ld      a, SQ_DRINKPOTION
@@ -1615,12 +1603,10 @@ do_stepfwd:     ld      a, 1
                 ld      (clrf), a
                 ld      (clrbtn), a
                 call    get_fwd_dist
-                or      a
-                jr      z, steptest     ; nothing left to step: test his foot
-                dec     a
-                add     a, SQ_STEP1
-                jp      jumpseq
-steptest:       ld      a, SQ_TESTFOOT
+                ld      c, a            ; which sequence that comes to is
+                ld      hl, c1stepseq   ; worked out in CODE1, where there is
+                call    c1call          ; room for it -- C in and C out, which
+                ld      a, c            ; is all the paging leaves alone
                 jp      jumpseq
 
 ; ---------------------------------------------------------------- sequence
@@ -1739,12 +1725,13 @@ sqjard:         ld      a, 0xff
 sqrowup:        push    hl
                 ld      hl, blocky
                 dec     (hl)
-                pop     hl
-                jp      seqloop
+                jr      sqrow
 
 sqrowdn:        push    hl
                 ld      hl, blocky
                 inc     (hl)
+sqrow:          ld      hl, c1addsl     ; the slicers of the row he steps to
+                call    c1call
                 pop     hl
                 jp      seqloop
 
@@ -1810,7 +1797,8 @@ sqeffect:       ld      a, (hl)
                 dec     a
                 jp      nz, seqloop
                 push    hl
-                call    potion_effect
+                ld      hl, potion_effect       ; in CODE1
+                call    c1call
                 pop     hl
                 jp      seqloop
 
@@ -2148,7 +2136,13 @@ ck1:            ld      (tempby), a
                 call    cmp_barr
                 ld      (cccode), a
                 ld      a, c
-                cp      BG_GATE
+                cp      BG_SLICER       ; a slicer is in his way only while
+                jr      nz, cknotsl     ; its jaws are shut
+                ld      a, (tilestate)
+                cp      SLICEREXT
+                jr      nz, ccno
+                jr      ckyes
+cknotsl:        cp      BG_GATE
                 jr      nz, ckyes
                 call    gatebarr        ; tilestate is the gate's own
                 jr      nc, ccno
@@ -3276,32 +3270,6 @@ fanext:         inc     hl
                 jr      c, fatile
                 ret
 
-; When he has died and stopped moving, the death song: heroic if he fell in a
-; fight.  CharLife goes past nought so it is asked for once.
-
-kid_death:      ld      a, (charlife)
-                or      a
-                jr      z, kdnow
-                ret     m               ; alive
-                call    page_pixels     ; dead a while: c1dead
-                jp      c1dead
-kdnow:          ld      a, (frame)
-                cp      185
-                jr      z, kddead
-                cp      177
-                jr      z, kddead
-                cp      178
-                ret     nz
-kddead:         ld      a, 1
-                ld      (charlife), a
-                ld      a, (heroic)
-                or      a
-                ld      a, SONG_ACCID
-                jr      z, kdsong
-                ld      a, SONG_HEROIC
-kdsong:         ld      c, 255
-                jp      cue_song
-
 sacol           equ     SYSVARS + 6
 sarow           equ     SYSVARS + 7
 sacolr          equ     SYSVARS + 8     ; this row's colour
@@ -3669,6 +3637,8 @@ cfspace:        call    cmp_space       ; solid: he stays where he is
                 ret     nz
                 ld      hl, blocky
                 inc     (hl)
+                ld      hl, c1addsl     ; startfall: the slicers of the row
+                call    c1call          ; he is falling to
                 ld      a, 3
                 ld      (charact), a
                 xor     a
@@ -3724,6 +3694,8 @@ hit_floor:      call    floor_plane
                 ld      (chary), a
                 call    land_spikes     ; on to spikes that are out: impaled
                 ret     nz
+                ld      hl, c1addsl     ; and the slicers of the row he lands
+                call    c1call          ; on start
                 ld      a, (yvel)
                 ld      b, a
                 xor     a
@@ -3750,8 +3722,11 @@ hit_floor:      call    floor_plane
 hfhard:         ld      a, 100          ; POP spends more than he can have
                 call    decstr
                 ld      b, SQ_HARDLAND
-hfland:         ld      a, b
-                jp      jumpseq
+hfland:         ld      a, b            ; and into its first frame at once,
+                call    jumpseq         ; as :doland's animchar does: a frame
+                jp      step_seq        ; of daylight between the two let the
+                                        ; control code have a dead man on the
+                                        ; ground and stand him up again
 hfsoft:         ld      a, (charid)     ; a guard always lands en garde, and
                 cp      2               ; so does the kid who was
                 jr      nc, hfeng
@@ -3869,7 +3844,16 @@ climb_up:       ld      a, (stunned)
                 ld      (clru), a
                 ld      (clrbtn), a
                 call    above_flags
-                cp      BG_GATE
+                cp      BG_MIRROR       ; a mirror or a slicer over him can
+                jr      z, culeft       ; be climbed only facing left
+                cp      BG_SLICER
+                jr      nz, cunotsl
+culeft:         ld      a, (facing)
+                or      a
+                jr      z, cusucceed
+                ld      a, SQ_CLIMBFAIL
+                jp      jumpseq
+cunotsl:        cp      BG_GATE
                 jr      nz, cusucceed
                 ld      a, (facing)
                 or      a
@@ -5769,6 +5753,39 @@ shh:            db      0
 dfsrc:          dw      0               ; bookkeeping: see dfsetup
 
 
+; UPDATEGUARD for the room below, which ADDGUARD will raise him in again:
+; a fresh start, and he is gone from this one.
+
+skel_down:      ld      a, SND_SPLAT
+                call    addsound
+                ld      a, (nowbank)
+                push    af
+                call    page_bg
+                ld      a, SKELLAND
+                ld      de, 0
+                call    gd_field_in
+                ld      (hl), SKELLANDBLK
+                ld      a, SKELLAND
+                ld      de, GDX
+                call    gd_field_in
+                ld      (hl), SKELLANDX
+                ld      a, SKELLAND
+                ld      de, GDFACE
+                call    gd_field_in
+                ld      (hl), 0         ; facing right
+                ld      a, SKELLAND
+                ld      de, GDPROG
+                call    gd_field_in
+                ld      a, (guardprog)
+                ld      (hl), a
+                ld      a, SKELLAND
+                ld      de, GDSEQH
+                call    gd_field_in
+                ld      (hl), 0         ; alive: ADDGUARD starts him afresh
+                pop     af
+                call    pageset
+                jp      gd_gone
+
 ; The guards' programs, AUTO.S: kept here, where there is room for them.
 
 ;               strike  0   1   2   3   4   5   6   7   8   9   10  11
@@ -6076,9 +6093,9 @@ c1dead:         ld      hl, charlife
                 jr      nc, cd1
                 inc     (hl)
                 jp      page_art
-cd1:            ld      a, 0x3f         ; ENTER or SPACE
-                in      a, (254)
-                rra
+cd1:            ld      a, 0xbf         ; ENTER, and not the button with it:
+                in      a, (254)        ; SPACE is pressed as he dies as often
+                rra                     ; as not, and the song never played
                 call    nc, ststop
                 ld      a, (sfxtimer)
                 or      a
@@ -6137,6 +6154,615 @@ tm2:            ld      a, (hl)
 
 msgstart:       db      9, "START THE TAPE", 0
 msgstop:        db      9, "STOP THE TAPE ", 0
+
+; ------------------------------------------------------------- a test key
+;
+; Q takes him to the next level, for testing: the stairs do no more than put
+; lvflag at 2, and nextroom takes it from there -- the tune, the black screen,
+; the tape and STARTKID in the new level's own room.  So it is armed only when
+; the flag says a level follows this one on the tape (1), never over a death's
+; restart (3), and only on the frame the key goes down: held, it would carry
+; him through the level after as well.
+
+KEYROW_QT       equ     0xFBFE          ; Q is bit 0 of the Q-to-T half row
+
+nextlevkey:     ld      bc, KEYROW_QT
+                in      a, (c)
+                cpl
+                and     1
+                ld      hl, qdown
+                cp      (hl)
+                ld      (hl), a
+                ret     z               ; as it was
+                or      a
+                ret     z               ; and it was let go
+                ld      a, (lvflag)
+                cp      1
+                ret     nz              ; the last level, or he is dead
+                inc     a
+                ld      (lvflag), a
+                ret
+
+qdown           equ     SYSVARS + 33    ; the key as it was last frame
+
+; NextFrame in TOPCTRL.S from the trans list on, as far as this port keeps
+; it here: animtrans, then the rest of what is done once a frame for the
+; room and the kid in it.  From the main loop, by c1jp; kid_death goes last,
+; as its way out may page the art bank in.
+
+c1anim:         call    nextlevkey      ; a test key first of all
+                ld      hl, animtrans
+                call    c1far
+                call    bonesrise
+                call    checkslice
+                call    addsfx
+
+; When he has died and stopped moving, the death song: heroic if he fell in a
+; fight.  CharLife goes past nought so it is asked for once.
+
+kid_death:      ld      a, (charlife)
+                or      a
+                jr      z, kdnow
+                ret     m               ; alive
+                jp      c1dead          ; dead a while
+kdnow:          ld      a, (frame)
+                cp      185
+                jr      z, kddead
+                cp      177
+                jr      z, kddead
+                cp      178
+                ret     nz
+kddead:         ld      a, 1
+                ld      (charlife), a
+                ld      a, (heroic)
+                or      a
+                ld      a, SONG_ACCID
+                jr      z, kdsong
+                ld      a, SONG_HEROIC
+kdsong:         ld      c, 255
+                jp      cue_song
+
+; ADDSFX in TOPCTRL.S: a strike that is blocked rings.
+
+addsfx:         ld      a, (frame)
+                cp      167             ; blocked strike
+                ld      a, SND_SWORDCLASH1
+                jp      z, addsound
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (frame + OP)
+                cp      167
+                ret     nz
+                ld      a, SND_SWORDCLASH2
+                jp      addsound
+
+; POTIONEFFECT in MISC.S, on the effect in the sequence the kid drinks in.
+; lastpotion is what RemoveObj left: -1 the sword, 1 a refresh of one point,
+; 2 one more point for good, 3 weightlessness, 5 poison.  The lightning is
+; the Apple's whole screen gone to one colour for a frame; the border here.
+; The upside down potion, 4, is not done: the screen cannot turn over.
+
+potion_effect:  ld      a, (charid)
+                or      a
+                ret     nz
+                ld      a, (lastpotion)
+                or      a
+                ret     z
+                inc     a
+                jr      nz, penotsword
+                ld      a, SONG_SWORD
+                ld      c, 25
+                call    cue_song
+                ld      a, 1            ; the sword: three green flashes
+                ld      (gotsword), a
+                ld      bc, GREEN * 256 + 3
+                jr      peflash
+penotsword:     dec     a
+                cp      1
+                jr      nz, pe2
+                ld      a, (maxkidstr)  ; a point back, if one is missing
+                ld      hl, kidstr
+                cp      (hl)
+                ret     z
+                inc     (hl)
+                ld      a, SONG_SHORTPOT
+                ld      c, 25
+                call    cue_song
+                ld      bc, RED * 256 + 2
+                jr      peflash
+pe2:            cp      2
+                jr      nz, pe3
+                ld      a, (maxkidstr)  ; BOOSTMETER, then RECHARGEMETER
+                cp      MAXKIDMETER
+                jr      nc, pe2full
+                inc     a
+                ld      (maxkidstr), a
+pe2full:        ld      (kidstr), a
+                ld      a, SONG_POTION
+                ld      c, 25
+                call    cue_song
+                ld      bc, RED * 256 + 5
+                jr      peflash
+pe3:            cp      3
+                jr      nz, pe5
+                ld      a, 200          ; wtlesstimer
+                ld      (weightless), a
+                ld      a, SONG_SHORTPOT
+                ld      c, 25
+                jp      cue_song
+pe5:            cp      5
+                ret     nz
+                ld      a, SND_SPLAT
+                call    addsound
+                ld      hl, kidstr      ; yecch: a point off
+                ld      a, (hl)
+                or      a
+                ret     z
+                dec     (hl)
+                ret
+peflash:        ld      a, b
+                ld      (lightcolor), a
+                ld      a, c
+                ld      (lightning), a
+                ret
+
+; RemoveObj in CTRL.S, for take_sword: the block in front of him, whichever
+; it holds -- the sword, or a flask whose potion is the top three bits of
+; its state -- is floor from now on, and the space it stood in is redrawn
+; at once, as RemoveObj marks it: a flask's bubbles are a band higher.
+
+c1take:         ld      a, (roomnum)
+                ld      (trscrn), a
+                ld      a, (blocky)     ; ten blocks to the row, as checkpress
+                call    mul10           ; works it out
+                ld      a, (fwdinx)
+                add     a, l
+                ld      (trloc), a
+
+                ld      hl, trobat      ; which it is
+                call    c1far
+                ld      (takeid), a
+                ld      a, (trobst)
+                rlca
+                rlca
+                rlca
+                and     7
+                ld      (lastpotion), a
+                ld      a, BG_FLOOR     ; and it is floor from now on
+                ld      hl, trobtype
+                call    c1far
+                xor     a
+                ld      (trobst), a
+                ld      hl, trobsave
+                call    c1far
+
+                ld      a, (takeid)
+                cp      BG_SWORD
+                ld      a, SWORDWIPE
+                jr      z, tkwipe
+                ld      a, FLASKWIPE
+tkwipe:         ld      (redh), a
+                ld      a, 1            ; back of the queue it lay there on
+                ld      (rqprio), a     ; the floor while he held it
+                ld      hl, redplate
+                call    c1far
+                xor     a
+                ld      (rqprio), a
+                ld      hl, ao_masks    ; and its floor masks, a flask's not
+                call    c1far           ; being a floor's
+                ld      hl, unfront     ; and the bottle is not in front of
+                call    c1far           ; him any more
+                ld      hl, shown_attrs ; and a flask's colour goes with it,
+                call    c1far           ; from a view being made as well
+                ld      a, (vwcam)
+                inc     a
+                ld      (vwatt), a
+                ret
+
+; ---------------------------------------------------------------- slicers
+;
+; ANIMSLICER in MOVER.S, off animobj's dispatch: the jaws go round their
+; frames for ever while he is in the room and on their row, and the moment
+; they are retracted with him gone -- or dead, unless they are the pair that
+; cut him -- the slicer comes off the trans list.  A = its id, as trobat
+; read it, gone with the paging: aoid has it.
+
+SLICERSYNC      equ     3               ; frames between one and the next
+
+aoslicer:       ld      a, (aoid)
+                cp      BG_SLICER
+                jp      nz, stopobj     ; none of animobj's: off the list
+                ld      a, (trdirec)
+                or      a
+                jp      m, asdone       ; stopped: only the redraw is left
+                call    aspending       ; its picture not yet drawn: the jaws
+                jp      nz, aoquiet     ; wait for it
+                ld      a, (trobst)     ; the next frame, round and round,
+                ld      b, a            ; the blood kept
+                and     0x7f
+                inc     a
+                cp      SLICETIMER + 1
+                jr      c, as1
+                ld      a, 1
+as1:            ld      c, a
+                ld      a, b
+                and     0x80
+                or      c
+                ld      (trobst), a
+                ld      a, c
+                cp      SLICEREXT       ; the jaws meeting
+                jr      nz, as2
+                ld      a, SND_SLICER   ; the CPC's, for JawsClash
+                call    addsound
+as2:            ld      a, (trscrn)     ; his room?
+                ld      hl, roomnum
+                cp      (hl)
+                jr      nz, asoff
+                ld      a, (trloc)      ; and his row?
+                ld      b, 0xff
+asrow:          inc     b
+                sub     10
+                jr      nc, asrow
+                ld      a, (blocky)
+                cp      b
+                jr      nz, asoff
+                ld      a, (charlife)
+                or      a
+                jp      m, asdone       ; he is alive: on it chops
+                ld      a, (trobst)     ; dead, and the slicers that did not
+                and     0x80            ; cut him stop
+                jr      nz, asdone
+asoff:          ld      a, (trobst)     ; retracted, it comes off the list
+                and     0x7f
+                cp      SLICERRET
+                jr      c, asdone
+                call    stopobj
+asdone:         ld      a, (trobst)     ; and retracted there is nothing to
+                and     0x7f            ; draw
+                cp      SLICERRET
+                jp      nc, aodone
+                ld      a, 1
+                ld      (redwant), a
+                ld      (rqprio), a     ; and first in the line, like a plate:
+                ld      a, SLICERWIPE   ; the view being made comes before the
+                ld      (redh), a       ; queue, and a walk across the room is
+                ld      hl, aodone      ; a view due almost every frame, so a
+                call    c1far           ; slicer that waited its turn was drawn
+                xor     a               ; once in eight frames and its jaws
+                ld      (rqprio), a     ; stood still
+                jp      page_pixels
+
+; A block's redraw is not done where it is asked for: it is queued, and the
+; queue lays one band of RQBAND rows a frame, so a whole block takes four.
+; The jaws move every frame, and the pass took its four bands from four
+; different pictures -- worse, a pass asked for again while under way starts
+; over, so with a slicer asking every frame it never finished at all and the
+; jaws were never once seen to meet.
+;
+; Drawing the block whole and at once instead is not open to us: one costs
+; 237000 T, and a frame is 212724.  So the jaws hold still until the picture
+; they are in has been drawn.  A slicer therefore chops more slowly than the
+; Apple's, by as much as the queue is behind -- but every position of the
+; jaws is seen whole, which is what a shut slicer being a wall depends on.
+;
+; Out: NZ while this slicer's block is still in the queue.
+
+aspending:      call    trrowcol
+                ld      a, (rqn)
+                or      a
+                ret     z
+                ld      b, a
+                ld      hl, rqq
+asp1:           ld      a, (blockrow)
+                cp      (hl)
+                jr      nz, asp2
+                inc     hl
+                ld      a, (blockcol)
+                cp      (hl)
+                dec     hl
+                jr      z, aspyes
+asp2:           inc     hl              ; four bytes to an entry
+                inc     hl
+                inc     hl
+                inc     hl
+                djnz    asp1
+                xor     a
+                ret
+aspyes:         ld      a, 1
+                or      a
+                ret
+
+; Nothing of it has moved, so there is nothing to draw and nothing to put
+; back -- but the object stays on the list.
+
+aoquiet:        xor     a
+                ld      (redwant), a
+                ld      hl, aodone
+                jp      c1far
+
+; ADDSLICERS in SUBS.S: every slicer on the row the character is on starts
+; chopping -- the first at once, each of the rest slicersync frames behind
+; it -- and one already in mid-slice is left alone.  His room is the one on
+; screen, so its thirty blocks are in hand.
+
+c1addsl:        ld      a, (blocky)
+                cp      3
+                ret     nc
+                call    mul10           ; ten blocks to the row
+                ld      a, l
+                ld      (sltrloc), a
+                ld      de, roomids
+                add     hl, de
+                ld      a, SLICETIMER
+                ld      (slstate), a
+                ld      b, 10
+asl1:           ld      a, (hl)
+                and     0x1f
+                cp      BG_SLICER
+                jr      nz, aslnext
+                push    hl
+                push    bc
+                ld      de, 30
+                add     hl, de
+                ld      a, (hl)         ; its state, as the room has it
+                ld      c, a
+                and     0x7f
+                jr      z, aslok
+                cp      SLICERRET
+                jr      c, aslskip      ; in mid-slice: leave it alone
+aslok:          ld      a, c            ; the blood it carries, and the frame
+                and     0x80            ; this one starts at
+                ld      hl, slstate
+                or      (hl)
+                call    trig_slicer
+                ld      hl, slstate     ; getnextstate: the next one starts
+                ld      a, (hl)         ; slicersync frames along
+                sub     SLICERSYNC
+                cp      SLICERRET
+                jr      nc, aslsync
+                add     a, SLICETIMER + 1 - SLICERRET
+aslsync:        ld      (hl), a
+aslskip:        pop     bc
+                pop     hl
+aslnext:        inc     hl
+                ld      a, (sltrloc)
+                inc     a
+                ld      (sltrloc), a
+                djnz    asl1
+                ret
+
+; TRIGSLICER in MOVER.S: A = the state it starts at, (sltrloc) = its block
+; in the room on screen.
+
+trig_slicer:    push    af
+                ld      a, (sltrloc)
+                ld      (trloc), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+                ld      hl, trobat
+                call    c1far
+                pop     af
+                ld      (trobst), a
+                ld      hl, trobsave
+                call    c1far
+                ld      a, 1
+                ld      (trdirec), a
+                ld      hl, addtrob
+                jp      c1far
+
+; CHECKSLICE in COLL.S: the blocks his picture overlaps this frame, out of
+; the collision buffer -- 0xff is a barrier he is inside -- and a slicer
+; among them with its jaws shut cuts him in half.
+;
+; CHECKSLICE2, the same for a guard, is not here: no guard of this level
+; ever stands on a slicer's row.
+
+checkslice:     ld      a, (blocky)     ; tempblocky
+                ld      (csrow), a
+                ld      b, 9
+cksl1:          ld      hl, cdthis
+                ld      e, b
+                ld      d, 0
+                add     hl, de
+                ld      a, (hl)
+                inc     a
+                jr      nz, cksl2       ; not over a barrier there
+                ld      hl, snthis
+                add     hl, de
+                ld      a, (hl)         ; the room that block is in
+                push    bc
+                ld      c, a
+                ld      a, (csrow)
+                ld      e, a
+                ld      a, c
+                ld      c, e
+                call    blk_in          ; B the column, C the row
+                cp      BG_SLICER
+                jr      nz, cksl3
+                ld      a, (tilestate)
+                and     0x7f
+                cp      SLICEREXT       ; shut?
+                jr      nz, cksl3
+                pop     bc
+                jr      c1slice
+cksl3:          pop     bc
+cksl2:          dec     b
+                jp      p, cksl1
+                ret
+
+; Slice: the blood stays on the jaws, and he is put square on them, at the
+; floor, and cut in half.  One that has him already leaves him alone.
+
+c1slice:        ld      a, (tempbx)     ; its block, in its own room
+                ld      (sltrloc), a
+                ld      a, (csrow)
+                call    mul10
+                ld      a, (sltrloc)
+                add     a, l
+                ld      (trloc), a
+                ld      a, (tempscrn)
+                ld      (trscrn), a
+                ld      hl, trobat
+                call    c1far
+                ld      a, (trobst)
+                or      0x80
+                ld      (trobst), a
+                ld      hl, trobsave
+                call    c1far
+                ld      a, (frame)
+                cp      178
+                ret     z
+                ld      a, (tempbx)     ; its left edge, seven units in
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                ld      d, h
+                ld      e, l
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                sbc     hl, de          ; twenty eight pixels to the block
+                ld      de, 14
+                add     hl, de
+                ld      (charx), hl
+                ld      a, 8            ; and eight the way he faces
+                ld      hl, move_by
+                call    c1mod
+                ld      hl, floor_plane
+                call    c1mod
+                ld      (chary), a
+                ld      a, 100
+                call    decstr
+                ld      a, SND_SPLAT
+                call    addsound
+                ld      a, SQ_HALVE
+                ld      hl, bumpseq     ; jumpseq, then animchar
+                jp      c1mod
+
+csrow:          db      0
+slstate:        db      0
+sltrloc:        db      0
+
+
+; ---------------------------------------------------------------- the bones
+;
+; BONESRISE in MISC.S: on level three, with the exit open and nobody else in
+; the room, the skeleton lying in screen one gets up as the kid comes level
+; with it.  The bones are a piece of the background until then; they become
+; floor, that block and the one to its right are redrawn, and what stands up
+; is a guard of the kid's own making -- CharID 4, program two, three points
+; of strength he can never be made to lose.
+
+bonesrise:      ld      a, (curlev)     ; level three
+                cp      2
+                ret     nz
+                ld      a, (gdhere)     ; and nobody in the room yet
+                or      a
+                ret     nz
+                ld      a, (roomnum)
+                cp      SKELSCRN
+                ret     nz
+                ld      a, (exitopen)
+                or      a
+                ret     z
+                ld      hl, (charx)     ; KidBlockX: level with the bones,
+                call    blockcol_of     ; or one short of them
+                cp      SKELTRIG
+                jr      z, brtrig
+                cp      SKELTRIG + 1
+                ret     nz
+
+brtrig:         ld      a, SKELY * 10 + SKELX
+                ld      (trloc), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+                ld      hl, trobat      ; what lies there
+                call    c1far
+                push    af
+                ld      a, BG_FLOOR     ; floor from now on, and the block
+                ld      hl, trobtype    ; and the one right of it redrawn --
+                call    c1far           ; markred and markwipe, 24 rows deep
+                ld      a, 24
+                ld      (redh), a
+                ld      hl, redplate
+                call    c1far
+                pop     af
+                cp      BG_BONES
+                ret     nz
+
+                call    swapchar        ; he is made in Char, as POP makes
+                ld      a, SKELY        ; him
+                ld      (blocky), a
+                ld      hl, floor_plane
+                call    c1mod
+                ld      (chary), a
+                ld      hl, SKELX * BLOCK_PX + BLOCK_PX ; getblockej + angle
+                ld      (charx), hl                     ; + 7
+                xor     a
+                ld      (facing), a     ; POP's -1, left
+                ld      a, SQ_ARISE
+                ld      hl, bumpseq     ; jumpseq, then animchar
+                call    c1mod
+                ld      a, SKELPROG
+                ld      (guardprog), a
+                ld      a, 0xff
+                ld      (charlife), a
+                ld      a, 3
+                ld      (oppstr), a
+                xor     a
+                ld      (alertguard), a
+                ld      (refract), a
+                ld      (justblocked), a
+                ld      (yvel), a
+                ld      hl, newcol      ; nothing of him drawn yet, and his
+                ld      b, 13           ; rectangles, and CharXVel
+brclr:          ld      (hl), a
+                inc     hl
+                djnz    brclr
+                ld      a, 2
+                ld      (charsword), a
+                ld      a, 4            ; the skeleton
+                ld      (charid), a
+                ld      a, 1            ; and a guard in the room from here
+                ld      (gdhere), a
+                jp      swapchar
+
+; ------------------------------------------------------------ careful step
+;
+; The rest of DoStepfwd in CTRL.S, which the control code has no room for.
+; In and out: (stepwant) -- in, how far GETFWDDIST says he may go; out, the
+; sequence to start.
+;
+; Nothing left to step is not the end of it.  A barrier ahead -- a mirror,
+; or a slicer -- he steps THROUGH, which is the only way past a slicer with
+; its jaws up, and without this one stopped him dead like a chasm.  An edge
+; he toes first and steps off only at a second press; CharRepeat, how long
+; the last step was, is what tells the two presses apart.
+
+c1stepseq:      ld      a, c
+                or      a
+                jr      z, cssnone
+cssgo:          ld      (charrepeat), a
+                dec     a
+                add     a, SQ_STEP1
+                ld      c, a
+                ret
+cssnone:        ld      a, (fwdkind)
+                dec     a
+                jr      z, cssthru      ; a barrier: straight through it
+                ld      hl, charrepeat
+                ld      a, (hl)
+                or      a
+                jr      z, cssthru      ; the second press: off the edge
+                ld      (hl), 0         ; the first: toe it
+                ld      c, SQ_TESTFOOT
+                ret
+cssthru:        ld      a, 11           ; POP's own natural step
+                jr      cssgo
+
+charrepeat      equ     SYSVARS + 34    ; CharRepeat: DoStepfwd's alone
 
 c1end:
                 org     c1fix
@@ -6268,7 +6894,9 @@ stubbank:       push    bc
 stseq:          call    jumpseq
                 call    page_canvas
                 call    step_seq
-                call    add_guard       ; and whoever keeps the room
+                ld      hl, c1addsl     ; the slicers of the row he starts on,
+                call    c1call          ; as CUT starts those of a room walked
+                call    add_guard       ; into -- and whoever keeps the room
                 ld      a, START_ROOM - KIDSTART_SCRN
                 or      a
                 ld      a, SONG_DANGER  ; the level begins: "Danger", CUESONG
@@ -6365,6 +6993,7 @@ pristok         equ     0x5C77          ; there is one to keep
 sfxbank         equ     0x5CD4          ; where the sounds are: see page_sfx
 curlev          equ     0x5C75          ; the level, less one
 origstr         equ     0x5C76          ; MaxKidStr as the level began
+milestone       equ     0x5C6B          ; level three's, passed
 cvbasep         equ     0x5C72          ; the canvas as a redraw sees it: two
 fmode           equ     0x5C74          ; rb_fetch's A
 

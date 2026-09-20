@@ -651,7 +651,9 @@ danotflask:     cp      BG_SPIKES       ; drawspikea over the piece
                 jr      nz, danotspikes
                 call    dapiece
                 jp      spike_ma
-danotspikes:    cp      BG_SWORD        ; drawsworda: its own picture, and
+danotspikes:    cp      BG_SLICER       ; drawslicera, and piecea has
+                jp      z, slicer_ma    ; nothing for it
+                cp      BG_SWORD        ; drawsworda: its own picture, and
                 jr      nz, dapiece     ; piecea has none for it
                 call    sword_gleam
                 jr      dago
@@ -1005,6 +1007,8 @@ flask_front:    ld      c, a
                 ld      (frxfix), a
                 ld      (frydy), a
                 ld      a, (objid)
+                cp      BG_SLICER
+                jr      z, ffslicer
                 cp      BG_FLASK
                 ld      a, c
                 ret     nz
@@ -1027,6 +1031,14 @@ flask_front:    ld      c, a
                 ret     c
                 ld      a, (bgtables + T_SPECIALFLASK)
                 ret
+
+; drawslicerf: a slicer has a front piece of its own for every picture of
+; its jaws, where fronti has none.
+
+ffslicer:       call    slicer_x
+                ld      a, c
+                ld      hl, bgtables + T_SLICERFRNT
+                jp      bgentry
 
 
 ; The rows of the piece that land, in imgbuf, moved (bgshift) pixels to the
@@ -1845,10 +1857,13 @@ lvflag:         db      LV_ARMED1
 nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
                 cp      2               ; has: LoadNextLevel, by way of the
                 jr      c, cutchar      ; room change it is so much like --
-                ld      a, 0x3f         ; once the tune up the stairs is heard
+                ld      a, 0xbf         ; once the tune up the stairs is heard
                 in      a, (254)        ; out, the torches burning on as it
-                rra                     ; plays, or ENTER or SPACE has cut it
-                call    nc, ststop      ; short, as a key does POP's PlaySong
+                rra                     ; plays, or ENTER has cut it short, as
+                call    nc, ststop      ; a key does POP's PlaySong.  ENTER and
+                                        ; nothing else: the button is SPACE,
+                                        ; and a hand resting on it took every
+                                        ; tune away the moment it began
                 ld      a, (sfxtimer)
                 or      a
                 ret     nz
@@ -2339,7 +2354,7 @@ rbn1:           ld      (rbleftn), a
 
 rbbatch:        ld      a, (rbleftn)
                 or      a
-                jp      z, rbdone
+                jr      z, rbdone
                 ld      b, 48
                 ld      a, (rbwide)
                 or      a
@@ -2382,7 +2397,7 @@ rbconv:         push    bc
                 pop     bc
                 djnz    rbconv
                 ld      (rbroomp), de
-                jp      rbbatch
+                jr      rbbatch
 
 rbdone:         jp      page_art        ; redshow reads the room
 
@@ -3423,7 +3438,8 @@ animobj:        xor     a               ; nothing wants redrawing yet -- and
                 jp      z, aospikes
                 cp      BG_SPACE
                 jr      z, aodone       ; the floor that was here has gone
-                jp      stopobj         ; none of these: off the list
+                ld      hl, aoslicer    ; a slicer, in CODE1 -- or none of
+                jp      c1jp            ; these, and off the list
 
 ; The bars are drawn at state/4, clamped, so most of a gate's life changes
 ; nothing to look at: fifty frames waiting at the top with the state above
@@ -3500,8 +3516,10 @@ aonostart:      xor     a
                 ld      (rqstart), a
                 ret
 aonotx:         cp      BG_FLASK        ; the bubbles: the block's own band
-                jr      nz, aonotf      ; they are in, and only that
-                call    onscreen
+                jr      z, aoone        ; they are in, and only that
+                cp      BG_SLICER       ; and a slicer's jaws keep to its own
+                jr      nz, aonotf      ; block as well
+aoone:          call    onscreen
                 ret     nz
                 call    trrowcol
                 call    rq_block

@@ -209,10 +209,30 @@ class Room:
             # drawsworda: piecea has no picture for the sword, it has one of
             # its own, and it gleams -- state 1 is the bright one.
             img = bg.swordgleam1 if st['state'] == 1 else bg.swordgleam0
+        elif objid == bg.slicer:
+            self._drawslicera(st)
+            return
         else:
             img = bg.piecea[objid]
         if img:
             self.draw(img, st['xco'], st['Ay'] + bg.pieceay[objid], ORA)
+
+    @staticmethod
+    def _slicer_frame(state):
+        """drawslicera and drawslicerf: which of the five pictures the state
+        is, fully retracted from slicerRet on."""
+        return bg.slicerseq[min(state & 0x7f, bg.slicerRet)] - 1
+
+    def _drawslicera(self, st):
+        """drawslicera: the jaws, the bottom one at Ay -- smeared once it
+        has cut -- and the top one slicergap above it."""
+        x = self._slicer_frame(st['state'])
+        bot = (bg.slicerbot2 if st['state'] & 0x80 else bg.slicerbot)[x]
+        if bot:
+            self.draw(bot, st['xco'], st['Ay'], ORA)
+        if bg.slicertop[x]:
+            self.draw(bg.slicertop[x], st['xco'], st['Ay'] - bg.slicergap[x],
+                      ORA)
 
     def draw_mb(self, st):
         """
@@ -333,6 +353,8 @@ class Room:
     def draw_front(self, st):
         x = st['objid']
         img = bg.fronti[x]
+        if x == bg.slicer:              # drawslicerf
+            img = bg.slicerfrnt[self._slicer_frame(st['state'])]
         # drawfrnt: potions two to four stand in the taller bottle.
         if x == bg.flask and 0x40 <= st['state'] & 0xe0 != 0xa0:
             img = bg.specialflask

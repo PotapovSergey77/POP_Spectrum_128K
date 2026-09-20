@@ -96,7 +96,7 @@ credit:         push    bc
                 call    credit1
                 pop     bc
                 ld      a, c
-                jp      tpause
+                jr      tpause
 
 credit1:        push    bc
                 ld      a, 0x80         ; DELTAEXPPOP: drawn while the clean
@@ -121,7 +121,7 @@ credit1:        push    bc
 
 unpack:         ld      a, BANK_ART
                 ld      de, 0x4000
-                jp      unpackto
+                jr      unpackto
 
 ; Bank 5 onto the second screen, shown, a character column at a time from
 ; the left: two columns in three fiftieths, near enough the time DBLEXPAND

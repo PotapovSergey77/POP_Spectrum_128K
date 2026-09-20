@@ -55,6 +55,11 @@ SCENES = [
     ('the sword fight', 3, 1, 2,
      lambda n: ['right'] if 2 <= n <= 3 else
      (['space'] if n % 6 == 0 else []), 110, 8, {'POP_GOTSWORD': '1'}),
+    # Three slicers on one row, all chopping: each lays its whole block down
+    # in the frame its jaws move, which is the only way they are ever seen
+    # shut, and they are three frames out of step with one another.
+    ('three slicers chop', 16, 2, 1, lambda n: ['right'], 70, 8,
+     {'POP_LEVEL': '3'}),
 ]
 
 
@@ -69,7 +74,10 @@ def build(env=None):
 
 
 def tape_for(name, room, row, col, extra=None):
-    tag = 'stress_%d_%d_%d%s' % (room, row, col, '_sw' if extra else '')
+    tag = 'stress_%s%d_%d_%d%s' % ((extra or {}).get('POP_LEVEL', ''),
+                                   room, row, col,
+                                   '_sw' if (extra or {}).get('POP_GOTSWORD')
+                                   else '')
     env = {'POP_START_ROOM': str(room), 'POP_START_ROW': str(row),
            'POP_START_COL': str(col)}
     env.update(extra or {})
