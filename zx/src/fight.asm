@@ -362,13 +362,9 @@ do_shad:        call    gd_swap
                 ret     z
                 ld      hl, jstkx       ; LoadDesel and SaveDesel: the keys
                 ld      de, kidkeys     ; and their fresh presses are the
-                ld      bc, 8           ; kid's, and the guard's presses are
-                ldir                    ; his own -- left in them, the kid
-                call    shadctrl        ; walked off on the guard's back
-                ld      hl, kidkeys     ; press, and a dead guard's release
-                ld      de, jstkx       ; made a held key new every frame
-                ld      bc, 8
+                ld      bc, 8           ; kid's, while the guard's are his own
                 ldir
+                call    shadctrl        ; SHADCTRL in CTRL.S
                 call    step_seq        ; ANIMCHAR
                 ld      hl, (charx)     ; CharX under ScrnLeft - 14, or at
                 ld      de, 28          ; ScrnRight + 14 and over
@@ -384,7 +380,21 @@ do_shad:        call    gd_swap
                 call    do_fall
                 call    checkspikes
                 call    checkimpale
-dsoff:          jp      swapchar
+
+; And only now are the kid's keys put back -- after everything that reads
+; them, not straight after shadctrl.  fall_on takes the button from btn, and
+; with the kid's there a held button made a falling guard reach for a ledge
+; and hang on it.  POP leaves the guard's keys in place for the whole of
+; DoShad and only two-player control ever swaps them (LoadDesel).  They may
+; not be left in them past the end of the frame, though: the kid walked off
+; on the guard's back press, and a dead guard's release made a held key new
+; every frame.
+
+dsoff:          ld      hl, kidkeys
+                ld      de, jstkx
+                ld      bc, 8
+                ldir
+                jp      swapchar
 
 ; SHADCTRL in CTRL.S: a guard whose strength has run out is dead, and a dead
 ; one still goes through GENCTRL, which lays him down.
@@ -421,11 +431,14 @@ SKELLANDBLK     equ     10              ; and its block, as indexblock has it
 cutguard:       ld      a, (gdhere)
                 or      a
                 ret     z
-                ld      a, (chary + OP)
-                cp      BOTCUT
-                ret     c
-                cp      TOPCUTMI        ; not wrapped round past the top
-                ret     nc
+                ld      a, (chary + OP) ; CUTGUARD asks this and nothing
+                cp      BOTCUT          ; else: ShadY at BotCutEdge or past
+                ret     c               ; it.  There was an upper bound here
+                                        ; as well, which a fall steps clean
+                                        ; over -- it gathers up to TERM_VEL a
+                                        ; frame, and the row under the screen
+                                        ; has its floor plane at 244, inside
+                                        ; the window that was thrown out
                 ld      a, (charid + OP)        ; a skeleton that falls into
                 cp      4                       ; the room it belongs in gets
                 jr      nz, gd_off              ; up again there
@@ -440,11 +453,17 @@ gd_off:         ld      a, (nowbank)
                 ld      (hl), 0xff
                 pop     af
                 call    pageset
+; His old rectangle is left standing.  draw_chars rubs out the box round the
+; new one and the old, and with no new one that box is the old alone -- his
+; last picture, which cutguard drops him on the frame he falls off the foot
+; of the screen.  Clearing it here left that picture lying along the bottom
+; until the view next moved.  keep_rect copies the empty new one over it at
+; the top of the next frame, so it costs nothing after that one frame.
+
 gd_gone:        xor     a
                 ld      (gdhere), a
                 ld      (oppstr), a
-                ld      (neww + OP), a  ; rubbed out where he was, and no more
-                ld      (oldw + OP), a
+                ld      (neww + OP), a
                 ret
 
 ; ---------------------------------------------------------------- AUTO.S
