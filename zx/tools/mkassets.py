@@ -613,6 +613,7 @@ def main(argv):
     # screens are shown before that: they travel in it, packed, after the
     # signature, and are gone once the room goes over them.
     intro_at, intro = titlescr.build(binout)
+    port = titlescr.port_blob(binout)
     # And the CPC's music for them, after the screens: see cpcmusic.py.
     tunes = cpcmusic.tunes()
     tunes_off = len(SIG_ART) + len(intro)
@@ -896,6 +897,10 @@ def main(argv):
     # copy of the band it composes goes past the title screens.
     cut_room = rbintro - canvas
     cut, cutfixed, cutinc, cutstats = princessscr.build(canvas, cut_room)
+    # And after it on the tape, where start puts the room's code, the port's
+    # own credit after the title, packed on the splash: start swaps the two,
+    # and intro.asm unpacks it from where the room's code was.
+    assert canvas + len(cut) == rbintro
     open(os.path.join(binout, 'cutfixed.bin'), 'wb').write(cutfixed)
     # And PlayCut1, the princess waiting before level two: a tape block of
     # its own, cut1.asm and what it plays -- see princessscr.build1.  Its
@@ -942,6 +947,7 @@ def main(argv):
            'CODE1_MAX   equ %d' % code1_max,
            'RBINTRO     equ %d' % rbintro,
            'CANVAS      equ %d' % canvas,
+           'PORTLEN     equ %d' % len(port),
            'sfxmap      equ %d' % sfxmap_at,
            'sfxtab      equ %d' % sfxtab_at,
            'sfxdata     equ %d' % sfxdata_at]
@@ -992,7 +998,7 @@ def main(argv):
     # all three whatever they hold.
     for i in (0, 1, 2):
         open(os.path.join(binout, 'bank_spr%d.bin' % (i + 1)), 'wb').write(
-            blobs[i] + SIG_SPR + (bytes(3) + cut if i == 2 else b''))
+            blobs[i] + SIG_SPR + (bytes(3) + cut + port if i == 2 else b''))
 
     # Shifting a row bit by bit was costing more than the whole rest of the
     # frame, so it goes through tables instead: for a shift of s, hi[s][b] is

@@ -40,10 +40,13 @@ intro:          ld      (introsp), sp
                 ld      bc, 80 * 256 + 38
                 call    credit
                 ld      hl, T_TITLE     ; TitleScreen, and the splash after
-                ld      b, 255          ; it for as long as the CPC's first
-                call    credit1         ; tune still has to play: 772 counts
-                ld      a, 233          ; in all is its 1206 fiftieths
-                call    tpause
+                ld      bc, 255 * 256 + 38      ; it for as long as the CPC's
+                call    credit          ; first tune still has to play: 772
+                ld      hl, roomblk     ; counts in all is its 1206 fiftieths
+                ld      bc, 172 * 256 + 23      ; -- with the port's own
+                call    credit          ; credit in the middle, where the
+                                        ; Apple has only the splash: start
+                                        ; left it where the room's code goes
 
                 ld      a, 0x80         ; Prolog1: unpacked out of sight and
                 call    setvis          ; wiped on from the left, the way

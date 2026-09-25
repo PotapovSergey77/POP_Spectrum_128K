@@ -1046,6 +1046,15 @@ def byline(pix):
     big_text(pix, 'Jordan Mechner', 128, 140)
 
 
+def port(pix):
+    """Not the Apple's: who made this port, after the title, in the
+    byline's face and on its lines, and where to find him in the copyright
+    line's letters under it."""
+    big_text(pix, 'ported by', 128, 126)
+    big_text(pix, 'Sergey Potapov', 128, 140)
+    small_text(pix, 'YouTube: @16BitMaster', 128, 149)
+
+
 def presents(pix):
     # the Apple's lines: its letters' feet on 129 and 143; across, the
     # middle of the screen
@@ -1080,7 +1089,30 @@ FONT = {
     't': ['.#...', '####.', '.#...', '.#...', '.#..#', '..##.'],
     'y': ['.....', '#...#', '#...#', '#...#', '.####', '....#', '.###.'],
 }
+FONT.update({
+    'B': ['####.', '#...#', '####.', '#...#', '#...#', '####.'],
+    'T': ['#####', '..#..', '..#..', '..#..', '..#..', '..#..'],
+    'Y': ['#...#', '#...#', '.#.#.', '..#..', '..#..', '..#..'],
+    '6': ['..##.', '.#...', '####.', '#...#', '#...#', '.###.'],
+    'b': ['#....', '####.', '#...#', '#...#', '#...#', '####.'],
+    's': ['.....', '.####', '#....', '.###.', '....#', '####.'],
+    'u': ['.....', '#...#', '#...#', '#...#', '#...#', '.####'],
+    ':': ['.', '.', '#', '.', '.', '#'],
+    '@': ['.###.', '#...#', '#.###', '#.#.#', '#.###', '#....', '.###.'],
+})
 COPYRIGHT = '© Copyright 1989 Jordan Mechner'
+
+
+def small_text(pix, text, centre, top):
+    """A line of FONT, centred on a pixel, its tops on a line."""
+    x = centre - (sum(len(FONT[ch][0]) + 1 for ch in text) - 1) // 2
+    for ch in text:
+        glyph = FONT[ch]
+        for j, row in enumerate(glyph):
+            for i, c in enumerate(row):
+                if c == '#':
+                    pix[top + j][x + i] = LETTER
+        x += len(glyph[0]) + 1
 
 
 def copyright(pix):
@@ -1125,7 +1157,7 @@ def cell(pix, cx, cy):
 
 
 def screen(name):
-    apple = poptitles.screen(name)
+    apple = poptitles.screen(name if name != 'port' else 'splash')
     cols, dots = poptitles.colours(apple), poptitles.dots(apple)
     splash = poptitles.screen('splash') if name not in STORY else apple
     pix = picture(poptitles.colours(splash))
@@ -1142,6 +1174,8 @@ def screen(name):
             presents(pix)
         elif name == 'byline':
             byline(pix)
+        elif name == 'port':
+            port(pix)
         else:
             credit(pix, apple, cols, dots, splash, ink=TITLE)
         edges(pix)
@@ -1312,9 +1346,27 @@ def build(cache_dir):
     return at, blob
 
 
+def port_blob(cache_dir):
+    """The port's credit packed on the splash, worked out once as build()
+    works out the rest."""
+    import hashlib
+    h = hashlib.sha1()
+    h.update(open(poptitles.DISK, 'rb').read())
+    for f in (__file__, poptitles.__file__):
+        h.update(open(f, 'rb').read())
+    path = os.path.join(cache_dir, 'intro.port.%s.bin' % h.hexdigest()[:16])
+    if os.path.exists(path):
+        return open(path, 'rb').read()
+    splash = screen('splash')
+    data = pack(screen('port'), splash)
+    assert unpack(data, splash) == screen('port')
+    open(path, 'wb').write(data)
+    return data
+
+
 def main(argv):
     out = argv[1] if len(argv) > 1 else '.'
-    for name in poptitles.NAMES:
+    for name in poptitles.NAMES + ['port']:
         scr = screen(name)
         open(os.path.join(out, 'zx_%s.scr' % name), 'wb').write(scr)
         preview(scr, os.path.join(out, 'zx_%s.png' % name))

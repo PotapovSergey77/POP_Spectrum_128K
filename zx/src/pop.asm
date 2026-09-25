@@ -7266,11 +7266,16 @@ revt2:          rra
                 lddr                                    ; the two overlap
 
                 ld      a, BANK_CVS     ; and the code that builds a room put
-                call    pageset         ; by where the titles leave it alone
-                ld      hl, roomblk
-                ld      de, RBINTRO
-                ld      bc, RB1LEN
-                ldir
+                call    pageset         ; by where the titles leave it alone,
+                ld      hl, roomblk     ; swapped with what the tape left
+                ld      de, RBINTRO     ; there: the port's credit, which the
+                ld      bc, RB1LEN      ; titles show from where the room's
+rbswap:         ld      a, (de)         ; code was
+                ldi
+                dec     hl
+                ld      (hl), a
+                inc     hl
+                jp      pe, rbswap
 
                 ld      hl, isrbanks    ; the interrupt's way in, at the top
                 ld      b, 6            ; of every bank that is ever paged

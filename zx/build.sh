@@ -72,6 +72,7 @@ print('принцесса 1: блок %d байт, код %04X..%04X, свобо
 assert csym['cut1end'] <= sym['roomblk'], 'принцесса 1 налезла на постройку комнаты'
 assert 0xC000 + len(block) <= csym['CUT1_LOW'], 'принцесса 1 не влезла в банк'
 assert csym['RB1LEN'] <= 3275
+assert sym['PORTLEN'] <= sym['RB1LEN'], 'надпись порта длиннее кода постройки комнаты'
 at = sym['cut1len'] + 1 - base          # levelgo's LD-BYTES length
 data = data[:at] + len(block).to_bytes(2, 'little') + data[at + 2:]
 mod = data[sym['MODORG'] - base:sym['modend'] - base]
