@@ -1111,18 +1111,23 @@ tsturn:         ld      a, SQ_TURN
                 ret
 
 ; STARTFALL from a fighting stance.  POP picks the guard's fall by which way
-; CharXVel carries him, and nothing here gives him one: forward.
+; CharXVel carries him -- and the fighting sequences set it: stabbed, strike
+; and retreat -1, advance +1.  A skeleton struck back over the edge goes with
+; efightfall, back and clear of it; efightfallfwd carried him forward on to
+; the post under the ledge, where he stood instead of dropping to the screen
+; below.
 
 fightfall_seq:  ld      a, (charid)
                 cp      2
-                jr      c, ffkid
-                xor     a
-                ld      (droppedout), a
-                ld      a, SQ_EFIGHTFALLFWD
-                ret
-ffkid:          ld      a, 1
-                ld      (droppedout), a ; for the guard's benefit
+                sbc     a, a            ; the kid drops out, for the guard's
+                ld      (droppedout), a ; benefit -- only ever asked if nought
                 ld      a, SQ_FIGHTFALL
+                ret     nz
+                ld      a, (xvel)
+                rlca
+                ld      a, SQ_EFIGHTFALLFWD
+                ret     nc
+                ld      a, SQ_EFIGHTFALL
                 ret
 
 ; FIRSTGUARD in MISC.S: the kid cannot run or jump past a guard en garde.
@@ -1642,52 +1647,32 @@ hsheer:         ld      a, -7
 hclear:         ld      a, SQ_HANGDROP
                 jp      jumpseq
 
-; A thing taken off block (blockcol, blockrow): its front piece -- the bottle
-; -- comes off the front list, height nought, so nothing is laid back over
-; him where it stood.  Its entry is the one whose column is the block's and
-; whose foot is within the block's floor line.
+; sl_sync's flip, which has to be out here as the room is in a bank of its
+; own: DE = the tile's first room byte, imgbuf the bits to flip, SLROWS rows
+; of four.  And the block shown straight after, which redshow takes from the
+; room -- (blockcol), (dy) and (redh) are set for it.
 
-unfront:        call    trrowcol        ; the redraws moved blockcol on
-                ld      a, (nfront)
-                or      a
-                ret     z
-                ld      b, a
-                ld      a, (blockcol)
-                add     a, a
-                add     a, a
-                ld      c, a            ; C = the block's own byte column
-                ld      a, (blockrow)
-                inc     a
+slxor:          call    page_art
+                ld      hl, imgbuf
+                ld      b, SLROWS
+slx1:           rept    3
+                ld      a, (de)
+                xor     (hl)
+                ld      (de), a
+                inc     hl
+                inc     de
+                endm
+                ld      a, (de)
+                xor     (hl)
+                ld      (de), a
+                inc     hl
+                ld      a, e
+                add     a, ROOM_BYTES - 3
                 ld      e, a
-                ld      d, 0
-                ld      hl, blockbot
-                add     hl, de
-                ld      d, (hl)         ; D = its floor line
-                ld      hl, frontlist
-ufloop:         ld      a, (hl)
-                sub     c
-                cp      4
-                jr      nc, ufnext
-                inc     hl
-                ld      a, d
-                sub     (hl)
-                dec     hl
-                cp      9
-                jr      nc, ufnext
-                push    hl
-                inc     hl
-                inc     hl
-                inc     hl
-                inc     hl
-                ld      (hl), 0
-                pop     hl
-ufnext:         inc     hl
-                inc     hl
-                inc     hl
-                inc     hl
-                inc     hl
-                djnz    ufloop
-                ret
+                jr      nc, slx3
+                inc     d
+slx3:           djnz    slx1
+                jp      redshow
 
 ; ---------------------------------------------------------------- sound
 ;
@@ -2004,21 +1989,9 @@ SPIKEWIPE       equ     31
 ; trigger 1 to slicetimer round and round, the jaws shut at slicerExt and
 ; open again from slicerRet; bit 7 is the blood, once it has cut someone.
 
-SLICEREXT       equ     2
-
-; A block's picture is laid a band a frame and shown when the last of them is
-; in, so the jaws the state asks for at slicerExt only reach the screen four
-; frames later -- and the state waits for them (aspending), so it steps to
-; slicerExt + 1 in the very frame they appear.  That, and not slicerExt, is
-; the state the jaws are shut ON THE SCREEN, and it is what bars him, what
-; cuts him and what the clash is heard at.  Reading slicerExt for those had
-; the blade cutting him while the way still looked open, and standing shut
-; and harmless after.
-
-SLICERSHUT      equ     SLICEREXT + 1
+SLICEREXT       equ     2               ; shut: it bars, cuts and clashes
 SLICERRET       equ     6
 SLICETIMER      equ     15
-SLICERWIPE      equ     63
 
 ; DRAWSLICERA in FRAMEADV.S: the jaws as the state has them -- the bottom
 ; one at Ay, smeared once it has cut, and the top one slicergap over it.
@@ -2060,11 +2033,11 @@ smtop:          pop     bc
 
 ; Which picture the state is, out of slicerseq.  POP has five of them and
 ; moves the jaws every frame; this port has two, shut and open, and nothing
-; in between.  The three middle pictures cost three more whole-block redraws
-; a cycle than a room with three slicers in it can pay for -- a block is
-; 237000 T and a frame 212724 -- and their whole effect is the jaws being
-; seen part way.  The two that are left are the two that matter: the state
-; the jaws cut at, and everything else.
+; in between -- each is a tile of the room's made when it is built (sl_make)
+; and the three middle ones would be three more a slicer, in a bank with no
+; room for them; all they show is the jaws part way.  The two that are left
+; are the two that matter: the state the jaws cut at, and everything else.
+; slpic makes the same choice.
 ;
 ; Out: C = the picture, 0 to 4, and the background bank in.
 

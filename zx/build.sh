@@ -130,6 +130,8 @@ assert sym['BAND_BYTES'] <= rb, 'полоса принцессы больше к
 print('буферы под загрузчиком %04X..%04X, %d байт'
       % (sym['LOWBUF'], sym['LOWTOP'], sym['LOWTOP'] - sym['LOWBUF']))
 assert sym['LOWTOP'] <= sym['stubs'], 'буферы под загрузчиком налезли на код'
+assert sym['SLEND'] <= sym['CODE1'], 'картинки ножниц налезли на код банка холста'
+assert sym["SLCOMMON"] + 4 * sym["SLBAND"] <= 0x10000 - 12, 'ножницы не влезли за код банка холста'
 assert sym['LOWSTACK'] >= 23755, 'буферы под загрузчиком залезли в переменные ПЗУ'
 assert sym['blockbot'] & 0xff <= 0xff - 4, 'blockbot не на одной странице'
 assert sym['SYSVARS'] >= 23675 and sym['SYSVARS'] + sym['SYSVARLEN'] <= sym['LOWVARS'], 'переменные в системных налезли'

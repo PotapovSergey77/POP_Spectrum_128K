@@ -3516,10 +3516,8 @@ aonostart:      xor     a
                 ld      (rqstart), a
                 ret
 aonotx:         cp      BG_FLASK        ; the bubbles: the block's own band
-                jr      z, aoone        ; they are in, and only that
-                cp      BG_SLICER       ; and a slicer's jaws keep to its own
-                jr      nz, aonotf      ; block as well
-aoone:          call    onscreen
+                jr      nz, aonotf      ; they are in, and only that
+                call    onscreen
                 ret     nz
                 call    trrowcol
                 call    rq_block

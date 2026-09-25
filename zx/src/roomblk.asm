@@ -608,7 +608,11 @@ newroom:        ld      hl, CANVAS      ; the whole canvas: see rbwipe
                 ld      bc, PRISTLEN
                 ldir
 nrp1:           call    compose
+                ld      hl, sl_make     ; the slicers' pictures, while the
+                call    c1jp            ; canvas is whole: see sl_make
                 call    convert
+                ld      hl, sl_keep
+                call    c1jp
                 call    build_fore
                 call    floormasks
                 call    maketorches

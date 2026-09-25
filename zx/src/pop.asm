@@ -179,8 +179,8 @@ mainrun:        ld      a, (FRAMES)
 
                 call    camera
                 call    rq_shows        ; blocks redrawn last frame, to show
-                call    page_canvas     ; the sequences live there, and
-                call    checkalert      ; EnemyAlert, before either moves
+                ld      hl, c1anim      ; the trans list first, as NextFrame
+                call    c1jp            ; has it, and EnemyAlert
                 call    input_step      ; everything down to here starts one
                 call    step_seq
                 call    firstguard
@@ -199,8 +199,8 @@ mainrun:        ld      a, (FRAMES)
                 call    nextroom        ; before anything reads his row again
                 call    checkpress
                 call    shakeloose
-                ld      hl, c1anim      ; the trans list, and the rest of
-                call    c1jp            ; NextFrame that lives in CODE1
+                ld      hl, c1post      ; the rest of NextFrame that lives
+                call    c1jp            ; in CODE1
                 call    animmobs
                 call    draw_chars
                 call    page_art
@@ -453,20 +453,26 @@ vwany:          ld      a, (vwcnt)
 ; In: A = the first, B = how many.
 
 vw_mark:        ld      c, a
-vm1:            ld      a, c
-                cp      192
-                jr      nc, vm2
-                call    vwbit
-                ld      d, a
+                call    vwbit           ; the first row's bit, and each next
+                ld      d, a            ; row the next one along: a slicer's
+vm1:            ld      a, c            ; fifty eight rows were 15000 T
+                cp      192             ; worked out one by one
+                ret     nc
+                ld      a, d
                 and     (hl)
                 jr      nz, vm2         ; wanted already
                 ld      a, d
                 or      (hl)
                 ld      (hl), a
+                push    hl
                 ld      hl, vwcnt
                 inc     (hl)
+                pop     hl
 vm2:            inc     c
-                djnz    vm1
+                rrc     d
+                jr      nc, vm3
+                inc     hl
+vm3:            djnz    vm1
                 ret
 
 ; A = a row.  Out: HL = its byte of vwmap, A = its bit.
@@ -2137,9 +2143,9 @@ ck1:            ld      (tempby), a
                 ld      (cccode), a
                 ld      a, c
                 cp      BG_SLICER       ; a slicer is in his way only while
-                jr      nz, cknotsl     ; its jaws are shut on the screen
-                ld      a, (tilestate)
-                cp      SLICERSHUT
+                jr      nz, cknotsl     ; its jaws are shut -- and COLL.S
+                ld      a, (tilestate)  ; asks it without masking the blood
+                cp      SLICEREXT       ; off: a smeared one never bars
                 jr      nz, ccno
                 jr      ckyes
 cknotsl:        cp      BG_GATE
@@ -6185,17 +6191,29 @@ nextlevkey:     ld      bc, KEYROW_QT
 
 qdown           equ     SYSVARS + 33    ; the key as it was last frame
 
-; NextFrame in TOPCTRL.S from the trans list on, as far as this port keeps
-; it here: animtrans, then the rest of what is done once a frame for the
-; room and the kid in it.  From the main loop, by c1jp; kid_death goes last,
-; as its way out may page the art bank in.
+; NextFrame in TOPCTRL.S, the parts of it this port keeps here, from the main
+; loop by c1jp.  animtrans and bonesrise come first, ahead of the kid, as they
+; do in NextFrame: what the trans list moves this frame is what he meets this
+; frame.  Run after him, as it was, a slicer triggered by his step had moved
+; on a frame before he could see it, and the jaws that barred him were the
+; ones of the frame before.  Then checkalert, before either of them moves,
+; and the canvas bank left in for the control code.
 
-c1anim:         call    nextlevkey      ; a test key first of all
-                ld      hl, animtrans
+c1anim:         ld      hl, animtrans
                 call    c1far
                 call    bonesrise
+                ld      hl, checkalert  ; the sequences are in the canvas bank
+                call    c1mod
+                jp      page_canvas
+
+; And after the two of them have moved: CHECKSLICE (DoKid's last), the
+; sounds, the slicers' pictures brought up to their states, and kid_death
+; last, as its way out may page the art bank in.
+
+c1post:         call    nextlevkey      ; a test key first of all
                 call    checkslice
                 call    addsfx
+                call    sl_sync
 
 ; When he has died and stopped moving, the death song: heroic if he fell in a
 ; fight.  CharLife goes past nought so it is asked for once.
@@ -6351,13 +6369,60 @@ tkwipe:         ld      (redh), a
                 ld      (rqprio), a
                 ld      hl, ao_masks    ; and its floor masks, a flask's not
                 call    c1far           ; being a floor's
-                ld      hl, unfront     ; and the bottle is not in front of
-                call    c1far           ; him any more
+                call    unfront         ; and the bottle is not in front of
+                                        ; him any more
                 ld      hl, shown_attrs ; and a flask's colour goes with it,
                 call    c1far           ; from a view being made as well
                 ld      a, (vwcam)
                 inc     a
                 ld      (vwatt), a
+                ret
+
+; A thing taken off block (blockcol, blockrow): its front piece -- the bottle
+; -- comes off the front list, height nought, so nothing is laid back over
+; him where it stood.  Its entry is the one whose column is the block's and
+; whose foot is within the block's floor line.
+
+unfront:        call    trrowcol        ; the redraws moved blockcol on
+                ld      a, (nfront)
+                or      a
+                ret     z
+                ld      b, a
+                ld      a, (blockcol)
+                add     a, a
+                add     a, a
+                ld      c, a            ; C = the block's own byte column
+                ld      a, (blockrow)
+                inc     a
+                ld      e, a
+                ld      d, 0
+                ld      hl, blockbot
+                add     hl, de
+                ld      d, (hl)         ; D = its floor line
+                ld      hl, frontlist
+ufloop:         ld      a, (hl)
+                sub     c
+                cp      4
+                jr      nc, ufnext
+                inc     hl
+                ld      a, d
+                sub     (hl)
+                dec     hl
+                cp      9
+                jr      nc, ufnext
+                push    hl
+                inc     hl
+                inc     hl
+                inc     hl
+                inc     hl
+                ld      (hl), 0
+                pop     hl
+ufnext:         inc     hl
+                inc     hl
+                inc     hl
+                inc     hl
+                inc     hl
+                djnz    ufloop
                 ret
 
 ; ---------------------------------------------------------------- slicers
@@ -6367,6 +6432,13 @@ tkwipe:         ld      (redh), a
 ; they are retracted with him gone -- or dead, unless they are the pair that
 ; cut him -- the slicer comes off the trans list.  A = its id, as trobat
 ; read it, gone with the paging: aoid has it.
+;
+; One step a frame and slicetimer steps round, as MOVER.S has it, and
+; nothing waits: the picture is sl_sync's, which keeps up with the state in
+; the frame the state is reached.  It used to be a block redraw through the
+; queue, four frames of bands a picture, and the state held still until the
+; picture was in -- so the jaws chopped at a pace of the queue's and not the
+; Apple's, later than he triggered them and further apart.
 
 SLICERSYNC      equ     3               ; frames between one and the next
 
@@ -6375,23 +6447,8 @@ aoslicer:       ld      a, (aoid)
                 jp      nz, stopobj     ; none of animobj's: off the list
                 ld      a, (trdirec)
                 or      a
-                jp      m, asdone       ; stopped: only the redraw is left
-                call    aspending       ; its picture not yet drawn: the jaws
-                jp      nz, aoquiet     ; wait for it
-
-; And the frame before they shut they wait for any other slicer to be done
-; with the queue.  A room with three of them had all three standing shut at
-; once while the queue crawled through their three blocks -- and shut is the
-; one position they must not be caught waiting in, since it both bars him
-; and cuts him.  Waiting open costs nothing and is safe.
-
-                ld      a, (trobst)
-                and     0x7f
-                cp      SLICEREXT - 1
-                jr      nz, asframe
-                call    asother
-                jp      nz, aoquiet
-asframe:        ld      a, (trobst)     ; the next frame, round and round,
+                jp      m, asdone       ; stopped: nothing moves
+                ld      a, (trobst)     ; the next frame, round and round,
                 ld      b, a            ; the blood kept
                 and     0x7f
                 inc     a
@@ -6404,7 +6461,7 @@ as1:            ld      c, a
                 or      c
                 ld      (trobst), a
                 ld      a, c
-                cp      SLICERSHUT      ; the jaws meeting, seen and heard
+                cp      SLICEREXT       ; the jaws meeting
                 jr      nz, as2
                 ld      a, SND_SLICER   ; the CPC's, for JawsClash
                 call    addsound
@@ -6431,119 +6488,435 @@ asoff:          ld      a, (trobst)     ; retracted, it comes off the list
                 cp      SLICERRET
                 jr      c, asdone
                 call    stopobj
-asdone:         ld      a, (trobst)     ; with two pictures and nothing between
-                and     0x7f            ; them, only the two frames that swap
-                sub     SLICEREXT       ; one for the other are ever drawn:
-                cp      2               ; the jaws meeting, and their opening
-                jp      nc, aodone      ; again the frame after
-; And it goes first in the line.  The view being made comes before the queue,
-; and walking across a room puts a view due on seven frames in eight, so a
-; slicer that waited its turn took thirty frames to lay its four bands and
-; stood shut for all of them.  That is only affordable because the wait above
-; lets one slicer chop at a time: three of them jumping the queue at once was
-; the whole frame gone.
 
-                ld      a, 1
+; The state goes back, and nothing is queued: sl_sync draws it.
+
+asdone:         xor     a
                 ld      (redwant), a
-                ld      (rqprio), a
-                ld      a, SLICERWIPE
-                ld      (redh), a
                 ld      hl, aodone
+                jp      c1far
+
+; The pictures.  A slicer has two, the jaws open and the jaws shut (see
+; slicer_x), and the shut one smeared once it has cut.  They are made with
+; the room, in the canvas -- the block's own passes run again over its band,
+; the way a block redraw runs them -- and kept as what each changes of the
+; open one: SLROWS rows of the four room bytes the block's twenty eight
+; pixels lie in.  A picture is then those bits flipped in the room and the
+; block shown, 55000 T or so, where a block redraw is 237000.
+;
+; The room is always built with them open, and slshow says what each shows.
+; A slice changes the picture twice, the jaws shutting at slicerExt and
+; opening the frame after -- the one frame they are shut on the Apple too --
+; and three times if the blood is spilt while they are shut.
+
+SLMAX           equ     3               ; the most any room of POP's has
+SLROWS          equ     58              ; the rows the jaws, their front and
+SLTOP           equ     62              ; the smear change: the first is
+SLTILE          equ     4 * SLROWS      ; SLTOP up from the floor line
+SLTILES         equ     PRISTINE + PRISTLEN     ; two to a slicer, in the
+SLEND           equ     SLTILES + 2 * SLTILE * SLMAX    ; canvas bank
+SLTEMP          equ     MASKCAN         ; and where they are made, while
+                                        ; the room is built: see sl_make
+
+slnum:          db      0               ; how many the room has
+slloc:          ds      SLMAX           ; their blocks
+slshow:         ds      SLMAX           ; and the picture each shows
+slslot:         db      0
+
+; A = a state.  Out: A = what it shows -- nought open, 1 shut, 2 shut and
+; smeared -- as slicer_x draws it.
+
+slpic:          ld      c, a
+                and     0x7f
+                cp      SLICEREXT
+                ld      a, 0
+                ret     nz
+                ld      a, c
+                rlca
+                and     1
+                inc     a
+                ret
+
+; Every frame, once the slicers and the characters have moved: a slicer whose
+; picture is not its state's is brought up to it -- in the room, the working
+; copy and a view being made -- before he is drawn, so the front goes over
+; him in the frame the jaws shut.
+
+sl_sync:        ld      a, (slnum)
+                or      a
+                ret     z
+                ld      b, a
+                ld      c, 0
+ssloop:         push    bc
+                ld      a, c
+                ld      (slslot), a
+                ld      hl, slloc
+                call    slat
+                ld      e, (hl)
+                ld      d, 0
+                ld      hl, roomids + 30
+                add     hl, de
+                ld      a, (hl)         ; its state, as the room has it
+                call    slpic
+                ld      hl, slshow
+                call    slat
+                cp      (hl)
+                call    nz, slturn
+                pop     bc
+                inc     c
+                djnz    ssloop
+                ret
+
+; HL = a table, (slslot) = the slot.  Out: HL on its entry.  A kept.
+
+slat:           push    af
+                ld      a, (slslot)
+                add     a, l
+                ld      l, a
+                jr      nc, sla1
+                inc     h
+sla1:           pop     af
+                ret
+
+; HL = its slshow, A = the picture it is to show.  The whole change goes in
+; one pass: to open, the old picture's bits; from open, the new one's;
+; between shut and smeared, both.
+
+slturn:         ld      c, (hl)
+                ld      (hl), a
+                or      a
+                jr      nz, slt1
+                ld      a, c            ; back to open: the old one's
+                ld      c, 0
+slt1:           push    bc
+                call    sltile
+                ld      de, imgbuf
+                ld      bc, SLTILE
+                ldir
+                pop     bc
+                ld      a, c            ; and the other's, if both are shut
+                call    slxorin
+                ld      hl, slloc
+                call    slat
+                ld      a, (hl)
+                ld      (trloc), a
+                call    trrowcol        ; its row and column
+                ld      a, (blockrow)
+                ld      hl, blockbot + 1
+                add     a, l
+                ld      l, a
+                ld      a, (hl)
+                sub     SLTOP + 1 - SLROWS      ; redshow's band: SLROWS
+                ld      (dy), a                 ; rows ending at the last
+                sub     SLROWS - 1              ; that changes
+                push    af
+                call    roomrow
+                ld      a, (blockcol)   ; seven room bytes to two blocks
+                ld      c, a
+                add     a, a
+                add     a, a
+                add     a, a
+                sub     c
+                srl     a
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ex      de, hl          ; DE = the tile's first room byte
+                ld      a, (redh)
+                push    af
+                ld      a, SLROWS
+                ld      (redh), a
+                xor     a
+                ld      (redwide), a
+                ld      hl, slxor       ; flipped, and shown
                 call    c1far
-                xor     a
-                ld      (rqprio), a
-                jp      page_pixels
+                pop     af
+                ld      (redh), a
+                pop     af              ; and a view being made wants them
+                ld      b, SLROWS
+                jp      vw_mark
 
-; A block's redraw is not done where it is asked for: it is queued, and the
-; queue lays one band of RQBAND rows a frame, so a whole block takes four.
-; The jaws move every frame, and the pass took its four bands from four
-; different pictures -- worse, a pass asked for again while under way starts
-; over, so with a slicer asking every frame it never finished at all and the
-; jaws were never once seen to meet.
-;
-; Drawing the block whole and at once instead is not open to us: one costs
-; 237000 T, and a frame is 212724.  So the jaws hold still until the picture
-; they are in has been drawn.  A slicer therefore chops more slowly than the
-; Apple's, by as much as the queue is behind -- but every position of the
-; jaws is seen whole, which is what a shut slicer being a wall depends on.
-;
-; Out: NZ while this slicer's block is still in the queue.
+; A = a picture, shut or smeared.  Out: HL = its tile, two to a slot.
 
-aspending:      call    trrowcol
-                ld      a, (rqn)
-                or      a
-                ret     z
-                ld      b, a
-                ld      hl, rqq
-asp1:           ld      a, (blockrow)
-                cp      (hl)
-                jr      nz, asp2
-                inc     hl
-                ld      a, (blockcol)
-                cp      (hl)
-                dec     hl
-                jr      z, aspyes
-asp2:           inc     hl              ; four bytes to an entry
-                inc     hl
-                inc     hl
-                inc     hl
-                djnz    asp1
-                xor     a
-                ret
-aspyes:         ld      a, 1
-                or      a
+sltile:         ld      b, a
+                ld      a, (slslot)
+                add     a, a
+                add     a, b
+                ld      b, a            ; the tiles before it, and one
+                ld      hl, SLTILES - SLTILE
+                ld      de, SLTILE
+sxi1:           add     hl, de
+                djnz    sxi1
                 ret
 
-; Another slicer's block waiting in the queue?  It is slicers that are looked
-; for and not a queue that is busy: the queue is shared with gates, plates,
-; the exit door and a flask's bubbles, and screen five of level three has a
-; gate and a slicer in it -- a gate takes forty frames to rise, and the jaws
-; would have stood open for all of them.
-;
-; Out: NZ when another slicer is waiting.  Its own block is never one of
-; them: aspending has already found nothing of its own in the queue.
+; A = a picture: its tile, if it has one, flipped into imgbuf.
 
-asother:        ld      a, (rqn)
-                or      a
+slxorin:        or      a
                 ret     z
-                ld      b, a
-                ld      hl, rqq
-aso1:           push    bc
-                push    hl
-                ld      a, (hl)         ; the row, and the ceiling's is -1
-                cp      3
-                jr      nc, aso2
+                call    sltile
+                ld      de, imgbuf
+                ld      bc, SLTILE
+sxi2:           ld      a, (de)
+                xor     (hl)
+                ld      (de), a
                 inc     hl
-                ld      c, (hl)         ; and the column
-                call    mul10           ; ten blocks to a row
+                inc     de
+                dec     bc
+                ld      a, b
+                or      c
+                jr      nz, sxi2
+                ret
+
+; The room's slicers and their pictures, called by newroom between compose
+; and convert, with the whole canvas there.  For each, the block's band is
+; wiped and the passes that are the same whatever the jaws do -- C, B, D and
+; their moving parts -- run again over it once, as a block redraw runs them;
+; then A and the front for each picture over a copy of that.  Its change
+; from the open one is taken in the canvas's own bytes, where the rest of the
+; group is nought, and packed the way convert packs a row: the packing only
+; moves bits about, so it packs a change as well as a picture.  The changes
+; wait in SLTEMP, past CODE1, where the floor masks go later, and sl_keep
+; puts them in SLTILES once convert has done with the canvas they lie over.
+;
+; The room is built with the jaws open.  Compose drew them as the state had
+; them: open, that is the open picture, and the canvas goes back to it after.
+
+SLBAND          equ     SLTOP + 1               ; the block's band, its rows
+SLORIG          equ     SLTEMP + 2 * SLTILE * SLMAX     ; the open picture,
+SLCOMMON        equ     SLORIG + 4 * SLBAND     ; and the passes before A,
+                                                ; four canvas bytes a row
+
+sl_make:        xor     a
+                ld      (slnum), a
+                ld      c, a            ; the block
+slm1:           ld      hl, roomids
                 ld      b, 0
-                add     hl, bc
-                ld      bc, roomids
                 add     hl, bc
                 ld      a, (hl)
                 and     0x1f
                 cp      BG_SLICER
-                jr      z, aso3
-aso2:           pop     hl
-                ld      bc, 4           ; four bytes to an entry
+                jr      nz, slm2
+                ld      a, (slnum)
+                cp      SLMAX
+                ret     nc
+                ld      (slslot), a
+                inc     a
+                ld      (slnum), a
+                push    bc
+                ld      a, c
+                ld      hl, slloc
+                call    slat
+                ld      (hl), a
+                ld      hl, slshow
+                call    slat
+                ld      (hl), 0
+                ld      (trloc), a
+                call    slmake1
+                pop     bc
+slm2:           inc     c
+                ld      a, c
+                cp      30
+                jr      c, slm1
+                ret
+
+; The slot (slslot), at block (trloc).
+
+slmake1:        call    trrowcol
+                ld      a, (trloc)
+                ld      e, a
+                ld      d, 0
+                ld      hl, roomids + 30
+                add     hl, de
+                ld      (sltarg), hl
+                ld      a, (hl)
+                push    af              ; its state, put back after
+                call    rb_setup        ; dy, xco and the blocks beside it
+                ld      a, (dy)
+                ld      (bandbot), a
+                sub     SLTOP
+                ld      (bandtop), a
+                call    canvasrow
+                ld      a, (xco)
+                ld      e, a
+                ld      d, 0
+                add     hl, de
+                ld      (slcan), hl     ; the block's first byte in the band
+                ld      de, SLORIG      ; as compose left it
+                call    slsave
+                ld      hl, (slcan)     ; wiped, and what does not move
+                ld      b, SLBAND
+                ld      de, CANVAS_W - 3
+sk1:            xor     a
+                ld      (hl), a
+                inc     hl
+                ld      (hl), a
+                inc     hl
+                ld      (hl), a
+                inc     hl
+                ld      (hl), a
+                add     hl, de
+                djnz    sk1
+                ld      hl, slpasses
+sk2:            ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      a, d
+                or      e
+                jr      z, sk3
+                push    hl
+                ex      de, hl
+                call    c1far
+                pop     hl
+                jr      sk2
+sk3:            ld      de, SLCOMMON
+                call    slsave
+                pop     af
+                push    af
+                call    slpic
+                or      a
+                jr      z, sk5
+                xor     a               ; not open: the open picture drawn,
+                call    slpaint         ; for the others to be taken from
+                ld      de, SLORIG
+                call    slsave
+sk5:            ld      a, (slslot)     ; two changes to a slot
+                add     a, a
+                ld      b, a
+                ld      hl, SLTEMP - SLTILE
+                ld      de, SLTILE
+                inc     b
+sk4:            add     hl, de
+                djnz    sk4
+                ld      (slrows), hl
+                ld      a, SLICEREXT
+                call    slpaint
+                call    slchange
+                ld      a, SLICEREXT + 0x80
+                call    slpaint
+                call    slchange
+                ld      hl, SLORIG      ; and the canvas back to open
+                ld      de, (slcan)
+                call    slback
+                pop     af
+                ld      hl, (sltarg)
+                ld      (hl), a
+                jp      rbband0
+
+; A = a state: the block's band as the passes before A left it, and A and
+; the front laid over it for that state.
+
+slpaint:        ld      hl, (sltarg)
+                ld      (hl), a
+                ld      hl, SLCOMMON
+                ld      de, (slcan)
+                call    slback
+                ld      hl, setblock    ; the state, as the passes read it
+                call    c1far
+                ld      hl, draw_a
+                call    c1far
+                ld      hl, draw_front
+                jp      c1far
+
+; The four bytes of the block down its band: out of the canvas to DE
+; (slsave), or from HL back into it at DE (slback).
+
+slsave:         ld      hl, (slcan)
+                ld      b, SLBAND
+ss1:            push    bc
+                ld      bc, 4
+                ldir
+                ld      bc, CANVAS_W - 4
                 add     hl, bc
                 pop     bc
-                djnz    aso1
-                xor     a
+                djnz    ss1
                 ret
-aso3:           pop     hl
+
+slback:         ld      b, SLBAND
+sb1:            push    bc
+                ld      bc, 4
+                ldir
+                ex      de, hl
+                ld      bc, CANVAS_W - 4
+                add     hl, bc
+                ex      de, hl
                 pop     bc
-                ld      a, 1
-                or      a
+                djnz    sb1
                 ret
 
-; Nothing of it has moved, so there is nothing to draw and nothing to put
-; back -- but the object stays on the list.
+; The canvas's picture against the open one, row by row down the tile: the
+; bits that differ, set in the block's half of a group whose other half is
+; nought, packed, and the room bytes the block lies in kept at (slrows),
+; which moves on to the next tile.
 
-aoquiet:        xor     a
-                ld      (redwant), a
-                ld      hl, aodone
-                jp      c1far
+slchange:       ld      hl, (slcan)
+                ld      (slcp), hl
+                ld      hl, SLORIG
+                ld      (slop), hl
+                ld      hl, cvbuf       ; the group: nought, and only the
+                ld      b, 8            ; block's half of it written after
+                xor     a
+sc1:            ld      (hl), a
+                inc     hl
+                djnz    sc1
+                ld      hl, cvbuf       ; an odd block is its second half,
+                ld      de, cvbuf + 8   ; and packed from its fourth byte
+                ld      a, (blockcol)
+                rrca
+                jr      nc, sc2
+                ld      hl, cvbuf + 4
+                ld      de, cvbuf + 11
+sc2:            ld      (slgh), hl
+                ld      (slgo), de
+                ld      b, SLROWS
+sc3:            push    bc
+                ld      hl, (slop)
+                ld      bc, (slcp)
+                ld      de, (slgh)
+                rept    4
+                ld      a, (bc)
+                xor     (hl)
+                ld      (de), a
+                inc     bc
+                inc     hl
+                inc     de
+                endm
+                ld      (slop), hl
+                ld      hl, CANVAS_W - 4
+                add     hl, bc
+                ld      (slcp), hl
+                ld      hl, cvbuf       ; packed
+                ld      de, cvbuf + 8
+                call    cv8to7
+                ld      hl, (slgo)
+                ld      de, (slrows)
+                ldi
+                ldi
+                ldi
+                ldi
+                ld      (slrows), de
+                pop     bc
+                djnz    sc3
+                ret
+
+slpasses:       dw      setblock, draw_c, draw_mc, draw_b, draw_mb
+                dw      draw_d, draw_md, 0
+
+sltarg:         dw      0               ; the block's state in roomids
+slcan:          dw      0
+slcp:           dw      0
+slop:           dw      0
+slgh:           dw      0               ; the block's half of the group
+slgo:           dw      0               ; and of it packed
+slrows:         dw      0
+
+; After convert: the changes into SLTILES, where sl_sync reads them.
+
+sl_keep:        ld      hl, SLTEMP
+                ld      de, SLTILES
+                ld      bc, 2 * SLTILE * SLMAX
+                ldir
+                ret
 
 ; ADDSLICERS in SUBS.S: every slicer on the row the character is on starts
 ; chopping -- the first at once, each of the rest slicersync frames behind
@@ -6646,7 +7019,7 @@ cksl1:          ld      hl, cdthis
                 jr      nz, cksl3
                 ld      a, (tilestate)
                 and     0x7f
-                cp      SLICERSHUT      ; shut on the screen?
+                cp      SLICEREXT       ; shut?
                 jr      nz, cksl3
                 pop     bc
                 jr      c1slice
