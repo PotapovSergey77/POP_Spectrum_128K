@@ -1010,11 +1010,13 @@ standing:       ld      a, (clrbtn)     ; a fresh click is "pick it up", and
                 jp      m, stgrab
 stback:         call    kid_engarde     ; an enemy in range: en garde
                 ret     nz
-                ld      a, (btn)
+                ld      a, (btn)        ; button up: a fresh push forward
+                or      a               ; runs, before anything else
+                jr      nz, stbtn
+                ld      a, (clrf)
                 or      a
-                jr      z, stnobtn
-
-                ld      a, (clrb)       ; button down
+                jp      m, do_startrun
+stbtn:          ld      a, (clrb)       ; then, button or not, the same three
                 or      a
                 jp      m, do_turn
                 ld      a, (clru)
@@ -1023,30 +1025,16 @@ stback:         call    kid_engarde     ; an enemy in range: en garde
                 ld      a, (clrd)
                 or      a
                 jp      m, do_down
-                ld      a, (jstkx)
+                ld      a, (jstkx)      ; and held forward: a run, button up,
+                or      a               ; a careful step on a fresh push with
+                ret     p               ; it down
+                ld      a, (btn)
                 or      a
-                ret     p
+                jr      z, do_startrun
                 ld      a, (clrf)
                 or      a
                 ret     p
                 jp      do_stepfwd
-
-stnobtn:        ld      a, (clrf)       ; button up
-                or      a
-                jp      m, do_startrun
-                ld      a, (clrb)
-                or      a
-                jp      m, do_turn
-                ld      a, (clru)
-                or      a
-                jp      m, do_up
-                ld      a, (clrd)
-                or      a
-                jp      m, do_down
-                ld      a, (jstkx)      ; or simply held forward
-                or      a
-                ret     p
-                jr      do_startrun
 
 ; No point starting a run into a wall, or he twitches on the spot.
 
@@ -1147,13 +1135,14 @@ hangbtn:        ld      a, (btn)
                                         ; ledge
                 ld      a, (charact)    ; hanging on the side of a block is
                 cp      6               ; hanging straight
-                ret     z
+                jr      z, hangcont
                 call    under_flags     ; hanging on the side of a block
                 cp      BLK_BLOCK
-                ret     nz
                 ld      a, SQ_HANGSTRAIGHT
-                jp      jumpseq
-
+                jp      z, jumpseq
+hangcont:       call    above_flags     ; the ledge crumbles away -- a loose
+                call    cmp_space       ; floor he hangs from falls: he falls
+                ret     nz              ; with it
 hangdrop:       jp      hang_release    ; in the fixed code: see there
 
 ; ------------------------------------------------------------------ crouching

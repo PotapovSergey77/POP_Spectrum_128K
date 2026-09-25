@@ -3531,14 +3531,15 @@ aonotf:         cp      BG_PRESSPLATE   ; a plate coming back up goes first too
                 jr      nz, aoplain     ; wobbles for four frames and settles,
 aoprio:         ld      a, 1            ; and a redraw that waits for the view
                 ld      (rqprio), a     ; to step arrives after it is over
-aoplain:        call    redplate
+aoplain:        call    redplate        ; the picture first: its corner in
+                ld      hl, mskwant     ; the block on the right stood there
+                ld      a, (hl)         ; for a third of a second behind the
+                ld      (hl), 0         ; masks.  A floor that has gone takes
+                or      a               ; its own wedge with it and gives one
+                call    nz, ao_masks    ; to the block on its right
                 xor     a
                 ld      (rqprio), a
-                ld      a, (mskwant)    ; a floor that has gone takes its own
-                or      a               ; wedge with it and gives one to the
-                ret     z               ; block on its right
-                xor     a
-                ld      (mskwant), a
+                ret
 ao_masks:       call    onscreen
                 ret     nz
                 call    trrowcol
