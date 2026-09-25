@@ -6918,6 +6918,40 @@ sl_keep:        ld      hl, SLTEMP
                 ldir
                 ret
 
+; bgdraw's BG_MASK, POP's mask opacity (MASKTAB in HRTABLES.S), which
+; maddfore lays a flask's bottle with: each pixel of the piece clears itself
+; and its neighbour either side, and then goes in.  Without it the floor's dither behind ran into the bottle, and the
+; handle and the bands of the tall one showed or not by which column it
+; stood in.  It is here, in CODE1, because bgdraw lays with the canvas
+; bank in: DE = the piece's row, HL = the canvas, B = how many bytes.
+
+bgpmask:        ld      c, 0            ; the halo the byte before spills
+bpk1:           push    bc              ; B bytes left, C that halo
+                ld      a, (de)
+                ld      b, a            ; B = its pixels, bits 7 to 1
+                add     a, a            ; each one's left neighbour
+                or      b
+                or      c
+                ld      c, a
+                ld      a, b            ; and right: pixel six's lands on
+                srl     a               ; the spare bit
+                or      c
+                ld      c, a            ; C = the halo
+                cpl
+                or      1               ; the canvas's spare bit alone
+                and     (hl)
+                or      b
+                ld      (hl), a
+                ld      a, c            ; pixel six's right neighbour is the
+                rrca                    ; next byte's pixel 0
+                and     0x80
+                inc     hl
+                inc     de
+                pop     bc
+                ld      c, a
+                djnz    bpk1
+                jp      bgrowskip
+
 ; ADDSLICERS in SUBS.S: every slicer on the row the character is on starts
 ; chopping -- the first at once, each of the rest slicersync frames behind
 ; it -- and one already in mid-slice is left alone.  His room is the one on

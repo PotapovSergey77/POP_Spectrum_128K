@@ -378,6 +378,8 @@ do_shad:        call    gd_swap
                 call    enemycoll
                 call    check_floor
                 call    do_fall
+                call    checkpress      ; a loose floor gives way under him
+                call    page_canvas     ; too; and it pages the blueprint in
                 call    checkspikes
                 call    checkimpale
 
@@ -1954,22 +1956,37 @@ sfxtimer:       db      0
 sfxacc:         db      0
 sfxprio:        db      0
 
-; addlowersound in SUBS.S: a gate going down creaks only where it is seen.
+; ADDLOWERSOUND in SUBS.S, line for line: on every other step of the bars
+; (the odd states), for a gate in the room on screen but not in its column
+; nine, or in column nine of the room to the left, whose bars stand at this
+; room's left edge -- and always for the gate of screen two of level three,
+; the one the plate by the three slicers opens, which is heard closing
+; wherever he runs to reach it.
 
-lowersound:     call    onscreen
-                jr      z, lsseen
-                ld      a, (links)      ; or hung in column nine of the room
-                ld      hl, trscrn      ; to the left, whose bars are the ones
-                cp      (hl)            ; at this room's left edge
-                ret     nz
-                call    trrowcol
+lowersound:     ld      a, (trobst)
+                rrca
+                ret     nc              ; the even states are quiet
+                ld      a, (curlev)
+                cp      2
+                jr      nz, ls1
+                ld      a, (trscrn)
+                cp      2
+                jr      z, lsyes        ; level three, screen two
+ls1:            call    trrowcol
+                ld      a, (links)      ; the room to the left?
+                ld      hl, trscrn
+                cp      (hl)
+                jr      nz, ls2
                 ld      a, (blockcol)
                 cp      9
                 ret     nz
-lsseen:         ld      a, (trobst)     ; and only as the bars move: a unit a
-                and     3               ; frame, drawn a pixel in four, slower
-                ret     nz              ; than they go up
-                ld      a, SND_LOWERINGGATE
+                jr      lsyes
+ls2:            call    onscreen
+                ret     nz
+                ld      a, (blockcol)
+                cp      9
+                ret     z
+lsyes:          ld      a, SND_LOWERINGGATE
                 jp      addsound
 
 ; ---------------------------------------------------------------- spikes
@@ -2371,7 +2388,7 @@ GREEN           equ     4
 
 ; DRAWFLASKA and SETUPFLASK: the bubbles over the bottle, a frame of them for
 ; the low five bits of its state, two bytes in and two pixels on -- three for
-; the tall bottles past the boost, whose bubbles are also four rows higher.
+; the tall bottles past the boost.
 ;
 ; Blocks are 28 pixels and colour cells 8, so a flask in an odd column stands
 ; four pixels further into its cells than one in an even column, and its
@@ -2379,11 +2396,12 @@ GREEN           equ     4
 ; and bubbles, goes five pixels to the left -- a byte back and two pixels on
 ; -- and every flask then has its bubbles in a single cell, which is the one
 ; its colour goes in; flask_front moves the bottle the same way.  And a tall
-; bottle's bubbles go another four rows up, into one cell row -- but not
-; potion five's, which drawfrnt gives the ordinary bottle: SETUPFLASK raises
-; them all the same, and they stood off its neck.  The bottle
-; itself stands two pixels lower, every one of them, so that its top is in
-; the cell row under the bubbles' and takes none of their colour.
+; bottle's bubbles go up into one cell row, seven rows (eight in the top
+; block row: see talltop) -- but not potion five's, which drawfrnt gives the
+; ordinary bottle: SETUPFLASK raises them all the same, and they stood off
+; its neck.  The bottle itself stands two pixels lower, every one of them,
+; so that its top is in the cell row under the bubbles' and takes none of
+; their colour.
 
 flask_ma:       ld      a, (state)
                 and     0x1f
@@ -2399,7 +2417,8 @@ flask_ma:       ld      a, (state)
                 dec     a
                 ld      c, a            ; C = which bubble, 0 to 2
                 ld      hl, BUBBLES + 256 * BUBMASK
-                ld      e, 0            ; E = how much higher
+                ld      de, 0x06ff      ; E = the tall bottle's rounding,
+                                        ; D what the short one adds back
                 ld      a, (state)
                 and     0xe0
                 jr      z, fmcont       ; empty
@@ -2409,14 +2428,14 @@ flask_ma:       ld      a, (state)
                 ld      hl, BUBBLES + 3 + 256 * (BUBMASK + 1)
                 cp      0xa0            ; potion five is in the ordinary
                 jr      z, fmcont       ; bottle, and bubbles at its height
-fmtall:         ld      e, 7            ; the tall bottle: the last line of
-                                        ; the pictures is empty, so seven up
-                                        ; keeps every dot in the cell row
-                                        ; above and brings them a line nearer
-                                        ; its neck
+fmtall:         ld      de, 0x00f8      ; the tall bottle: down to a cell
+                                        ; line six under the short one's --
+                                        ; seven up in the lower block rows,
+                                        ; eight in the top one: see talltop
 fmcont:         ld      a, (ay)
-                sub     14
-                sub     e
+                sub     20
+                and     e
+                add     a, d
                 ld      (yco), a
                 ld      b, 2            ; B = bytes in
                 ld      a, (blockcol)
@@ -2499,28 +2518,28 @@ bubble_poke:    call    trrowcol
                 ld      a, (hl)
                 ld      c, a            ; C = 0 to 2, or -1
                 ld      a, (trobst)     ; the potion: the tall bottles are
-                and     0xe0            ; seven rows higher, as flask_ma has
-                ld      de, 2           ; them, and past the boost a pixel on
+                and     0xe0            ; at the short ones' height, as flask_ma has
+                ld      de, 0x0102      ; them, and past the boost a pixel on
                 cp      0x40            ; -- potion five too, though its
                 jr      c, bpshort      ; bottle and its bubbles' height are
                 jr      z, bptall       ; the ordinary one's
                 dec     e               ; E = the shift into the byte
                 cp      0xa0
                 jr      z, bpshort
-bptall:         ld      d, 7
+bptall:         ld      d, talltop - blockbot   ; talltop's row: flask_ma
 bpshort:        ld      a, (blockcol)
                 rra
                 jr      nc, bpeven
                 inc     e               ; odd: a pixel further back in its cell
 bpeven:         ld      a, e
                 ld      (bpshift), a
-                ld      hl, blockbot + 1        ; the top row: 23 over the floor
-                ld      a, (blockrow)   ; line, and the rest higher -- the
-                add     a, l            ; table on one page
+                ld      hl, blockbot    ; the top row: 23 over the floor
+                ld      a, (blockrow)   ; line, or talltop's -- the tables
+                add     a, d            ; on one page
+                add     a, l
                 ld      l, a
                 ld      a, (hl)
                 sub     23
-                sub     d
                 ld      (rowy), a
                 ld      a, (blockcol)   ; its byte column, as flask_attrs has it
                 ld      b, a

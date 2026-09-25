@@ -28,7 +28,7 @@ APPLE_PX        equ     CANVAS_W * 7
 BG_AND          equ     0               ; the four ways a piece goes down
 BG_ORA          equ     1
 BG_STA          equ     2
-BG_XOR          equ     3
+BG_MASK         equ     3               ; POP's mask: a pixel's halo cleared
 
 page_bg:        ld      a, BANK_BG
                 jp      pageset
@@ -297,14 +297,6 @@ bgpsta:         ld      a, (de)
                 djnz    bgpsta
                 jr      bgrowskip
 
-bgpxor:         ld      a, (de)
-                xor     (hl)
-                ld      (hl), a
-                inc     hl
-                inc     de
-                djnz    bgpxor
-                jr      bgrowskip
-
 bgmand:         ld      a, (de)         ; a mask covers what an AND clears,
                 cpl                     ; what an ORA sets, and the whole
                 and     0xfe            ; rectangle of an STA
@@ -362,7 +354,7 @@ mul8l:          add     hl, hl
 mul8n:          djnz    mul8l
                 ret
 
-bgpict:         dw      bgpand, bgpora, bgpsta, bgpxor
+bgpict:         dw      bgpand, bgpora, bgpsta, bgpmask
 bgmasks:        dw      bgmand, bgpora, bgmsta, bgmsta
 
 bandtop:        db      0               ; the rows a draw may touch
@@ -1101,7 +1093,10 @@ draw_front:     call    page_bg
                 call    bgay
                 ld      c, BG_ORA
                 ld      a, (objid)
-                cp      BG_POSTS
+                cp      BG_FLASK        ; maddfore: the bottle with a halo
+                jr      nz, dfnotfl     ; cleared round it, as POP lays it
+                ld      c, BG_MASK
+dfnotfl:        cp      BG_POSTS
                 jr      z, dfsta
                 cp      BG_ARCHTOP2
                 jr      c, dfgo
@@ -1300,6 +1295,12 @@ LOWVARLEN       equ     20
 
 roomnum:        db      START_ROOM      ; the way into the level
 blockbot:       db      2, 65, 128, 191, 254
+; And for a tall bottle's bubbles, the same place in the table as a row's
+; floor line: 23 under their top row, which is the one that keeps all six of
+; them in the cell row flask_attrs colours -- seven over the short bottle's
+; in the lower two block rows, as they always were, and eight in the top
+; one, sixty five rows down, where seven ran them a row into the next.
+talltop:        db      34 + 23, 98 + 23, 162 + 23
 imgbuf:         ds      384             ; the largest piece is 378 bytes
 
 ; ---------------------------------------------------------------- repack
