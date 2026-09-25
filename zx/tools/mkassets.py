@@ -612,8 +612,7 @@ def main(argv):
     # The art bank is empty until the first room is built, and the title
     # screens are shown before that: they travel in it, packed, after the
     # signature, and are gone once the room goes over them.
-    intro_at, intro = titlescr.build(binout)
-    port = titlescr.port_blob(binout)
+    intro_at, intro, tail_at, tail = titlescr.build(binout)
     # And the CPC's music for them, after the screens: see cpcmusic.py.
     tunes = cpcmusic.tunes()
     tunes_off = len(SIG_ART) + len(intro)
@@ -897,9 +896,10 @@ def main(argv):
     # copy of the band it composes goes past the title screens.
     cut_room = rbintro - canvas
     cut, cutfixed, cutinc, cutstats = princessscr.build(canvas, cut_room)
-    # And after it on the tape, where start puts the room's code, the port's
-    # own credit after the title, packed on the splash: start swaps the two,
-    # and intro.asm unpacks it from where the room's code was.
+    # And after it on the tape, where start puts the room's code, the
+    # credits laid over the splash -- the Apple's two and the port's own
+    # after the title: start swaps the two, and intro.asm unpacks them from
+    # where the room's code was.  The art bank has the room for CODE1.
     assert canvas + len(cut) == rbintro
     open(os.path.join(binout, 'cutfixed.bin'), 'wb').write(cutfixed)
     # And PlayCut1, the princess waiting before level two: a tape block of
@@ -919,7 +919,8 @@ def main(argv):
     # unpacked once, at the start, and never again; and the canvas bank's
     # own code (CODE1) travels past the music, for start to put in place.
     clean_off = len(SIG_ART) + dict(intro_at)['splash']
-    splash_len = dict(intro_at)['presents'] - dict(intro_at)['splash']
+    offs = [off for _, off in intro_at] + [len(intro)]
+    splash_len = offs[offs.index(dict(intro_at)['splash']) + 1] - dict(intro_at)['splash']
     assert princessscr.BAND_ROWS * 32 <= splash_len,         'the princess band is longer than the splash it goes over'
     c1art = PAGE_WINDOW + len(SIG_ART) + len(intro)
     print('принцесса  комната %d, картинки %d (%d), в памяти %d; в банке 1 '
@@ -947,12 +948,14 @@ def main(argv):
            'CODE1_MAX   equ %d' % code1_max,
            'RBINTRO     equ %d' % rbintro,
            'CANVAS      equ %d' % canvas,
-           'PORTLEN     equ %d' % len(port),
+           'TAILLEN     equ %d' % len(tail),
            'sfxmap      equ %d' % sfxmap_at,
            'sfxtab      equ %d' % sfxtab_at,
            'sfxdata     equ %d' % sfxdata_at]
     for name, off in intro_at:
         inc.append('T_%-9s equ %d' % (name.upper(), PAGE_WINDOW + len(SIG_ART) + off))
+    for name, off in tail_at:       # from roomblk, which bg.inc cannot name
+        inc.append('T_%-9s equ %d' % (name.upper(), off))
     inc += cutinc
     inc.append('CUT_CLEAN_OFF equ %d' % clean_off)
     inc.append('C1ART       equ %d' % c1art)
@@ -998,7 +1001,7 @@ def main(argv):
     # all three whatever they hold.
     for i in (0, 1, 2):
         open(os.path.join(binout, 'bank_spr%d.bin' % (i + 1)), 'wb').write(
-            blobs[i] + SIG_SPR + (bytes(3) + cut + port if i == 2 else b''))
+            blobs[i] + SIG_SPR + (bytes(3) + cut + tail if i == 2 else b''))
 
     # Shifting a row bit by bit was costing more than the whole rest of the
     # frame, so it goes through tables instead: for a shift of s, hi[s][b] is

@@ -1303,25 +1303,32 @@ def unpack(data, base=None):
 
 # The screens intro.asm shows, in the order they are packed.
 INTRO = [('splash', None), ('presents', 'splash'), ('byline', 'splash'),
-         ('title', 'splash'), ('prolog', None), ('sumup', 'prolog')]
+         ('title', 'splash'), ('prolog', None), ('sumup', 'prolog'),
+         ('port', 'splash')]
+# Those that ride on the tape behind bank 1's block rather than in the art
+# bank: start leaves them where the room's code goes, which is free while the
+# titles run up to the princess -- see mkassets.py.
+TAIL = ('presents', 'byline', 'port')
 # The story's end on its beginning: the same border, and three quarters of
 # the screen the same.  intro.asm lays the beginning down again under it,
 # out of sight, and the CPC's music has the room that saves in the bank.
 
 
 def intro_blob():
-    """[(name, offset)], and the packed screens one after another."""
-    blob = bytearray()
-    at = []
+    """[(name, offset)] and the packed screens one after another, for the
+    art bank; and the same for the tail."""
+    blobs = {False: bytearray(), True: bytearray()}
+    ats = {False: [], True: []}
     screens = {}
     for name, base in INTRO:
         screens[name] = screen(name)
         b = screens[base] if base else None
         data = pack(screens[name], b)
         assert unpack(data, b) == screens[name], name
-        at.append((name, len(blob)))
-        blob += data
-    return at, bytes(blob)
+        tail = name in TAIL
+        ats[tail].append((name, len(blobs[tail])))
+        blobs[tail] += data
+    return ats[False], bytes(blobs[False]), ats[True], bytes(blobs[True])
 
 
 def build(cache_dir):
@@ -1334,34 +1341,20 @@ def build(cache_dir):
         h.update(open(f, 'rb').read())
     key = h.hexdigest()[:16]
     bpath = os.path.join(cache_dir, 'intro.%s.bin' % key)
+    tpath = os.path.join(cache_dir, 'intro.%s.tail.bin' % key)
     jpath = os.path.join(cache_dir, 'intro.%s.json' % key)
-    if os.path.exists(bpath) and os.path.exists(jpath):
-        return [tuple(x) for x in json.load(open(jpath))], open(bpath, 'rb').read()
-    at, blob = intro_blob()
+    if all(os.path.exists(p) for p in (bpath, tpath, jpath)):
+        at, tat = json.load(open(jpath))
+        return ([tuple(x) for x in at], open(bpath, 'rb').read(),
+                [tuple(x) for x in tat], open(tpath, 'rb').read())
+    at, blob, tat, tail = intro_blob()
     for old in os.listdir(cache_dir):
         if old.startswith('intro.'):
             os.remove(os.path.join(cache_dir, old))
     open(bpath, 'wb').write(blob)
-    json.dump(at, open(jpath, 'w'))
-    return at, blob
-
-
-def port_blob(cache_dir):
-    """The port's credit packed on the splash, worked out once as build()
-    works out the rest."""
-    import hashlib
-    h = hashlib.sha1()
-    h.update(open(poptitles.DISK, 'rb').read())
-    for f in (__file__, poptitles.__file__):
-        h.update(open(f, 'rb').read())
-    path = os.path.join(cache_dir, 'intro.port.%s.bin' % h.hexdigest()[:16])
-    if os.path.exists(path):
-        return open(path, 'rb').read()
-    splash = screen('splash')
-    data = pack(screen('port'), splash)
-    assert unpack(data, splash) == screen('port')
-    open(path, 'wb').write(data)
-    return data
+    open(tpath, 'wb').write(tail)
+    json.dump([at, tat], open(jpath, 'w'))
+    return at, blob, tat, tail
 
 
 def main(argv):

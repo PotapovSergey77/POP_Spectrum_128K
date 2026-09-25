@@ -2991,7 +2991,13 @@ addmob:         ld      a, (nummob)     ; and on to the list, if there is room
 
 ; ---- one step of everything falling ----
 
-animmobs:       ld      a, (nummob)
+animmobs:       ld      a, (rqn)        ; a floor that has just given way
+                or      a               ; stays where it was, over its own
+                jr      z, anm0         ; picture, until the blocks it leaves
+                ld      a, (rqq + 3)    ; are drawn without it: while the line
+                rla                     ; has pictures going first, nothing
+                ret     c               ; falls
+anm0:           ld      a, (nummob)
                 or      a
                 ret     z
                 ld      b, a
@@ -3531,15 +3537,13 @@ aonotf:         cp      BG_PRESSPLATE   ; a plate coming back up goes first too
                 jr      nz, aoplain     ; wobbles for four frames and settles,
 aoprio:         ld      a, 1            ; and a redraw that waits for the view
                 ld      (rqprio), a     ; to step arrives after it is over
-aoplain:        call    redplate        ; the picture first: its corner in
-                ld      hl, mskwant     ; the block on the right stood there
-                ld      a, (hl)         ; for a third of a second behind the
-                ld      (hl), 0         ; masks.  A floor that has gone takes
-                or      a               ; its own wedge with it and gives one
-                call    nz, ao_masks    ; to the block on its right
-                xor     a
-                ld      (rqprio), a
-                ret
+aoplain:        call    redplate        ; the pictures, going first -- a
+                xor     a               ; floor that has gone waits for them:
+                ld      (rqprio), a     ; see animmobs -- and after them the
+                ld      hl, mskwant     ; masks: a floor that has gone takes
+                or      (hl)            ; its own wedge with it and gives one
+                ld      (hl), 0         ; to the block on its right
+                ret     z
 ao_masks:       call    onscreen
                 ret     nz
                 call    trrowcol
@@ -3564,7 +3568,7 @@ aosword:        call    onscreen
                 jr      z, aoswnew
                 ld      (trobst), a
                 cp      1
-                jr      nz, aodone
+                jp      nz, aodone
                 jr      aoswred
 aoswnew:        ld      a, r
                 and     0x3f

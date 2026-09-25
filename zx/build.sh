@@ -72,7 +72,7 @@ print('принцесса 1: блок %d байт, код %04X..%04X, свобо
 assert csym['cut1end'] <= sym['roomblk'], 'принцесса 1 налезла на постройку комнаты'
 assert 0xC000 + len(block) <= csym['CUT1_LOW'], 'принцесса 1 не влезла в банк'
 assert csym['RB1LEN'] <= 3275
-assert sym['PORTLEN'] <= sym['RB1LEN'], 'надпись порта длиннее кода постройки комнаты'
+assert sym['TAILLEN'] <= sym['RB1LEN'], 'надписи заставки длиннее кода постройки комнаты'
 at = sym['cut1len'] + 1 - base          # levelgo's LD-BYTES length
 data = data[:at] + len(block).to_bytes(2, 'little') + data[at + 2:]
 mod = data[sym['MODORG'] - base:sym['modend'] - base]
@@ -85,6 +85,7 @@ art = open('build/bin/bank_art.bin', 'rb').read()
 assert 0xC000 + len(art) == sym['C1ART'], 'банк заставки не той длины'
 assert sym['C1ART'] + len(c1) <= 0x10000 - 12, 'код банка холста не влез в банк заставки'
 assert len(c1) <= sym['RB1LEN'], 'код банка холста длиннее кода постройки комнаты'
+assert sym['c1end'] <= sym['MODORG'], 'код банка холста налез на управление в образе программы'
 open('build/bin/bank_art.bin', 'wb').write(art + c1)
 print('код банка холста %04X..%04X, %d байт, свободно там %d'
       % (sym['CODE1'], sym['c1end'], len(c1), sym['CODE1_MAX'] - len(c1)))

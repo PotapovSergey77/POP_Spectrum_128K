@@ -93,7 +93,7 @@ LOWVARS         equ     23734
 
 SYSLOW          equ     0x5C0B
 SYSVARS         equ     23675
-SYSVARLEN       equ     58
+SYSVARLEN       equ     59
 
 SCREEN          equ     16384
 FRAMES          equ     23672           ; the ROM's own count of interrupts,
@@ -138,9 +138,6 @@ X_MAX           equ     320
 
 start2:         call    repaint
                 call    draw_chars
-                call    page_art
-                call    hide_floor
-                call    hide_behind
                 ld      a, (FRAMES)
                 ld      (frstart), a
                 ei
@@ -202,10 +199,8 @@ mainrun:        ld      a, (FRAMES)
                 ld      hl, c1post      ; the rest of NextFrame that lives
                 call    c1jp            ; in CODE1
                 call    animmobs
-                call    draw_chars
-                call    page_art
-                call    hide_floor
-                call    hide_behind
+                call    draw_chars      ; and the floor and the front back
+                call    page_art        ; over him: see kid_pics
                 call    rq_run          ; and the redrawing, as time allows
                 call    vw_fill         ; and the view ahead, to the very end
                 jp      main
@@ -3010,7 +3005,11 @@ mbshow:         ds      8               ; and that with where it was
 ; D and B sections, composed at build time -- its foot on moby and its left
 ; edge at mobx Apple bytes, which lands on a byte or four pixels into one.
 ; Where they were last frame has been put back already; where they are now
-; is shown next frame together with it, as mbshow.
+; is shown next frame together with it, as mbshow.  The room goes back under
+; the whole of that box before the picture goes down: it takes in what lies
+; between the two -- the rows a fast one dropped past, or the gap between two
+; of them when one has gone and the other has moved up a slot -- and the
+; working copy there is whatever it held before the view last moved.
 
 MOBROWS         equ     FF_H
 
@@ -3038,12 +3037,7 @@ dmloop:         push    bc              ; one box was most of the screen to
                 pop     bc
                 inc     c
                 djnz    dmloop
-                ld      hl, mbshow      ; each with where it was, to show
-                ld      de, mbold
-                call    box_two
-                ld      hl, mbshow + 4
-                ld      de, mbold + 4
-                jr      box_two
+                ret
 
 draw_mob:       ld      a, (mobvel)
                 inc     a
@@ -3114,12 +3108,25 @@ dmfits:         ld      hl, dmrect
                 ld      (hl), b
                 inc     hl
                 ld      (hl), MOBROWS
-                call    page_art        ; the room back under it first: after
-                ld      hl, dmrect      ; the view has moved, what the working
-                call    eraseset        ; copy holds there is the old view
+                call    page_art        ; the room back under it and where it
+                ld      hl, (dmslot)    ; was, as one, first: after the view
+                ld      de, mbshow - mbold      ; has moved, what the working
+                add     hl, de          ; copy holds there is the old view
+                ld      de, dmrect
+                call    box_two         ; which keeps HL
+                call    eraseset
                 ld      a, FF_BLOB
                 ld      (curbank), a
                 call    page_frame
+                ld      a, (dmrect)     ; what the left edge cut off, a mask
+                ld      hl, dmcol       ; and a byte of the piece a column:
+                sub     (hl)            ; from there on every row is laid
+                add     a, a            ; whole, as far as the rectangle
+                ld      e, a            ; goes, with nothing asked a byte
+                ld      d, 0
+                ld      hl, (dmsrc)
+                add     hl, de
+                ld      (dmsrc), hl
                 ld      a, (dmtop)
                 ld      b, MOBROWS
                 ld      c, a            ; C = the row in hand
@@ -3127,33 +3134,24 @@ dmrow:          push    bc
                 ld      a, c
                 cp      192
                 jr      nc, dmnext      ; off the top or the foot
-                ld      e, 0
+                ld      a, (dmrect)
+                ld      e, a
+                ld      a, c
                 call    scraddr
                 ld      bc, work - SCREEN
-                add     hl, bc          ; column nought of the working copy
-                ld      a, (dmw)
+                add     hl, bc          ; its first column in the working copy
+                ld      a, (dmrect + 2)
                 ld      b, a
-                ld      a, (dmcol)
-                ld      c, a
                 ld      de, (dmsrc)
-dmbyte:         ld      a, c
-                cp      32
-                jr      nc, dmskip      ; off either side
-                push    hl
-                add     a, l
-                ld      l, a
-                ld      a, (de)         ; the mask: the room shows through
+dmbyte:         ld      a, (de)         ; the mask: the room shows through
                 and     (hl)
                 inc     de
                 ex      de, hl
                 or      (hl)            ; and the piece
                 ex      de, hl
                 ld      (hl), a
-                pop     hl
-                dec     de
-dmskip:         inc     de
+                inc     hl
                 inc     de
-                inc     c
                 djnz    dmbyte
 dmnext:         ld      hl, (dmsrc)     ; a row on
                 ld      a, (dmw)
@@ -3358,7 +3356,6 @@ cropboth:       ld      a, (croprow)
                 ld      hl, (curleft)
                 add     hl, de
                 dec     hl
-                jr      cropright
 cropright:      call    tile_in_row
                 call    crop_solid
                 ret     z
@@ -4897,6 +4894,7 @@ gdlast          equ     LOWVARS + LOWVARLEN     ; charx, chary, facing,
                                         ; frame; charcu and his rectangle: ten,
                                         ; up to the deepest the stack goes
 gdskip          equ     0x5C6F          ; 1: left as he is this frame
+kidskip         equ     SYSVARS + 58    ; and the prince: see kid_still
 gddirty         equ     0x5C70          ; something wrote over him
 spkroom         equ     0x5C71          ; the room has spikes: see roomblk
 
@@ -4905,15 +4903,16 @@ spkroom         equ     0x5C71          ; the room has spikes: see roomblk
 ; one exchange of the two records less, and the prince, drawn after, is put
 ; right the same way over his own.
 
+kid_pics:       ld      a, (kidskip)    ; the prince's the same, last
+                jr      gdpics1
 gd_pics:        ld      a, (gdskip)
-                or      a
+gdpics1:        or      a
                 ret     nz
                 call    dp_pics
                 call    page_art
                 call    hide_floor
                 jp      hide_behind
 
-rect_still:     call    rect_box        ; the prince's box, then the question
 gd_still:       ld      hl, gdskip
                 ld      (hl), 0
                 ld      a, (gdhere)
@@ -6195,6 +6194,116 @@ c1anim:         ld      hl, animtrans
                 call    c1mod
                 jp      page_canvas
 
+; The prince standing still is the same picture in the same place frame
+; after frame, and rubbing him out, drawing him, putting the floor and the
+; front back over him and showing him was a quarter of a frame -- which the
+; redraw queue wanted, so that a gate went up a step in four frames.  He is
+; left as he is, as a still guard is (gd_still), when where he is, his frame,
+; the way he faces, where he is cut and his rectangle are as when he was last
+; drawn, and nothing goes over his box this frame: no floor falling, no
+; guard drawn afresh, no block put back, no flame, no view turned round.
+; His box is then emptied, so nothing rubs him out and nothing shows him,
+; and kid_pics does not draw him.  From draw_chars by c1call, the guard's
+; question first, as rect_still had it.
+
+kid_still:      ld      hl, newcol      ; the box round where he is and was
+                call    rect_box
+                call    gd_still
+                xor     a
+                ld      (kidskip), a
+                ld      hl, charx       ; as when last drawn, and this frame's
+                ld      de, kidlast     ; kept whatever the answer
+                ld      bc, 5 * 256
+                call    gs_cmp
+                ld      hl, charcu
+                ld      b, 5
+                call    gs_cmp
+                ld      a, c
+                ld      hl, mbold + 2   ; nothing falling
+                or      (hl)
+                ld      hl, mbold + 6
+                or      (hl)
+                ld      hl, nummob
+                or      (hl)
+                ld      hl, flipnow     ; nor the view turning round
+                or      (hl)
+                ld      hl, fullshow
+                or      (hl)
+                ret     nz
+                ld      a, (gdhere)     ; the guard drawn afresh over him
+                or      a
+                jr      z, ksgd
+                ld      a, (gdskip)
+                or      a
+                jr      nz, ksgd
+                ld      de, boxcol
+                call    gs_meet
+                ret     c
+ksgd:           ld      a, (dirtyn)     ; a block put back over him
+                or      a
+                jr      z, ksfl
+                ld      b, a
+                ld      de, dirtyq
+ksdq:           call    ksmeet
+                ret     c
+                inc     de
+                inc     de
+                inc     de
+                inc     de
+                djnz    ksdq
+ksfl:           ld      a, (torches)    ; a flame laid over him
+                or      a
+                jr      z, ksyes
+                ld      b, a
+                ld      hl, torches + 1
+ksfl1:          push    hl
+                ld      de, ksrect      ; its rectangle on the screen
+                ld      a, (hl)
+                push    bc
+                call    subcam
+                pop     bc
+                ld      (de), a
+                inc     hl
+                inc     de
+                push    bc
+                ldi
+                ldi
+                ldi
+                pop     bc
+                ld      de, ksrect
+                call    ksmeet
+                pop     hl
+                ret     c
+                ld      de, 7
+                add     hl, de
+                djnz    ksfl1
+ksyes:          ld      hl, kidskip
+                inc     (hl)
+                xor     a
+                ld      (boxw), a
+                ret
+
+; DE = a rectangle.  Out: carry if it meets his box.  DE and HL as they were.
+
+ksmeet:         ld      hl, boxcol
+                inc     de
+                inc     de
+                ld      a, (de)
+                dec     de
+                dec     de
+                or      a
+                ret     z
+                call    ov1
+                ret     nc
+                inc     hl
+                inc     de
+                call    ov1
+                dec     de
+                ret
+
+ksrect:         ds      4
+kidlast:        ds      10
+
 ; And after the two of them have moved: CHECKSLICE (DoKid's last), the
 ; sounds, the slicers' pictures brought up to their states, and kid_death
 ; last, as its way out may page the art bank in.
@@ -7268,9 +7377,9 @@ revt2:          rra
                 ld      a, BANK_CVS     ; and the code that builds a room put
                 call    pageset         ; by where the titles leave it alone,
                 ld      hl, roomblk     ; swapped with what the tape left
-                ld      de, RBINTRO     ; there: the port's credit, which the
-                ld      bc, RB1LEN      ; titles show from where the room's
-rbswap:         ld      a, (de)         ; code was
+                ld      de, RBINTRO     ; there: the credits over the splash,
+                ld      bc, RB1LEN      ; which the titles show from where the
+rbswap:         ld      a, (de)         ; room's code was
                 ldi
                 dec     hl
                 ld      (hl), a

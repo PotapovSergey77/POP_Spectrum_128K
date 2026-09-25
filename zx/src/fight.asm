@@ -100,8 +100,8 @@ draw_chars:     call    gd_swap
 dckid:          call    dp_rect
                 ld      hl, newcol + OP ; a guard gone still has his last
                 call    rect_box        ; picture to rub out
-                ld      hl, newcol
-                call    rect_still
+                ld      hl, kid_still
+                call    c1call
                 ld      hl, boxcol + OP
                 call    eraseset
                 ld      hl, boxcol
@@ -116,7 +116,7 @@ dckid:          call    dp_rect
                 jr      z, dckid2
                 call    gd_pics
                 call    swapchar
-dckid2:         jp      dp_pics
+dckid2:         jp      kid_pics
 
 ; HL = a character's new rectangle, his old one after it and his box after
 ; that.  Out: the box round the two, or whichever of them is not empty.
