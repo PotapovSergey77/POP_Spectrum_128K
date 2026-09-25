@@ -71,6 +71,7 @@ dopage:         and     7
                 out     (c), a
                 ret
 
+cutfixed        equ     roomblk         ; PlayCut0's pictures: see mkassets
                 include "assets.inc"
                 include "bg.inc"
 MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend

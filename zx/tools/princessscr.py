@@ -444,6 +444,23 @@ def build_blobs(scene_frames=None):
                 return True
         return False
 
+    def boxed(rec, torch):
+        """A character's box over the bytes a flame is laid in."""
+        x, y = torch
+        fcol, fw = x >> 3, eq['CUT_FL_W']
+        ftop = y - eq['CUT_FL_H'] + 1
+        for n, cx in rec:
+            if n == NONE:
+                continue
+            posn, c0, r0, w, h, data, img = sprites[n & 0x7F]
+            col = cx >> 3
+            last = col + min(w + 1, 32 - col) - 1
+            top = sprite_top(img, r0)
+            if (col <= fcol + fw - 1 and last >= fcol
+                    and top <= y and top + h - 1 >= ftop):
+                return True
+        return False
+
     # The script: a record a frame -- what happens, and each of them.
     script = bytearray()
     last_glass, sand = None, False
@@ -460,6 +477,10 @@ def build_blobs(scene_frames=None):
             f |= 16
             sand = True
         assert not any(covered(rec, c) for c in left_cells)
+        # the frame between (cutplay.asm, cmid) burns the right flame on
+        # only while neither cell is covered: its box must be in them
+        if not (covered(rec, tip) or covered(rec, body)):
+            assert not boxed(rec, TORCHES[1])
         if covered(rec, tip):
             f |= 32
         if covered(rec, body):

@@ -200,4 +200,3 @@ cutkey          equ     introend
 
                 include "cutplay.asm"
 
-cutfixed:       incbin  "cutfixed.bin"

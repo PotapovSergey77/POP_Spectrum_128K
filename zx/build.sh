@@ -128,7 +128,7 @@ print('постройка комнаты %04X..%04X, %d байт, в банка�
 assert rb <= room, 'код постройки комнаты не влез в банки'
 assert sym['roomend'] <= sym['HICODE'], 'код постройки комнаты налез на код боя'
 assert sym['work'] % 0x800 == 0, 'рабочий буфер не на границе 2K'
-assert sym['BAND_BYTES'] <= rb, 'полоса принцессы больше кода постройки комнаты'
+assert sym['BAND_BYTES'] + sym['CUT_BUFOFF'] <= rb, 'полоса принцессы больше кода постройки комнаты'
 print('буферы под загрузчиком %04X..%04X, %d байт'
       % (sym['LOWBUF'], sym['LOWTOP'], sym['LOWTOP'] - sym['LOWBUF']))
 assert sym['LOWTOP'] <= sym['stubs'], 'буферы под загрузчиком налезли на код'

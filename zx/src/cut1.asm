@@ -67,6 +67,7 @@ c1sp:           dw      0
 CUT_BANK        equ     BANK_ART
 CUT_TUNE        equ     0xFF            ; its one tune
 CUT_HOLD        equ     1
+CUT_BUFOFF      equ     0               ; its pictures are in its own block
 cutkey          equ     c1key
 
 tunes:          dw      CUT1_TUNE, CUT1_TUNEND

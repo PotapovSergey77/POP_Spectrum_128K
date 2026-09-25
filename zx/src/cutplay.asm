@@ -134,7 +134,7 @@ ctune:          db      0
 ; in the room the canvas has once the game begins.  Between levels, when the
 ; room's code is running, cut1.asm puts it by for the scene.
 
-cutbuf          equ     roomblk
+cutbuf          equ     roomblk + CUT_BUFOFF
 CUT_Q7          equ     59              ; eighths of a fiftieth a frame at
 CUT_Q12         equ     65              ; SPEED 7 and at SPEED 12
 BAND_BYTES      equ     CUT_BAND_ROWS * 32
@@ -240,7 +240,9 @@ cnosand:
                 ld      (ctune), a
                 call    itune
 cnotune:
-                call    pburn           ; DoFast: two flames and the stars
+                ld      a, 1            ; DoFast: two flames and the stars
+                call    pburn
+                xor     a
                 call    pburn
                 call    pstars
 
@@ -274,8 +276,101 @@ cpost:          rept    CUT_PO_W
                 djnz    cpost
 
                 call    pflow           ; and the sand over them
+                call    cshow           ; and the band to the screen not shown
 
-                ld      a, (cvis)       ; the band to the screen not shown
+; PAUSE, SPEED long: seven and three eighths fiftieths a frame at 7, and
+; eight and an eighth at 12 -- well over twice the three the game's frame
+; takes: any faster went ahead of the music.  What a frame does not take whole is
+; carried to the next, and a frame shown late takes it from the next one's
+; time, so the scene keeps to the tune.  The screen changes on an
+; interrupt, never in the middle of one being shown, and a key ends the
+; scene.
+
+                ld      a, (cflags)
+                rrca                    ; carry: SPEED 12
+                ld      a, CUT_Q7
+                jr      nc, cq1
+                ld      a, CUT_Q12
+cq1:            ld      hl, ctog        ; eighths of a fiftieth, and what
+                add     a, (hl)         ; was left of the last frame's
+                ld      c, a
+                and     7
+                ld      (hl), a
+                ld      a, c
+                rrca
+                rrca
+                rrca
+                and     0x1F
+                ld      (cper), a
+                call    cwait
+                ld      hl, clast       ; when the next is due from: when
+                ld      a, (cper)       ; this one was
+                add     a, (hl)
+                ld      (hl), a
+                call    cflip           ; PAGEFLIP
+
+                ld      a, (cflags)     ; FLASHOFF: the screen that was
+                and     2               ; white has the other's colours back
+                jr      z, cnounflash
+                ld      a, BANK_CANVAS
+                call    pageset
+                ld      hl, 0x5800
+                ld      de, 0xD800
+                ld      a, (cvis)
+                or      a
+                jr      z, cunflash
+                ex      de, hl
+cunflash:       ld      bc, 768
+                ldir
+cnounflash:
+                ld      a, (cfirst)     ; and after the first frame, the room
+                or      a               ; on the second screen too
+                jr      z, cnotfirst
+                xor     a
+                ld      (cfirst), a
+                call    copy57
+cnotfirst:
+                ld      hl, ccount
+                dec     (hl)
+                jr      nz, cmid
+                if      CUT_HOLD
+                ld      a, (sfxtimer)   ; PlaySong: until the tune has
+                or      a               ; played out, the last frame again
+                ret     z
+                inc     (hl)
+                ld      hl, (cptr)
+                ld      de, -5
+                add     hl, de
+                ld      (cptr), hl
+                else
+                ret
+                endif
+
+; Halfway to the next frame, a picture the Apple does not show: the same
+; frame with the torches burnt on a flame, so that they burn about as fast
+; as they do in the game, at twice the pace of the frames the music holds
+; the scene to.  Only the torches: where the vizier stands in front of the
+; right one, it waits for the next frame, that draws him over it.
+
+cmid:           ld      a, (cflags)
+                and     0x60
+                jr      nz, cmid1
+                inc     a
+                call    pburn
+cmid1:          xor     a
+                call    pburn
+                call    cshow
+                ld      a, (cper)
+                rrca
+                and     0x7F
+                call    cwait
+                call    cflip
+                jp      cutloop
+
+; The band to the screen not shown, and the right flame's colours on it,
+; or white where the vizier is in its cells.
+
+cshow:          ld      a, (cvis)
                 xor     0x80
                 ld      (chid), a
                 ld      a, BANK_CANVAS
@@ -304,9 +399,9 @@ bandout:        push    af
                 cp      CUT_BAND_TOP + CUT_BAND_ROWS
                 jr      nz, bandout
 
-                ld      hl, 0x5800 + CUT_T1_TIP ; the right flame's colours,
-                ld      a, (chid)       ; or white where the vizier is in
-                or      h               ; its cells
+                ld      hl, 0x5800 + CUT_T1_TIP
+                ld      a, (chid)
+                or      h
                 ld      h, a
                 ld      a, (cflags)
                 ld      c, CUT_INK_TIP
@@ -321,30 +416,12 @@ cfltip:         ld      (hl), c
                 jr      z, cflbody
                 ld      c, CUT_INK_WHITE
 cflbody:        ld      (hl), c
+                ret
 
-; PAUSE, SPEED long: seven and three eighths fiftieths a frame at 7, and
-; eight and an eighth at 12 -- well over twice the three the game's frame
-; takes: any faster went ahead of the music.  What a frame does not take whole is
-; carried to the next.  The screen changes on an interrupt, never in the
-; middle of one being shown, and a key ends the scene.
+; Until A fiftieths from when the last frame was due; a key ends the scene.
 
-                ld      a, (cflags)
-                rrca                    ; carry: SPEED 12
-                ld      a, CUT_Q7
-                jr      nc, cq1
-                ld      a, CUT_Q12
-cq1:            ld      hl, ctog        ; eighths of a fiftieth, and what
-                add     a, (hl)         ; was left of the last frame's
-                ld      c, a
-                and     7
-                ld      (hl), a
-                ld      a, c
-                rrca
-                rrca
-                rrca
-                and     0x1F
-                ld      c, a
-cwait:          halt
+cwait:          ld      c, a
+cwait1:         halt
                 xor     a
                 in      a, (254)
                 cpl
@@ -355,49 +432,14 @@ cwait:          halt
                 ld      a, (FRAMES)
                 sub     b
                 cp      c
-                jr      c, cwait
-                ld      a, (FRAMES)
-                ld      (clast), a
-                ld      a, (chid)       ; PAGEFLIP
-                ld      (cvis), a
-                call    setvis
-
-                ld      a, (cflags)     ; FLASHOFF: the screen that was
-                and     2               ; white has the other's colours back
-                jr      z, cnounflash
-                ld      a, BANK_CANVAS
-                call    pageset
-                ld      hl, 0x5800
-                ld      de, 0xD800
-                ld      a, (cvis)
-                or      a
-                jr      z, cunflash
-                ex      de, hl
-cunflash:       ld      bc, 768
-                ldir
-cnounflash:
-                ld      a, (cfirst)     ; and after the first frame, the room
-                or      a               ; on the second screen too
-                jr      z, cnotfirst
-                xor     a
-                ld      (cfirst), a
-                call    copy57
-cnotfirst:
-                ld      hl, ccount
-                dec     (hl)
-                jp      nz, cutloop
-                if      CUT_HOLD
-                ld      a, (sfxtimer)   ; PlaySong: until the tune has
-                or      a               ; played out, the last frame again
-                ret     z
-                inc     (hl)
-                ld      hl, (cptr)
-                ld      de, -5
-                add     hl, de
-                ld      (cptr), hl
-                jp      cutloop
-                endif
+                jr      c, cwait1
                 ret
+
+; The screen composed shown.
+
+cflip:          ld      a, (chid)
+                ld      (cvis), a
+                jp      setvis
 
 ; The screen shown, its colours: HL, the bank paged if it is the second.
 
@@ -520,15 +562,10 @@ lyend:          pop     de
                 djnz    lyrow
                 ret
 
-; PBURN: the next torch round, a new flame for it by GETFLAMEFRAME, and
-; PSETUPFLAME's picture of it laid down.
+; PBURN: torch A, a new flame for it by GETFLAMEFRAME, and PSETUPFLAME's
+; picture of it laid down.
 
-pburn:          ld      a, (ptcount)
-                inc     a
-                cp      2
-                jr      c, pb1
-                xor     a
-pb1:            ld      (ptcount), a
+pburn:          ld      (ptcount), a
                 ld      e, a
                 ld      d, 0
                 ld      hl, ptstate
@@ -952,6 +989,7 @@ boxes:          dw      0, 0, 0, 0
 cvis:           db      0
 chid:           db      0
 clast:          db      0
+cper:           db      0
 cflags:         db      0
 cchars:         db      0, 0, 0, 0
 lext:           dw      0

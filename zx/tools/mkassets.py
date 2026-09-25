@@ -902,6 +902,12 @@ def main(argv):
     # where the room's code was.  The art bank has the room for CODE1.
     assert canvas + len(cut) == rbintro
     open(os.path.join(binout, 'cutfixed.bin'), 'wb').write(cutfixed)
+    # The princess's pictures that PlayCut0 keeps in fixed memory ride in
+    # with the credits, first, where start swaps them in: the band she is
+    # composed in goes after them (CUT_BUFOFF), over the credits, which are
+    # shown before her.
+    tail = cutfixed + tail
+    tail_at = [(name, off + len(cutfixed)) for name, off in tail_at]
     # And PlayCut1, the princess waiting before level two: a tape block of
     # its own, cut1.asm and what it plays -- see princessscr.build1.  Its
     # code is put to it by build.sh.
@@ -949,6 +955,7 @@ def main(argv):
            'RBINTRO     equ %d' % rbintro,
            'CANVAS      equ %d' % canvas,
            'TAILLEN     equ %d' % len(tail),
+           'CUT_BUFOFF  equ %d' % len(cutfixed),
            'sfxmap      equ %d' % sfxmap_at,
            'sfxtab      equ %d' % sfxtab_at,
            'sfxdata     equ %d' % sfxdata_at]
