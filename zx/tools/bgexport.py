@@ -488,7 +488,7 @@ def level_blob(level_path):
 BGOVL_LEN = 306
 # And a level's own code (lvcode.asm), which rides with its blueprint, head
 # and colours: the room kept for it in the bank and in every level's block.
-LVCODE_LEN = 363
+LVCODE_LEN = 364                # the last byte its basicstrength (LVSTR)
 
 
 def set_parts(bgset):

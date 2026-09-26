@@ -18,9 +18,10 @@
                 org     bgovl
 
 ; The entries, three bytes apart, where pop.asm has them: ovstripe, ovstart,
-; ovpost, ovset, ovflame, ovattr and ovshad.  The dungeon has only ovset and
-; ovflame.  ovpost is the level's own code, which rides with its blueprint
-; (lvcode.asm).
+; ovpost, ovset, ovflame, ovattr and ovshad.  ovpost is the level's own code,
+; which rides with its blueprint (lvcode.asm); the dungeon's ovstart goes
+; there too, carry set to tell them apart -- level eight's mouse wants the
+; top of the frame.  Its shadowman is the mouse, who presses nothing.
 
                 ret                     ; (drawb's stripe was here: bg.asm)
                 ds      2
@@ -28,16 +29,24 @@
                 jp      start
                 jp      lvcode
                 else
-                ret
-                ds      2
-                ret
-                ds      2
+                jp      dstart
+                jp      dpost
                 endif
                 jp      setup
                 jp      flame
                 if      OVLSET
                 jp      attrs
                 jp      shad
+                else
+                ret                     ; (ovattr: the palace's)
+                ds      2
+                ret
+                ds      2
+
+dstart:         scf
+                jp      lvcode
+dpost:          or      a
+                jp      lvcode
                 endif
 
 ; The set into the program, from newroom: the room's colour, and the meters'

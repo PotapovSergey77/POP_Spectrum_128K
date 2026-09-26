@@ -1,10 +1,12 @@
 ; ---------------------------------------------------------------- a level's code
 ;
 ; What only one level does -- level four's mirror, five's thief, six's
-; plunge -- rides with its blueprint, at lvcode in the background bank:
-; LVCODE_LEN bytes after the level's head and its colours, loaded with them
-; whenever the level is.  The set's code (bgovl.asm) goes to it after the
-; frame's moves: ovpost is a jump here.  Assembled once for each level on
+; plunge, eight's mouse -- rides with its blueprint, at lvcode in the
+; background bank: LVCODE_LEN bytes after the level's head and its colours,
+; loaded with them whenever the level is, the last of them the level's
+; basicstrength (LVSTR).  The set's code (bgovl.asm) goes to it after the
+; frame's moves: ovpost is a jump here; the dungeon's comes at the top of
+; the frame as well, with carry set.  Assembled once for each level on
 ; the tape (LVNUM, from 1) and put in the level's block by build.sh; what it
 ; uses of the game and of the set's code comes from their symbols,
 ; lvsyms.inc.  A level with nothing of its own is a ret.
@@ -451,7 +453,117 @@ plrec:          dw      PLX
 
                 endif
 
-                if      LVNUM < 4 or LVNUM > 6
+                if      LVNUM = 8
+
+; ---------------------------------------------------------------- the mouse
+;
+; Level eight's (misctimers in TOPCTRL.S, MOUSERESCUE in MISC.S, MouseProg
+; in AUTO.S): with the exit open, once the kid has been in screen 16 for
+; mousetimer frames the mouse comes in from the right of its top row, runs
+; left on to the raise plate there, stops and lifts his head, turns and
+; runs off the way he came.
+;
+; He is the second character, and all through the frame's moves the
+; shadowman as far as the game can tell -- which is what SHADCTRL makes of
+; him: no guard's program, no alert, nobody's meter, not left behind in a
+; room -- so he presses the plate as anyone does.  Only while he is drawn,
+; from the moves' end to the next frame's top, is he CharID nought, so that
+; he is laid down whole, in the main set's pictures, as the kid is; and his
+; strength nought, so that no meter shows it.  Nobody else is ever either
+; of those on this level.
+;
+; The dungeon's set comes here twice a frame: at the top, before anything
+; moves -- ovstart, with carry set -- and after the moves, ovpost.
+
+MSCRN           equ     16              ; misctimers' screen
+MOUSETIMER      equ     150             ; and mousetimer
+MOUSEX          equ     2 * (200 - 58)  ; MOUSERESCUE's CharX, our pixels:
+                                        ; MouseProg's VanishChar at it too
+MLEAVEX         equ     2 * (166 - 58)  ; and short of CharX 166 he leaves
+
+post:           jr      c, start
+                ld      a, (gdhere)     ; to be drawn: the kid's way
+                or      a
+                ret     z
+                ld      a, (charid + OP)
+                dec     a
+                ret     nz
+                ld      (charid + OP), a
+                ld      (oppstr), a
+                ret
+
+start:          ld      a, (gdhere)     ; the mouse, drawn: the shadowman
+                or      a               ; again, for the moves
+                jr      z, mtimer
+                ld      a, (charid + OP)
+                or      a
+                jr      nz, mtimer
+                inc     a
+                ld      (charid + OP), a
+                ld      (oppstr), a
+
+; MouseProg: scurrying, short of CharX 166 he leaves -- Mleave, and the
+; ANIMCHAR that follows it, its act 0 and first frame, for the next step to
+; go on from; stopped, at CharX 200 he is gone.
+
+                ld      hl, (charx + OP)
+                ld      a, (charact + OP)
+                or      a
+                jr      z, mstopped
+                ld      de, -MLEAVEX
+                add     hl, de
+                bit     7, h
+                jr      z, mtimer
+                ld      hl, seqs + SO_MLEAVE + 3
+                ld      (seqptr + OP), hl
+                xor     a
+                ld      (charact + OP), a
+                jr      mtimer
+mstopped:       ld      de, -MOUSEX
+                add     hl, de
+                bit     7, h
+                call    z, gd_gone      ; VANISHCHAR
+
+; misctimers: in screen 16 with the exit open, exitopen counts the frames up
+; to mousetimer, and then the mouse comes -- once.
+
+mtimer:         ld      a, (roomnum)
+                cp      MSCRN
+                ret     nz
+                ld      hl, exitopen
+                ld      a, (hl)
+                or      a
+                ret     z
+                cp      MOUSETIMER
+                jr      c, minc
+                ret     nz
+
+; MOUSERESCUE: CharID 24 at CharX 200, the top row's floor, facing left,
+; alive, strength one, Mscurry and a step of it -- act 1 and his first
+; frame.  Nothing of him drawn yet.
+
+                push    hl
+                ld      hl, mrec
+                ld      de, oprec
+                ld      bc, CHRECLEN
+                ldir
+                pop     hl
+                ld      a, 1
+                ld      (oppstr), a
+                ld      (gdhere), a
+minc:           inc     (hl)
+                ret
+
+mrec:           dw      MOUSEX
+                db      55, 0, 186
+                dw      seqs + SO_MSCURRY + 3
+                db      0, 0, 1, 0, 1, 0xff
+                ds      CHRECLEN - 14
+                db      192
+
+                endif
+
+                if      LVNUM < 4 or LVNUM = 7
 post:           ret
                 endif
 

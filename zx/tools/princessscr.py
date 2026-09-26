@@ -56,6 +56,7 @@ FLOOR_Y = princess.FLOOR_Y
 # copies it to the screen whole.
 BAND_TOP, BAND_BOT = 94, 152
 BAND_ROWS = BAND_BOT - BAND_TOP + 1
+BAND_BOT0 = BAND_BOT
 
 # ---------------------------------------------------------------- the room
 
@@ -296,11 +297,13 @@ def scene(frames=None):
                 continue
             posn, x, y, face = st[who]
             left, bottom, img, mir = princess.place(posn, x, y, face)
-            assert bottom == FLOOR_Y, (who, bottom)
-            if posn not in ids:
-                ids[posn] = len(sprites)
-                sprites.append((posn,) + trimmed(img) + (img,))
-            n = ids[posn]
+            # a picture is kept at the one height: its line in the band
+            # is its table's, and a frame says only where along
+            key = (posn, bottom)
+            if key not in ids:
+                ids[key] = len(sprites)
+                sprites.append((key,) + trimmed(img) + (img,))
+            n = ids[key]
             _, c0, r0, w, h, data, _ = sprites[n]
             if mir:
                 bx = left + img.px_width - 8 * c0 - 8 * w
@@ -322,8 +325,8 @@ def scene_boxes(sprites, frames):
                 yield n, (x, 0)
 
 
-def sprite_top(img, r0):
-    return FLOOR_Y - img.height + 1 + r0
+def sprite_top(img, r0, bottom=FLOOR_Y):
+    return bottom - img.height + 1 + r0
 
 
 def build_blobs(scene_frames=None):
@@ -345,13 +348,13 @@ def build_blobs(scene_frames=None):
     # rows, width, height, top band row, and the pmask's place or NONE
     table, pics = bytearray(), bytearray()
     for posn, c0, r0, w, h, data, img in sprites:
-        top = band_row(sprite_top(img, r0))
-        band_row(sprite_top(img, r0) + h - 1)
+        top = band_row(sprite_top(img, r0, posn[1]))
+        band_row(sprite_top(img, r0, posn[1]) + h - 1)
         pm = NONE
-        if posn in PMASK:
+        if posn[0] in PMASK:
             # at the picture's left edge, which is 8 * c0 left of the box
             assert c0 == 0
-            pm = band_row(FLOOR_Y + PMASK[posn])
+            pm = band_row(posn[1] + PMASK[posn[0]])
         table += bytes([0, 0, w, h, top, pm])
         pics += data
     # the pmask: its unlit pixels, the ones it clears, as a picture
@@ -442,7 +445,7 @@ def build_blobs(scene_frames=None):
             posn, c0, r0, w, h, data, img = sprites[n & 0x7F]
             col = x >> 3
             last = col + min(w + 1, 32 - col) - 1
-            top = sprite_top(img, r0)
+            top = sprite_top(img, r0, posn[1])
             if col <= cx <= last and top <= cy * 8 + 7 and top + h - 1 >= cy * 8:
                 return True
         return False
@@ -458,7 +461,7 @@ def build_blobs(scene_frames=None):
             posn, c0, r0, w, h, data, img = sprites[n & 0x7F]
             col = cx >> 3
             last = col + min(w + 1, 32 - col) - 1
-            top = sprite_top(img, r0)
+            top = sprite_top(img, r0, posn[1])
             if (col <= fcol + fw - 1 and last >= fcol
                     and top <= y and top + h - 1 >= ftop):
                 return True
@@ -611,7 +614,7 @@ def draw_char(s, sprites, n, x):
     her pixels are in."""
     cells = set()
     posn, c0, r0, w, h, data, img = sprites[n & 0x7F]
-    top = sprite_top(img, r0)
+    top = sprite_top(img, r0, posn[1])
     for j in range(h):
         row = data[j * w:(j + 1) * w]
         bits = [(row[k >> 3] >> (7 - (k & 7))) & 1 for k in range(8 * w)]
@@ -641,24 +644,36 @@ def build1(tune, rb_len, frames=None, side='A', still=False):
     still: the princess never moves, and is drawn into the room once --
     PlayCut2's lies left of the band, which would have to be wider for her
     and its code with it, past where it may go."""
+    global BAND_BOT, BAND_ROWS
     princess.side(side)
     try:
         frames = princess.cut1() if frames is None else frames
-        scr = bytearray(room())
-        if still:
-            assert len({f['princess'] for f in frames}) == 1
-            assert all(f['vizier'] is None for f in frames)
-            sprites, recs = scene(frames[:1])
-            for n, x in recs[0][1]:
-                if n != NONE:
-                    # and white, as the band's characters are, where she
-                    # lies over the rug's colours (the user asked)
-                    for c in draw_char(scr, sprites, n, x):
-                        scr[6144 + c] = BRIGHT << 6 | BLACK << 3 | WHITE
-            frames = [dict(f, princess=None) for f in frames]
-        table, pics, script, fixed, at, eq, count = build_blobs(frames)
+        # the band down to the lowest of them: PlayCut8's princess kneels
+        # and the mouse runs a line or three below the floor
+        BAND_BOT = max([BAND_BOT0] + [princess.place(*f[w])[1]
+                                      for f in frames
+                                      for w in ('vizier', 'princess') if f[w]])
+        BAND_ROWS = BAND_BOT - BAND_TOP + 1
+        return _build1(tune, rb_len, frames, still)
     finally:
         princess.side('A')
+        BAND_BOT, BAND_ROWS = BAND_BOT0, BAND_BOT0 - BAND_TOP + 1
+
+
+def _build1(tune, rb_len, frames, still):
+    scr = bytearray(room())
+    if still:
+        assert len({f['princess'] for f in frames}) == 1
+        assert all(f['vizier'] is None for f in frames)
+        sprites, recs = scene(frames[:1])
+        for n, x in recs[0][1]:
+            if n != NONE:
+                # and white, as the band's characters are, where she
+                # lies over the rug's colours (the user asked)
+                for c in draw_char(scr, sprites, n, x):
+                    scr[6144 + c] = BRIGHT << 6 | BLACK << 3 | WHITE
+        frames = [dict(f, princess=None) for f in frames]
+    table, pics, script, fixed, at, eq, count = build_blobs(frames)
     room_packed = titlescr.pack(bytes(scr))
     top = 0x10000 - 12
     rbsave = top - rb_len
@@ -703,7 +718,7 @@ def preview_frames(path, every=12):
             if n == NONE:
                 continue
             posn, c0, r0, w, h, data, img = sprites[n & 0x7F]
-            top = sprite_top(img, r0)
+            top = sprite_top(img, r0, posn[1])
             for j in range(h):
                 row = data[j * w:(j + 1) * w]
                 bits = [(row[k >> 3] >> (7 - (k & 7))) & 1 for k in range(8 * w)]

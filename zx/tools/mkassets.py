@@ -77,6 +77,12 @@ KID_SEQS = (list(range(1, 51))
                81, 82, 83, 104,          # fightfall, efightfall, patchfall
                78])                      # drinkpotion
 
+# And the mouse's, for level eight's (MOUSERESCUE in MISC.S, MouseProg in
+# AUTO.S): scurry and leave, in his frames 186 to 188 of the main set.
+MSCURRY, MLEAVE = 105, 107
+MOUSE_SEQS = [MSCURRY, MLEAVE]
+MOUSE_FRAMES = (186, 187, 188)
+
 CHAR_ANCHOR = 21
 ALT_FRAMES = 40                 # ALTSET1: frames 150 to 189
 
@@ -163,7 +169,7 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 7
+LEVELS = 8
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
@@ -222,8 +228,20 @@ LH_NEXT, LH_NEXTLEN, LH_INK, LH_SET, LH_CUT = 8, 10, 12, 13, 14
 # its pictures come from.  Each is a tape block of its own before the
 # level's (cut1.asm), and the head of the level before it says how long.
 # Level six's is PlayCut3, which SUBS.S plays as
-# PlayCut1: the same block again.
-CUT_BEFORE = {2: 1, 4: 2, 6: 1}
+# PlayCut1: the same block again; level eight's is PlayCut8, the princess
+# sending the mouse out.
+CUT_BEFORE = {2: 1, 4: 2, 6: 1, 8: 3}
+
+# basicstrength in AUTO.S, by level: a guard's strength is this and his
+# program's extrastrength (getgdstrength).  Each level's is the last byte
+# kept for its own code (LVSTR, lvcode.asm), which add_guard reads.
+BASIC_STRENGTH = [4, 3, 3, 3, 3, 4, 5, 4, 4, 5, 5, 5, 4, 6]
+
+
+def lvcode_room(n):
+    """The room kept for level n's own code, build.sh's to fill, and
+    its guards' basic strength at the end of it."""
+    return bytes(bgexport.LVCODE_LEN - 1) + bytes([BASIC_STRENGTH[n]])
 
 # STARTKID's :special3 and milestone3 in AUTO.S: level three's milestone is
 # passed when he goes left out of the room right of the first gate, and from
@@ -311,21 +329,30 @@ def build_sprites(frames_used):
     frames = popframe.load()
     top = max(frames_used) + 1
     table, banks, trims = bytearray(top * 6), [bytearray()], {}
-    for n in frames_used:
+    # the mouse's few last, in a gap a bank before has left: the last bank
+    # has the canvas after it, and the princess's room after that
+    for n in sorted(frames_used, key=lambda n: n in MOUSE_FRAMES):
         if n in frames:             # frame 0 is "nothing to draw"
-            lay_frame(table, banks, trims, n, frames[n])
+            lay_frame(table, banks, trims, n, frames[n],
+                      fit=n in MOUSE_FRAMES)
     return table, banks, trims
 
 
 
-def lay_frame(table, banks, trims, n, frame):
-    """One frame's record at index n of the table, its pixels in the banks."""
+def lay_frame(table, banks, trims, n, frame, fit=False):
+    """One frame's record at index n of the table, its pixels in the banks
+    -- the last, or with fit the first they fit in."""
     img = popframe.image(frame)
     width, height, data = sprite_bytes(img, 0)
     cut, below, width, height, data = trim_frame(width, height, data)
     trims[n] = below
-    if len(banks[-1]) + len(data) > BANK_SIZE - 2:
-        banks.append(bytearray())   # this one will not fit: start the next
+    if fit:
+        b = next(i for i, k in enumerate(banks)
+                 if len(k) + len(data) <= BANK_SIZE - 2)
+    else:
+        if len(banks[-1]) + len(data) > BANK_SIZE - 2:
+            banks.append(bytearray())   # this one will not fit: start the next
+        b = len(banks) - 1
     e = n * 6
     # The foot has to land where the logic says it does.  GETBASEX puts
     # it at CharX + Fdx - footmark, applied the way he faces, and the
@@ -342,9 +369,9 @@ def lay_frame(table, banks, trims, n, frame):
     dx = 2 * frame.dx
     table[e:e + 4] = bytes([width, height, (-dx + cut * 8) & 0xff,
                             (dx - (cut + width) * 8) & 0xff])
-    table[e + 4:e + 6] = (((len(banks) - 1) << BANK_SHIFT)
-                          | len(banks[-1])).to_bytes(2, 'little')
-    banks[-1] += data
+    table[e + 4:e + 6] = ((b << BANK_SHIFT)
+                          | len(banks[b])).to_bytes(2, 'little')
+    banks[b] += data
 
 # SOUNDNAMES.S's sounds, by number, and after them the moments the CPC
 # release has a sound for that the Apple's has not.  Each is played as the
@@ -751,7 +778,7 @@ def main(argv):
 
 
     seq, code, entry = build_sequences()
-    used = seq.walk(KID_SEQS)
+    used = seq.walk(KID_SEQS + MOUSE_SEQS)
     # And the frames the code puts him in that no sequence names: 161, the
     # block that worked, which CHECKSTRIKE sets over 150.
     used += [f for f in (161,) if f not in used]
@@ -915,7 +942,7 @@ def main(argv):
                            CUT_BEFORE[START_LEVEL + 1]))
     bgblob += colours[START_LEVEL].ljust(colmax, bytes(1))
     lvc = ['build/bin/bank_bg.bin %d %d' % (len(bgblob), START_LEVEL)]
-    bgblob += bytes(bgexport.LVCODE_LEN)
+    bgblob += lvcode_room(START_LEVEL)
     # Which files carry which set's code, for build.sh to put in once it is
     # assembled: see bgovl.asm.
     ovl = ['build/bin/bank_bg.bin %d %d'
@@ -971,7 +998,7 @@ def main(argv):
                        % (n, bgat['bgovl'],
                           bgexport.BGSETS.index(bgexport.level_bgset(n))))
         lvc.append('build/bin/level%d.bin %d %d' % (n, len(blob), n))
-        blob += bytes(bgexport.LVCODE_LEN)
+        blob += lvcode_room(n)
         assert len(blob) == nxt[n - 1][1]
         if n + 1 in CUT_BEFORE and n < LEVELS:
             cutheads.append('build/bin/level%d.bin %d %d'
@@ -1051,10 +1078,11 @@ def main(argv):
     # And the princess's scenes between levels, each a tape block of its
     # own, cut1.asm and what it plays -- see princessscr.build1.  Its code
     # is put to it by build.sh.  PlayCut1 waiting before level two, and
-    # PlayCut2 lying down before level four, off the second side's
-    # pictures -- whose song, s_Heartbeat, the CPC has none of: the tune of
-    # its PlayCut1 plays.
-    scenes = {1: (princess.cut1(), 'A'), 2: (princess.cut2(), 'B')}
+    # off the second side's pictures PlayCut2 lying down before level four
+    # and PlayCut8 sending the mouse out before level eight -- whose song,
+    # s_Heartbeat, the CPC has none of: the tune of its PlayCut1 plays.
+    scenes = {1: (princess.cut1(), 'A'), 2: (princess.cut2(), 'B'),
+              3: (princess.cut8(), 'B')}
     for k, (frames, side) in scenes.items():
         sced, scefix, sceneinc, scelow = princessscr.build1(
             cpcmusic.tunes((6,))[0], RBROOM, frames, side, k == 2)
@@ -1123,6 +1151,7 @@ def main(argv):
                                        + LEVEL_HEAD))
     inc.append('lvcode      equ %d' % (PAGE_WINDOW + bgat['level'] + 2304
                                        + LEVEL_HEAD + colmax))
+    inc.append('LVSTR       equ lvcode + %d' % (bgexport.LVCODE_LEN - 1))
     inc.append('FLAME_BYTES equ %d' % (FLAME_W * FLAME_H))
     for i, cells in enumerate(flcells):
         inc.append('FLCELLS%d    equ %d' % (i, cells))
@@ -1270,6 +1299,8 @@ def main(argv):
         # and where stand begins among them, for code that has no jumpseq to
         # hand (bgovl.asm's thief): seqptr is seqs plus this
         f.write('SO_STAND    equ %d' % seq.at[seq.entries[2]] + chr(10))
+        f.write('SO_MSCURRY  equ %d' % seq.at[seq.entries[MSCURRY]] + chr(10))
+        f.write('SO_MLEAVE   equ %d' % seq.at[seq.entries[MLEAVE]] + chr(10))
         f.write('START_X     equ %d\n'
                 % (popframe.screen_x(popframe.char_x(START_COL)) - START_NUDGE))
         f.write('START_Y    equ %d\n' % popframe.char_y(START_ROW))

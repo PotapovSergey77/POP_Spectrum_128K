@@ -7,7 +7,7 @@
 set -e
 cd "$(dirname "$0")"
 python tools/mkassets.py build
-cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/bin/*.bin src/
+cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc
 cd src
 ../tools/pasmo.exe --bin pop.asm ../build/pop.bin ../build/pop.sym
@@ -35,7 +35,7 @@ with open('src/popsyms.inc', 'w') as f:
         f.write('%-15s equ     0x%04X\n' % (name, sym[name]))
 PY
 cd src
-for k in 1 2; do
+for k in 1 2 3; do
     cp cut$k.inc cutsel.inc
     cp cutfixed$k.bin cutsel.bin
     ../tools/pasmo.exe --bin cut1.asm ../build/cut${k}code.bin ../build/cut$k.sym
@@ -105,7 +105,7 @@ base = sym['stubs']
 # code where it runs and jump there, the room, the pictures and the tune,
 # and the code.
 lens = {}
-for k in (1, 2):
+for k in (1, 2, 3):
     csym = {}
     for line in open('build/cut%d.sym' % k):
         m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
@@ -201,12 +201,14 @@ for line in open('build/bin/lvc.lst'):
         if m:
             lsym[m.group(1)] = int(m.group(2), 16)
     assert lsym['post'] == lsym['lvcode'], 'уровень %s: вход не в начале' % n
-    assert len(code) <= sym['LVCODE_LEN'], 'код уровня %s длиннее LVCODE_LEN' % n
+    # the last byte of the room is the level's basicstrength (LVSTR)
+    assert len(code) <= sym['LVCODE_LEN'] - 1, 'код уровня %s длиннее LVCODE_LEN' % n
     b = bytearray(open(path, 'rb').read())
-    assert not any(b[off:off + sym['LVCODE_LEN']]), path
+    assert not any(b[off:off + sym['LVCODE_LEN'] - 1]), path
+    assert 3 <= b[off + sym['LVCODE_LEN'] - 1] <= 6, path
     b[off:off + len(code)] = code
     open(path, 'wb').write(b)
-    print('код уровня %s: %d байт из %d' % (n, len(code), sym['LVCODE_LEN']))
+    print('код уровня %s: %d байт из %d' % (n, len(code), sym['LVCODE_LEN'] - 1))
 print('управление %04X..%04X, %d байт в банке 7, свободно там %d'
       % (sym['MODORG'], sym['modend'], len(mod), 0x10000 - sym['modend']))
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'

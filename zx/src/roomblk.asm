@@ -1620,15 +1620,12 @@ agrect:         ld      (hl), a
                 ld      (refract), a
                 ld      (justblocked), a
                 ld      a, (guardprog)  ; his strength, from his program
-                ld      e, a            ; and his level (getgdstrength)
-                ld      d, 0
-                ld      hl, extrastrength
+                ld      e, a            ; and his level (getgdstrength),
+                ld      d, 0            ; whose basicstrength is at the end
+                ld      hl, extrastrength       ; of its own code
                 add     hl, de
-                ld      a, (curlev)
-                ld      e, a
-                ld      a, (hl)
-                ld      hl, basicstrength
-                add     hl, de
+                call    page_bg
+                ld      a, (LVSTR)
                 add     a, (hl)
                 jr      agstr
 agdead:         ld      a, 1
@@ -1642,8 +1639,6 @@ agnone:         pop     af
                 jp      pageset
 
 extrastrength:  db      0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0
-basicstrength:  db      3, 3, 3, 3, 4, 5, 4     ; levels 1-7, as far as the
-                                                ; tape goes
 
 ; CUTCHECK in AUTO.S: the kid is going into room A the way C says -- 0 up,
 ; 1 down, 2 left, 3 right.  A live guard en garde close to that side goes

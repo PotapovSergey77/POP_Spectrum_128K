@@ -244,8 +244,61 @@ def cut2():
     return frames
 
 
+MSCURRY, MSTOP, MLEAVE, PSTROKE, PRISE = 105, 106, 107, 110, 111
+
+
+def cut8():
+    """PlayCut8, the princess sending the mouse out, before level eight:
+    the hourglass as PlayCut1 has it, STARTP8 -- STARTP0 at CharX 130 and
+    CharY floorY + 3, stroking -- in the shadow's place, and STARTM8 --
+    STARTM4's mouse at CharX 144, stopped -- in the kid's; twenty frames,
+    the mouse leaves, twenty more, the princess rises, twenty more.  Then
+    the mouse is gone (he is off the room's right by then) and s_Heartbeat,
+    of which the CPC has none: its PlayCut1 tune plays, as for PlayCut2."""
+    seq = popseq.load()
+    frames = []
+    prn = Char(seq, 120, FLOOR_Y, -1)
+    prn.jumpseq(PSTAND)
+    prn.animchar()
+    prn.x, prn.y = 130, FLOOR_Y + 3
+    prn.jumpseq(PSTROKE)
+    prn.animchar()
+    mouse = Char(seq, 199, FLOOR_Y + 1, -1)
+    mouse.jumpseq(MSCURRY)
+    mouse.animchar()
+    mouse.x = 144
+    mouse.jumpseq(MSTOP)
+    mouse.animchar()
+    gone = [False]
+
+    def play(n):
+        for _ in range(n):
+            mouse.animchar()
+            prn.animchar()
+            frames.append({
+                'speed': 12,
+                'vizier': None if gone[0] else
+                          (mouse.posn, mouse.x, mouse.y, mouse.face),
+                'princess': (prn.posn, prn.x, prn.y, prn.face),
+                'glass': CUT1_GLASS, 'sand': True, 'flash': False})
+
+    play(20)
+    mouse.jumpseq(MLEAVE)
+    play(20)
+    prn.jumpseq(PRISE)
+    play(20)
+    gone[0] = True          # KidPosn nought: the mouse disappears
+    play(1)
+    frames[-1]['tune'] = True
+    play(1)
+    frames[-1]['hold'] = True
+    return frames
+
+
 ALT = None
 T6 = T7 = None
+MAIN = None
+MAIN_TABLES = {}
 CHTAB6B = os.path.join(HERE, '..', '..', '01 POP Source', 'Images',
                        'IMG.CHTAB6.B')
 
@@ -262,13 +315,23 @@ def side(which):
 
 
 def picture(posn):
-    """The frame's image, its Fdx and Fdy, and Fcheck."""
-    global ALT, T6, T7
+    """The frame's image, its Fdx and Fdy, and Fcheck.  ALTSET2's go up to
+    85; the mouse's, 186 to 188, are the main set's (USEALTSETS leaves
+    CharID 24 in it), out of chtable2."""
+    global ALT, T6, T7, MAIN
     if ALT is None:
         ALT = load_altset2()
         mem = poprincess.memory()
         T6 = popimg.Table.from_memory(mem, poprincess.CHTABLE6)
         T7 = popimg.Table.from_memory(mem, poprincess.CHTABLE7)
+    if posn >= 150:
+        if MAIN is None:
+            MAIN = popframe.load()
+        f = MAIN[posn]
+        if f.table not in MAIN_TABLES:
+            MAIN_TABLES[f.table] = popimg.Table(os.path.join(
+                popframe.IMAGES, popframe.TABLES[f.table]))
+        return MAIN_TABLES[f.table].get(f.index), f.dx, f.dy, f.check
     f = ALT[posn]
     table = T6 if f.table == 5 else T7
     return table.get(f.index), f.dx, f.dy, f.check
