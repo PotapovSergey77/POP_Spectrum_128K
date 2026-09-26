@@ -76,6 +76,14 @@ cutfixed        equ     roomblk         ; PlayCut0's pictures: see mkassets
                 include "bg.inc"
 MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 
+; The background set's own code, in its bank with its pictures: bgovl.asm.
+; Its entries, three bytes apart.
+
+ovstripe        equ     bgovl + 0       ; drawb's stripe
+ovstart         equ     bgovl + 3       ; the top of a frame, from c1anim
+ovpost          equ     bgovl + 6       ; after the frame's moves, c1post
+ovset           equ     bgovl + 9       ; the set into the program: newroom
+
 ; And between the last system variable the 48K ROM's interrupt touches and
 ; the bottom of the stack, what 48K BASIC kept its channels in: nothing uses
 ; it now, and twenty of the drawing's bytes live there, which start makes
@@ -733,6 +741,13 @@ pgbits:         or      0x10            ; another bank can put this one back
 ; own, say.  And c1far is CODE1's way out: a routine of the fixed half at
 ; HL, which may page what it likes, and the canvas bank back after it.
 
+; CODE1's way into the background set's code (bgovl.asm): by c1far, with
+; HL = bgjp and DE = the entry, which returns to c1far.
+
+bgjp:           call    page_bg
+                ex      de, hl
+                jp      (hl)
+
 c1call:         ld      a, (nowbank)
                 push    af
                 call    c1jp
@@ -1034,14 +1049,17 @@ stbtn:          ld      a, (clrb)       ; then, button or not, the same three
 
 ; No point starting a run into a wall, or he twitches on the spot.
 
-; DoStartrun.  Very close to a barrier it becomes a careful step instead,
-; and it clears no flag of its own.
+; DoStartrun.  Very close to a barrier it becomes a careful step instead --
+; but not a slicer, which he may run at -- and it clears no flag of its own.
 
 do_startrun:    call    get_fwd_dist
                 ld      b, a
                 ld      a, (fwdkind)
                 cp      1               ; a barrier ahead?
                 jr      nz, srgo
+                ld      a, (fwdid)
+                cp      BG_SLICER
+                jr      z, srgo
                 ld      a, b
                 cp      8
                 jr      nc, srgo
@@ -2133,7 +2151,9 @@ ck1:            ld      (tempby), a
                 cp      SLICEREXT       ; off: a smeared one never bars
                 jr      nz, ccno
                 jr      ckyes
-cknotsl:        cp      BG_GATE
+cknotsl:        cp      BG_MIRROR       ; a mirror: see ckmirr
+                jp      z, ckmirr
+                cp      BG_GATE
                 jr      nz, ckyes
                 call    gatebarr        ; tilestate is the gate's own
                 jr      nc, ccno
@@ -2366,6 +2386,32 @@ tile_flags:     ld      a, (blocky)
 
 mpc2:
                 org     mfix2
+
+; COLL.S's :mirror.  A mirror bars the way -- but to the kid on a running
+; jump, from its right: he goes through, and his reflection comes to life,
+; createshad, which REFLECTION acts on (bgovl.asm).  SMASHMIRROR's spec
+; nothing reads, and is not kept.  From checkcoll1, in the module, and back.
+
+ckmirr:         ld      a, (charid)
+                or      a
+                jr      nz, ckmyes
+                ld      a, (frame)      ; frames 39 to 43
+                sub     39
+                cp      5
+                jr      nc, ckmyes
+                ld      a, (facing)     ; facing left
+                or      a
+                jr      nz, ckmyes
+                dec     a
+                ld      (createshad), a
+                jp      ccno
+ckmyes:         jp      ckyes
+
+createshad:     db      0               ; 0xFF: the reflection comes to life
+shadkey:        db      0               ; the shadow's JSTKX: see bgovl.asm
+lastkidstr:     db      0               ; hurt_flash's: here, where the
+                                        ; mirror's CreateShad can set it
+
 ; CMPSPACE and CMPBARR out of CTRLSUBS.S, as the tables they may as well be.
 ; In: A = a block type.  cmp_space: Z when the block is clear -- and a solid
 ; block counts as clear here, which is why onground has a case of its own for
@@ -2851,7 +2897,7 @@ set_attrs_at:   ld      a, 1            ; the meters' colours go with it
                 ld      e, l
                 inc     de
                 ld      bc, 767
-                ld      (hl), INK_ROOM
+saink:          ld      (hl), INK_ROOM  ; the set's: newroom puts it here
                 ldir
                 call    flask_attrs
 
@@ -4043,9 +4089,9 @@ frame_entry:    call    frame_index
 frame_index:    ld      a, (frame)
                 ld      l, a
                 ld      h, 0
-                ld      a, (charid)
-                or      a
-                ret     z
+                ld      a, (charid)     ; the kid and the shadow: his own
+                cp      2
+                ret     c
                 ld      a, l
                 cp      102
                 ret     c
@@ -4296,10 +4342,12 @@ shoff:          ld      hl, (charx)
 
 dp_clip:        xor     a
                 ld      (spskip), a
+                ld      a, (clipl)      ; the left edge: the screen's, or
+                ld      e, a            ; CROPCHAR's FCharCL, a mirror's
                 ld      a, (newcol)
                 ld      c, a
-                bit     7, a
-                jr      z, clipright
+                sub     e               ; signed, as the column is
+                jp      p, clipright
                 neg                     ; off the left: skip that many bytes
                 ld      (spskip), a
                 ld      b, a
@@ -4308,7 +4356,7 @@ dp_clip:        xor     a
                 jr      c, clipnone
                 jr      z, clipnone
                 ld      (neww), a
-                ld      c, 0
+                ld      c, e
 clipright:      ld      a, c
                 ld      b, a
                 ld      a, (neww)
@@ -4336,6 +4384,12 @@ dp_image:       call    dp_place
                 ld      a, (neww)       ; none of it on the screen
                 or      a
                 ret     z
+                ld      a, (charid)     ; the shadow: every other line of
+                dec     a               ; him left out, the room showing
+                ld      a, 0            ; through -- the Apple lays him
+                jr      nz, dpsolid     ; EORed, which one colour cannot
+                inc     a               ; tell from the kid
+dpsolid:        ld      (dfodd + 1), a
                 call    dfsetup
 
                 call    page_frame
@@ -4402,12 +4456,15 @@ dpfit:          push    hl
 ; -- dfsetup has patched into the routine once for the picture; they were a
 ; third of every row's time asked afresh.
 
-drawrow:        push    de
+drawrow:        ld      a, h            ; the line's parity
+dfodd:          and     0               ; patched: 1 for the shadow
+                jr      nz, drskip
+                push    de
                 push    hl
 dfcall:         call    0               ; patched: the row's routine
                 pop     hl
                 pop     de
-                ld      a, e
+drskip:         ld      a, e
 dfstep:         add     a, 0            ; patched: a row of pairs
                 ld      e, a
                 jr      nc, dr1
@@ -5633,6 +5690,8 @@ boxtop:         db      0               ; as one, and shown as one
 boxw:           db      0
 boxh:           db      0
 xvel:           db      0               ; CharXVel: along, in a free fall
+clipl:          db      0               ; FCharCL: the first screen column
+                                        ; he shows in -- a mirror's edge
 CHRECLEN        equ     $ - chrec
 oprec:          ds      CHRECLEN
 OP              equ     oprec - chrec
@@ -5781,15 +5840,17 @@ skel_down:      ld      a, SND_SPLAT
                 call    pageset
                 jp      gd_gone
 
-; The guards' programs, AUTO.S: kept here, where there is room for them.
+; The guard's program, AUTO.S: his column of its tables, which c1gprob copies
+; out of CODE1 whenever he is given one -- the tables are only ever read for
+; the guard in the room.
 
-;               strike  0   1   2   3   4   5   6   7   8   9   10  11
-strikeprob:     db      75, 100, 75, 75, 75, 50, 100, 220, 0, 60, 40, 60
-restrikeprob:   db      0, 0, 0, 5, 5, 175, 20, 10, 0, 255, 255, 150
-blockprob:      db      0, 150, 150, 200, 200, 255, 200, 250, 0, 255, 255, 255
-impblockprob:   db      0, 75, 75, 100, 100, 145, 100, 250, 0, 145, 255, 175
-advprob:        db      255, 200, 200, 200, 255, 255, 200, 0, 0, 255, 100, 100
-refractimer:    db      20, 20, 20, 20, 10, 10, 10, 10, 0, 10, 0, 0
+GP_STRIKE       equ     0
+GP_RESTRIKE     equ     1
+GP_BLOCK        equ     2
+GP_IMPBLOCK     equ     3
+GP_ADV          equ     4
+GP_REFRACT      equ     5
+gprob:          ds      6
 
 cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
@@ -6188,7 +6249,10 @@ qdown           equ     SYSVARS + 33    ; the key as it was last frame
 ; ones of the frame before.  Then checkalert, before either of them moves,
 ; and the canvas bank left in for the control code.
 
-c1anim:         ld      hl, animtrans
+c1anim:         ld      de, ovstart     ; the set's own first: a reflection
+                ld      hl, bgjp        ; out of the way of the frame's moves
+                call    c1far
+                ld      hl, animtrans
                 call    c1far
                 call    bonesrise
                 ld      hl, checkalert  ; the sequences are in the canvas bank
@@ -6313,6 +6377,9 @@ c1post:         call    nextlevkey      ; a test key first of all
                 call    checkslice
                 call    addsfx
                 call    sl_sync
+                ld      de, ovpost      ; and the set's: level four's mirror,
+                ld      hl, bgjp        ; his reflection in it and the
+                call    c1far           ; shadow that comes out of it
 
 ; When he has died and stopped moving, the death song: heroic if he fell in a
 ; fight.  CharLife goes past nought so it is asked for once.
@@ -7277,6 +7344,7 @@ brtrig:         ld      a, SKELY * 10 + SKELX
                 call    c1mod
                 ld      a, SKELPROG
                 ld      (guardprog), a
+                call    c1gprob
                 ld      a, 0xff
                 ld      (charlife), a
                 ld      a, 3
@@ -7333,6 +7401,37 @@ cssthru:        ld      a, 11           ; POP's own natural step
                 jr      cssgo
 
 charrepeat      equ     SYSVARS + 34    ; CharRepeat: DoStepfwd's alone
+
+; The guards' programs, AUTO.S, and the column of them for (guardprog) into
+; gprob, where the fight reads it: add_guard and bonesrise come here as they
+; give a guard his program.
+
+c1gprob:        ld      a, (guardprog)
+                ld      e, a
+                ld      d, 0
+                ld      hl, strikeprob
+                add     hl, de
+                ld      de, gprob
+                ld      b, 6
+cgp1:           ld      a, (hl)
+                ld      (de), a
+                inc     de
+                ld      a, l            ; the next table, twelve on
+                add     a, 12
+                ld      l, a
+                adc     a, h
+                sub     l
+                ld      h, a
+                djnz    cgp1
+                ret
+
+;               strike  0   1   2   3   4   5   6   7   8   9   10  11
+strikeprob:     db      75, 100, 75, 75, 75, 50, 100, 220, 0, 60, 40, 60
+restrikeprob:   db      0, 0, 0, 5, 5, 175, 20, 10, 0, 255, 255, 150
+blockprob:      db      0, 150, 150, 200, 200, 255, 200, 250, 0, 255, 255, 255
+impblockprob:   db      0, 75, 75, 100, 100, 145, 100, 250, 0, 145, 255, 175
+advprob:        db      255, 200, 200, 200, 255, 255, 200, 0, 0, 255, 100, 100
+refractimer:    db      20, 20, 20, 20, 10, 10, 10, 10, 0, 10, 0, 0
 
 c1end:
                 org     c1fix

@@ -41,7 +41,7 @@ IMAGES = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..',
 # any of them.
 BY_PIECE = ('maska', 'maskb', 'piecea', 'pieceay', 'pieceb', 'pieceby',
             'piecec', 'pieced', 'fronti', 'fronty', 'frontx', 'bstripe',
-            'frontmx', 'frontmw')
+            'frontmx', 'frontmw', 'halfimg')
 
 # And the shorter ones, each padded to its own fixed length.
 FIXED = (('blockb', 2), ('blockc', 2), ('blockd', 2), ('blockfr', 2),
@@ -60,7 +60,7 @@ SINGLES = ('looseb', 'panelb0', 'panelc0', 'archpanel', 'CUmask', 'CUpiece',
            'specialflask', 'numblox', 'numpans', 'numbpans', 'slicerfrh')
 
 
-def front_body(imgnum, t1, t2):
+def front_body(imgnum, t1, t2, shafts=None):
     """
     How much of a front piece stands in front of him: all of it.
 
@@ -79,7 +79,7 @@ def front_body(imgnum, t1, t2):
     img = (t2 if imgnum & 0x80 else t1).get(imgnum & 0x7f)
     if img is None:
         return 0, 0
-    if imgnum in SHAFTS:
+    if imgnum in (SHAFTS if shafts is None else shafts):
         # The long pillars are laid masked, not stamped, so only their
         # pixels hide him -- and for all but a few rows at one end those are
         # a narrow shaft in the middle of the picture.  The mask is one
@@ -95,6 +95,11 @@ def front_body(imgnum, t1, t2):
 
 
 SHAFTS = (0x48, 0x49)           # fronti of pillarbottom and pillartop
+# In the palace a post and the foot of an arch are a thin column with a
+# knob or two, drawn masked (maddfore) and not stamped: only the column hides
+# him, as the long pillars' shaft does.  Their whole rectangle hid him as if
+# they were solid walls.
+PAL_SHAFTS = SHAFTS + (0x45, 0xa8)      # fronti of posts and archbot
 
 
 def foot_rows(imgnum, t1, t2):
@@ -141,16 +146,50 @@ def edge_shafts(table):
     return table
 
 
-def dungeon_table(n):
-    """IMG.BGTAB1.DUN or 2, as this port draws them."""
-    t = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB%d.DUN' % n))
+# The two background sets, BGset1 in MISC.S: the dungeon, and the palace
+# that levels four to six, ten, eleven and fourteen are built of.
+BGSETS = ('DUN', 'PAL')
+BGSET_OF_LEVEL = [0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 1, 1, 2, 2, 1]   # bgset1
+
+
+def level_bgset(n):
+    """'DUN' or 'PAL' for level n -- bgset1's 2 is the dungeon's too."""
+    return 'PAL' if BGSET_OF_LEVEL[n] == 1 else 'DUN'
+
+
+def set_table(n, bgset='DUN'):
+    """IMG.BGTAB1 or 2 of a set, as this port draws them: the palace's
+    long pillars are the dungeon's, and thickened the same."""
+    t = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB%d.%s' % (n, bgset)))
     return edge_shafts(t) if n == 1 else t
 
 
-def piece_tables():
-    t1 = dungeon_table(1)
-    t2 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'))
-    body = [front_body(n, t1, t2) for n in bg.fronti]
+def dungeon_table(n):
+    return set_table(n, 'DUN')
+
+
+# DRAWHALF in FRAMEADV.S: climbing up, the tiles with a half piece have
+# CUmask and CUpiece laid instead of their whole floorpiece -- and in the
+# palace a post and the foot of an arch have CUpost.  The port asks a table
+# rather than the tile and the set.
+HALFPIECE = ('floor', 'torch', 'dpressplate', 'exit_')
+
+
+def half_images(bgset):
+    half = [0] * 30
+    for n in HALFPIECE:
+        half[getattr(bg, n)] = bg.CUpiece
+    if bgset == 'PAL':
+        half[bg.posts] = half[bg.archbot] = bg.CUpost
+    return half
+
+
+def piece_tables(bgset='DUN'):
+    t1 = set_table(1, bgset)
+    t2 = set_table(2, bgset)
+    bg.halfimg = half_images(bgset)
+    shafts = PAL_SHAFTS if bgset == 'PAL' else SHAFTS
+    body = [front_body(n, t1, t2, shafts) for n in bg.fronti]
     # drawfrnt puts a slicer's front piece down itself, one of slicerfrnt
     # by its state, and fronti has none for it: all five are the one size,
     # and it stands in front of him like any other.  But only the foot of it
@@ -223,19 +262,49 @@ def flask_images(t):
     return out
 
 
-def image_table(path, extra=False):
-    """count, count 2-byte offsets, then the records -- bottom row first."""
-    t = popimg.Table(path)
-    if os.path.basename(path) == 'IMG.BGTAB1.DUN':
-        edge_shafts(t)
-    if extra:
-        t.images.update(flask_images(t))
-    top = max(t.images) if t.images else 0
+# The pictures the game ever lays: every one BGDATA.S's arrays and single
+# pieces name, the sword's gleam, and the bubbles made at the end of the
+# second table.  The rest of a table -- the torch flames, which go over the
+# room from a table of their own, and the letters and boxes of the messages,
+# which this port does not show -- stays off the tape: bgdraw lays nothing
+# for a picture whose offset is nought.
+IMAGE_ARRAYS = ('maska', 'maskb', 'piecea', 'pieceb', 'piecec', 'pieced',
+                'fronti', 'bstripe', 'halfimg', 'blockb', 'blockc', 'blockd',
+                'blockfr', 'spaceb', 'floorb', 'panelb', 'panelc', 'loosea',
+                'loosed', 'spikea', 'spikeb', 'slicertop', 'slicerbot',
+                'slicerfrnt', 'slicerbot2', 'gate8b', 'gate8c')
+IMAGE_SINGLES = ('looseb', 'panelb0', 'panelc0', 'archpanel', 'CUmask',
+                 'CUpiece', 'CUpost', 'gatebotSTA', 'gatebotORA', 'gateB1',
+                 'gatecmask', 'stairs', 'door', 'doormask', 'toprepair',
+                 'archtop3sp', 'specialflask', 'swordgleam0', 'swordgleam1')
+
+
+def used_images():
+    """The image numbers the game lays, bit 7 the second table."""
+    keep = bg.halfimg if hasattr(bg, 'halfimg') else None
+    bg.halfimg = half_images('PAL')
+    used = set()
+    for name in IMAGE_ARRAYS:
+        used |= {v & 0xff for v in getattr(bg, name)}
+    for name in IMAGE_SINGLES:
+        used.add(getattr(bg, name) & 0xff)
+    used |= {0x80 | n for n in range(BUBBLES, BUBMASK + 2)}
+    used.discard(0)
+    if keep is not None:
+        bg.halfimg = keep
+    return used
+
+
+def table_records(t, keep):
+    """(top, offsets into the records or None, the records) -- bottom row
+    first, and only the pictures in keep -- the count only as far as the
+    last of them."""
+    top = max(i for i in t.images if i in keep)
     body = bytearray()
-    where = [0] * (top + 1)
+    where = [None] * (top + 1)
     for i in range(1, top + 1):
         img = t.images.get(i)
-        if img is None:
+        if img is None or i not in keep:
             continue
         where[i] = len(body)
         body += bytes([img.width, img.height])
@@ -244,11 +313,7 @@ def image_table(path, extra=False):
         rows.reverse()                          # back to POP's own order
         for r in rows:
             body += bytes(REV[b & 0x7f] for b in r)
-    head = bytearray([top])
-    base = 1 + 2 * top
-    for i in range(1, top + 1):
-        head += struct.pack('<H', (base + where[i]) if where[i] or i == 1 else 0)
-    return bytes(head) + bytes(body)
+    return top, where, bytes(body)
 
 
 GDINFO = 2048 + 71              # GdStartBlock in INFO, EQ.S
@@ -256,18 +321,18 @@ GDINFO = 2048 + 71              # GdStartBlock in INFO, EQ.S
 
 def guards_fixed(level):
     """
-    The level's guards, as ADDGUARD can use them.  GdStartX and GdStartSeq
-    are 255 in these blueprints wherever a guard stands, which puts him off
-    the right of the screen and on a sequence address in the Apple's memory
-    that means nothing here: he is put on his block the way the kid is put
-    on his, and starts fresh -- SeqH 0 is ADDGUARD's own code for that.
+    INITIALGUARDS in SUBS.S, once for the level: every guard stands on his
+    block the way the kid is put on his -- GdStartX getblockej + angle + 7 --
+    and starts fresh, SeqH 0 being ADDGUARD's own code for that.  What the
+    blueprints have there is whatever the editor left: mostly 255, which
+    puts him off the right of the screen, and level four's first guard 0,
+    off the left.
     """
     level = bytearray(level)
     for s in range(24):
         block = level[GDINFO + s]
         if block < 30:
-            if level[GDINFO + 48 + s] == 255:
-                level[GDINFO + 48 + s] = 14 * (block % 10) + 72
+            level[GDINFO + 48 + s] = 14 * (block % 10) + 72
             level[GDINFO + 120 + s] = 0
     return bytes(level)
 
@@ -301,22 +366,95 @@ def gates_set(level):
 GMAXVAL = 47 * 4
 
 
+# Where this port changes a level, as the user asked: torches whose flame
+# burned over a slicer's blade.  Level four's room with the tall flask has
+# its torch two blocks left, on the floor there; and the room right of the
+# exit's plate (11) has its torch -- in its first column, the flame in the
+# second over the slicer -- in the last column of the room to its left (4),
+# whose flame burns in this one's first (maketorches).  (level, room, block,
+# room, block): the two swapped, type and spec.
+MOVES = [(4, 23, 6, 23, 4), (4, 11, 10, 4, 19)]
+
+
+def level_moved(n, level):
+    level = bytearray(level)
+    for lv, ra, a, rb, b in MOVES:
+        if lv == n:
+            for base in (0, 720):
+                i, j = base + (ra - 1) * 30 + a, base + (rb - 1) * 30 + b
+                level[i], level[j] = level[j], level[i]
+    return bytes(level)
+
+
 def level_blob(level_path):
     """A level's blueprint as the game keeps it."""
-    return gates_set(flasks_set(guards_fixed(open(level_path, 'rb').read())))
+    n = int(os.path.basename(level_path)[5:])
+    return gates_set(flasks_set(guards_fixed(
+        level_moved(n, open(level_path, 'rb').read()))))
 
 
-def build(level_path):
-    """(blob, {name: offset}) -- everything the background bank carries."""
-    tables = piece_tables()
-    t1 = image_table(os.path.join(IMAGES, 'IMG.BGTAB1.DUN'))
-    t2 = image_table(os.path.join(IMAGES, 'IMG.BGTAB2.DUN'), True)
-    level = level_blob(level_path)
+# The background bank is laid out once for both sets: the piece tables, the
+# set's own code (BGOVL_LEN bytes: see bgovl.asm), the two image tables'
+# offsets, then their pictures, and the blueprint where the bigger set's
+# pictures end.  So a level of the other set brings everything up to its
+# blueprint off the tape in one block, and a level of the same set only its
+# blueprint.  An offset is from its table's own count byte, round 65536, and
+# may reach any picture in the bank.
+BGOVL_LEN = 400
 
-    blob = bytearray()
-    at = {}
-    for name, part in (('bgtables', tables), ('bgtab1', t1),
-                       ('bgtab2', t2), ('level', level)):
-        at[name] = len(blob)
-        blob += part
-    return bytes(blob), at, offsets(BY_PIECE)
+
+def set_parts(bgset):
+    """(piece tables, (top, where, records) for each image table)."""
+    keep = used_images()
+    tables = piece_tables(bgset)
+    t1 = set_table(1, bgset)
+    t2 = set_table(2, bgset)
+    t2.images.update(flask_images(t2))
+    k1 = {n for n in keep if n < 0x80}
+    k2 = {n & 0x7f for n in keep if n >= 0x80}
+    return tables, table_records(t1, k1), table_records(t2, k2)
+
+
+def layout():
+    """({name: offset}, the parts of each set): where each thing is in the
+    bank, the same for both sets."""
+    parts = {s: set_parts(s) for s in BGSETS}
+    tlen = len(parts['DUN'][0])
+    top1 = max(parts[s][1][0] for s in BGSETS)
+    top2 = max(parts[s][2][0] for s in BGSETS)
+    at = {'bgtables': 0, 'bgovl': tlen}
+    at['bgtab1'] = at['bgovl'] + BGOVL_LEN
+    at['bgtab2'] = at['bgtab1'] + 1 + 2 * top1
+    at['bgpics'] = at['bgtab2'] + 1 + 2 * top2
+    at['level'] = at['bgpics'] + max(len(parts[s][1][2]) + len(parts[s][2][2])
+                                     for s in BGSETS)
+    return at, parts
+
+
+def set_blob(bgset, ovl=b''):
+    """The bank up to the blueprint, for a set: its tables, its code, its
+    pictures."""
+    at, parts = layout()
+    tables, (top1, w1, r1), (top2, w2, r2) = parts[bgset]
+    assert len(ovl) <= BGOVL_LEN, "the set's code is over BGOVL_LEN"
+    blob = bytearray(at['level'])
+    blob[0:len(tables)] = tables
+    blob[at['bgovl']:at['bgovl'] + len(ovl)] = ovl
+    pics = at['bgpics']
+    for base, top, where, rec in ((at['bgtab1'], top1, w1, 0),
+                                  (at['bgtab2'], top2, w2, len(r1))):
+        blob[base] = top
+        for i in range(1, top + 1):
+            off = 0 if where[i] is None else (pics + rec + where[i] - base) & 0xffff
+            blob[base + 1 + 2 * (i - 1):base + 3 + 2 * (i - 1)] = struct.pack('<H', off)
+    blob[pics:pics + len(r1)] = r1
+    blob[pics + len(r1):pics + len(r1) + len(r2)] = r2
+    return bytes(blob)
+
+
+def build(level_path, bgset='DUN'):
+    """(blob, {name: offset}, the piece tables' offsets) -- everything the
+    background bank carries up to and with the blueprint."""
+    at, _ = layout()
+    blob = set_blob(bgset) + level_blob(level_path)
+    return blob, at, offsets(BY_PIECE)

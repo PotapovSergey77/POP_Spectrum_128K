@@ -27,7 +27,7 @@ WIDTH_BYTES, HEIGHT = 40, 192
 BLOCK_PX = 28                   # a block is 4 bytes of 7 pixels
 BLOCKBOT = [2, 65, 128, 191, 254]
 
-AND, ORA, STA, XOR, MASK = 0, 1, 2, 3, 4
+AND, ORA, STA, XOR, MASK, HALO = 0, 1, 2, 3, 4, 5
 
 IMAGES = os.path.join(os.path.dirname(__file__), '..', '..',
                       '01 POP Source', 'Images')
@@ -83,6 +83,9 @@ class Room:
             if not 0 <= y < HEIGHT:
                 continue
             row, line = img.row(r), self.canvas[y]
+            if op == HALO:
+                self._halo(row, line, xco)
+                continue
             for c in range(img.width):
                 x = xco + c
                 if not 0 <= x < WIDTH_BYTES:
@@ -96,6 +99,21 @@ class Room:
                     line[x] = b
                 elif op == XOR:
                     line[x] ^= b
+
+    @staticmethod
+    def _halo(row, line, xco):
+        """maddfore's MASKTAB: every lit pixel and the one either side of it
+        cleared, within the picture's own bytes, and the picture ORed in."""
+        px = [(b >> i) & 1 for b in row for i in range(7)]
+        n = len(px)
+        halo = [px[i] or (i and px[i - 1]) or (i + 1 < n and px[i + 1])
+                for i in range(n)]
+        for c in range(len(row)):
+            x = xco + c
+            if not 0 <= x < WIDTH_BYTES:
+                continue
+            h = sum(1 << i for i in range(7) if halo[c * 7 + i])
+            line[x] = (line[x] & ~h & 0x7f) | (row[c] & 0x7f)
 
     # -- the section passes of RedBlockSure -------------------------------
 
@@ -168,13 +186,13 @@ class Room:
                 if sp >= bg.numpans:
                     return
                 img, dy = bg.panelb[sp], bg.pieceby[x]
-            elif img:
-                self.draw(img, st['xco'], bg.pieceby[x] + st['Ay'], ORA)
-                # the palace background set adds a wall stripe
+            else:
+                if img:
+                    self.draw(img, st['xco'], bg.pieceby[x] + st['Ay'], ORA)
+                # the palace background set adds a wall stripe, whether
+                # there is a B section or not (:stripe in drawb)
                 if self.palace and bg.bstripe[x]:
                     self.draw(bg.bstripe[x], st['xco'], st['Ay'] - 32, ORA)
-                return
-            else:
                 return
         if img:
             self.draw(img, st['xco'], dy + st['Ay'], ORA)
@@ -369,6 +387,8 @@ class Room:
         # the pixel, so stamping it instead puts the tile's art back exactly
         # as drawn and takes the neighbour's B section out of the balusters.
         op = STA if (x >= bg.archtop2 or x == bg.posts) else ORA
+        if self.palace and x == bg.posts:
+            op = HALO                   # drawfrnt's maddfore in the palace
         # A flask in an odd column goes five pixels back, a byte less and two
         # pixels on, so that its bubbles keep to one colour cell: flask_ma.
         # And every bottle stands two pixels lower, clear of its bubbles' cell.
@@ -706,10 +726,11 @@ class Cover(Room):
         if st['preced'] != bg.space:
             return
         objid = st['objid']
-        if half and objid in HALFPIECE:
+        piece = bgexport.half_images('PAL' if self.palace else 'DUN')[objid]
+        if half and piece:
             yco = st['Ay'] + (1 if objid == bg.dpressplate else 0)
             self.draw(bg.CUmask, st['xco'], yco, AND)
-            self.draw(bg.CUpiece, st['xco'], st['Ay'], ORA)
+            self.draw(piece, st['xco'], st['Ay'], ORA)
         else:
             if bg.maska[objid]:                     # addamask
                 self.draw(bg.maska[objid], st['xco'], st['Ay'], AND)

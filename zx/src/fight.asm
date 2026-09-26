@@ -344,14 +344,6 @@ gd_field_in:    dec     a               ; A = the room
                 add     hl, de
                 ret
 
-; Out: A = table HL's entry for his program.
-
-gd_prog:        ld      a, (guardprog)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                ld      a, (hl)
-                ret
 
 ; ---------------------------------------------------------------- a frame
 ;
@@ -468,6 +460,12 @@ gd_gone:        xor     a
                 ld      (neww + OP), a
                 ret
 
+; ShadowProg: what the shadow presses, bgovl.asm has said.
+
+acshad:         ld      a, (shadkey)
+                ld      (jstkx), a
+                ret
+
 ; ---------------------------------------------------------------- AUTO.S
 ;
 ; AUTOCTRL for a guard: he presses the keys, and GENCTRL takes them the way
@@ -486,9 +484,11 @@ acrel:          ld      (hl), a
                 ld      hl, refract     ; the refractory period after a hit
                 call    dec_nz
 
-                ld      a, (charid)     ; SkelProg: the skeleton is always
-                cp      4               ; en garde
-                jr      nz, acsword
+                ld      a, (charid)     ; ShadowProg: the shadow's keys are
+                dec     a               ; his level's to say -- bgovl.asm
+                jr      z, acshad       ; sets them
+                cp      3               ; SkelProg: the skeleton is always
+                jr      nz, acsword     ; en garde
                 ld      a, 2
                 ld      (charsword), a
 acsword:        ld      a, (charsword)  ; GuardProg: en garde already?
@@ -709,7 +709,7 @@ mayadvance:     ld      a, (guardprog)  ; guard 0 is too dumb to wait
                 ld      a, (gdtimer)
                 or      a
                 ret     nz
-madumb:         ld      hl, advprob
+madumb:         ld      hl, gprob + GP_ADV
                 call    chance
                 ret     nc
                 jr      pr_fwd
@@ -721,11 +721,11 @@ maybeblock:     ld      a, (frame + OP)
                 jr      z, mb99
                 cp      162             ; guy22, block to strike
                 ret     nz
-mb99:           ld      hl, blockprob
+mb99:           ld      hl, gprob + GP_BLOCK
                 ld      a, (justblocked)
                 or      a
                 jr      z, mbtry
-                ld      hl, impblockprob
+                ld      hl, gprob + GP_IMPBLOCK
 mbtry:          call    chance
                 ret     nc
                 jr      pr_up
@@ -735,22 +735,21 @@ maybestrike:    ld      a, (frame + OP)
                 ret     z
                 cp      151             ; starting to strike: don't
                 ret     z
-                ld      hl, strikeprob
+                ld      hl, gprob + GP_STRIKE
                 ld      a, (frame)
                 cp      161             ; just blocked: restrike?
                 jr      z, msre
                 cp      150
                 jr      nz, mstry
-msre:           ld      hl, restrikeprob
+msre:           ld      hl, gprob + GP_RESTRIKE
 mstry:          call    chance
                 ret     nc
                 jr      pr_strike
 
-; RNDP: a throw against his program's entry in table HL.  Carry when it comes
-; in under it.
+; RNDP: a throw against his program's entry in table HL -- gprob's copy of
+; it.  Carry when it comes in under it.
 
-chance:         call    gd_prog
-                ld      c, a
+chance:         ld      c, (hl)
                 call    rnd
                 cp      c
                 ret
@@ -1195,7 +1194,6 @@ hfcheck:        ld      a, (kidstr)
                 ret
 
 hurton:         db      0
-lastkidstr:     db      0
 
 mpc6:
                 org     mfix6
@@ -1289,8 +1287,7 @@ checkstab:      ld      a, (gdhere)
 csguard:        call    swapchar
                 call    stabchar
                 call    swapchar
-                ld      hl, refractimer
-                call    gd_prog
+                ld      a, (gprob + GP_REFRACT)
                 ld      (refract), a
 cskid:          ld      a, (charact)
                 cp      99
@@ -2764,7 +2761,9 @@ oppshown:       ld      a, (gdhere)
                 or      a
                 ret     z
                 ld      a, (charid + OP)
-                cp      4
+                cp      4               ; the skeleton's is not shown, nor
+                jr      z, oppnone      ; the shadow's but on level twelve
+                dec     a
                 jr      z, oppnone
                 ld      a, (oppstr)
                 ret
@@ -2898,7 +2897,7 @@ mmput:          ld      e, a
                 ld      h, a
                 ld      a, (mmwhat)
                 cp      2
-                ld      a, INK_ROOM
+mmrink:         ld      a, INK_ROOM     ; the room's: see newroom
                 jr      z, mmink1
                 ld      a, (mmink)
 mmink1:         ld      (hl), a
@@ -2951,5 +2950,3 @@ cacount:        db      0               ; CHECKALERT's ]Xcount and ]Xend, as
 caend:          db      0               ; block columns
 
 BASICSTR        equ     3               ; basicstrength for level 1
-
-extrastrength:  db      0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0

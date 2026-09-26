@@ -4,9 +4,24 @@ maketorches:    xor     a
                 ld      (flrec), hl
                 xor     a
                 ld      (mtrow), a
-mtr:            xor     a
-                ld      (mtcol), a
-mtc:            ld      a, (mtrow)
+mtr:            ld      a, 0xff         ; from the room to the left's last
+                ld      (mtcol), a      ; column: DRAWTORCHB has no flame
+mtc:            ld      a, (mtcol)      ; there, but this port moved a torch
+                inc     a               ; there out from over a slicer
+                jr      nz, mtin        ; (bgexport's MOVES), and it burns
+                ld      a, (mtrow)      ; in this room's first column
+                add     a, a
+                ld      l, a
+                ld      h, 0
+                ld      de, prevblk
+                add     hl, de
+                ld      a, (hl)
+                and     0x1f
+                cp      BG_TORCH
+                jp      nz, mtnext
+                ld      hl, 7           ; room pixel 28 * -1 + 35
+                jr      mtpix
+mtin:           ld      a, (mtrow)
                 ld      l, a
                 ld      h, 0
                 add     hl, hl
@@ -48,7 +63,7 @@ mtc:            ld      a, (mtrow)
                 sbc     hl, bc          ; less four is twenty eight
                 ld      de, 35
                 add     hl, de
-                ld      a, l
+mtpix:          ld      a, l
                 and     7               ; three or seven
                 ld      (mtal), a
                 srl     h               ; and which byte it starts in
@@ -597,7 +612,12 @@ cvgroup:        push    bc
 
 ; A room, start to finish: the blocks laid into the canvas, then repacked.
 
-newroom:        ld      hl, CANVAS      ; the whole canvas: see rbwipe
+; The level's set put into the program: its own code says how (ovset,
+; bgovl.asm).  Every room, since a level may have brought a set.
+
+newroom:        call    page_bg
+                call    ovset
+                ld      hl, CANVAS      ; the whole canvas: see rbwipe
                 ld      (cvbasep), hl
                 ld      a, (pristok)    ; the level as it began is in the
                 or      a               ; canvas, which the room is about to
@@ -1175,6 +1195,7 @@ nrcgo:          xor     a               ; nothing of the last room's still
 
 levelgo:        xor     a
                 ld      (gdkeep), a
+                ld      (createshad), a
                 ld      (numtrans), a
                 ld      (nummob), a
                 ld      (exitopen), a
@@ -1430,13 +1451,16 @@ chssrc:         dw      0
 chsdst:         dw      0
 chslen:         dw      0
 
-; LD-BYTES in the 48K ROM, which is what is paged: the blueprint and its head
-; into the background bank, or the princess's room into the art bank.  Until it loads -- a tape not playing is waited
-; for, and one that went wrong is tried again.  The border it leaves is
-; BASIC's, and the game's is black.
+; LD-BYTES in the 48K ROM, which is what is paged: the next level into the
+; background bank -- its blueprint and head, or for a level of the other set
+; all the bank up to them, where and how long this level's head says -- or
+; the princess's room into the art bank.  Until it loads -- a tape not
+; playing is waited for, and one that went wrong is tried again.  The border
+; it leaves is BASIC's, and the game's is black.
 
-tapeload:       ld      hl, level
-                ld      de, LEVEL_LEN
+tapeload:       call    page_bg
+                ld      hl, (level + LV_HEAD + LH_NEXT)
+                ld      de, (level + LV_HEAD + LH_NEXTLEN)
                 ld      a, BANK_BG
 
 ; A block, whichever: HL where, DE how long, A the bank.
@@ -1525,6 +1549,8 @@ agface:         ld      (facing), a
                 jr      c, agprog
                 ld      a, 3            ; the default
 agprog:         ld      (guardprog), a
+                ld      hl, c1gprob     ; and what it makes him do
+                call    c1call
                 ld      a, (curlev)     ; level three's guard is the
                 cp      2               ; skeleton
                 ld      a, 2
@@ -1583,8 +1609,12 @@ agrect:         ld      (hl), a
                 ld      (alertguard), a
                 ld      (refract), a
                 ld      (justblocked), a
+                ld      a, (guardprog)  ; his strength, from his program
+                ld      e, a
+                ld      d, 0
                 ld      hl, extrastrength
-                call    gd_prog
+                add     hl, de
+                ld      a, (hl)
                 add     a, BASICSTR
                 jr      agstr
 agdead:         ld      a, 1
@@ -1596,6 +1626,8 @@ agstr:          ld      (oppstr), a
                 ld      (gdhere), a
 agnone:         pop     af
                 jp      pageset
+
+extrastrength:  db      0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0
 
 ; CUTCHECK in AUTO.S: the kid is going into room A the way C says -- 0 up,
 ; 1 down, 2 left, 3 right.  A live guard en garde close to that side goes
@@ -1621,6 +1653,9 @@ leave_room:     ld      (lrroom), a
 lrnomile:       ld      a, (gdhere)
                 or      a
                 ret     z
+                ld      a, (charid + OP) ; the shadow of level four is no
+                dec     a               ; guard, and is not left behind as
+                jp      z, gd_gone      ; one: VANISHCHAR
                 ld      a, (charlife + OP)
                 or      a
                 jp      p, update_guard ; dead: left behind

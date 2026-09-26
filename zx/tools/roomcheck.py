@@ -31,12 +31,14 @@ LEVELS = os.path.join(HERE, '..', '..', '01 POP Source', 'Levels')
 SENTINEL = 0x0010               # somewhere the game never runs
 
 
-def host(level, n):
+def host(level, n, bgset='DUN'):
     """The room as renderroom draws it, packed the way the game holds it."""
-    room = renderroom.Room('DUN')
+    room = renderroom.Room(bgset)
     room.hatch_walls = lambda ids: None      # our own touch, not POP's
     room.build(level, n)
-    px = renderroom.normalise_hatch(room.to_pixels(), level, n)
+    px = room.to_pixels()
+    if bgset == 'DUN':
+        px = renderroom.normalise_hatch(px, level, n)
     out = bytearray()
     for y in range(192):
         line = bytearray(35)
@@ -47,10 +49,10 @@ def host(level, n):
     return bytes(out)
 
 
-def host_masks(level, n):
+def host_masks(level, n, bgset='DUN'):
     """The two floorpiece masks as renderroom makes them, band by band, packed
     the way the game holds them: fifteen rows to a block row, 35 bytes each."""
-    floor, half = renderroom.floor_covers(level, n)
+    floor, half = renderroom.floor_covers(level, n, bgset)
     out = []
     for px in (floor, half):
         m = bytearray()
@@ -89,16 +91,19 @@ def main(argv):
         return 1
     sym = json.load(open(os.path.join(HERE, '..', 'build', 'sym.json')))
     num = int(argv[2]) if len(argv) > 2 else 1
+    bgset = bgexport.level_bgset(num)
     path = os.path.join(LEVELS, 'LEVEL%d' % num)
     level = poplevel.Level(path)
     # the gates as GETINITOBJ leaves them, which the host does not do
-    level.data = bgexport.gates_set(level.data)
+    level.data = bgexport.gates_set(bgexport.level_moved(num, level.data))
     cpu = runtap.boot(argv[1])
     runtap.game_frame(cpu, sym['main'], [])
     if num > 1:
         blob = open(os.path.join(HERE, '..', 'build', 'bin',
                                  'level%d.bin' % num), 'rb').read()
         at = sym['level'] - 0xC000
+        if len(blob) > sym['LEVEL_LEN']:        # it brings its set
+            at = 0
         if cpu.page == sym['BANK_BG']:
             cpu.mem[0xC000 + at:0xC000 + at + len(blob)] = blob
         else:
@@ -107,7 +112,7 @@ def main(argv):
     bad = badm = 0
     for n in range(1, 25):
         made = compose(cpu, sym, n)
-        want = host(level, n)
+        want = host(level, n, bgset)
         d = sum(1 for i in range(6720) if made[i] != want[i])
         if d:
             bad += 1
@@ -117,7 +122,7 @@ def main(argv):
         # And the two floorpiece masks newroom made on the way: a mask built
         # wrong is the same in a fresh build as in a patched one, so only a
         # reference from outside the game can see it.
-        for name, want_m in zip(('floormask', 'halfmask'), host_masks(level, n)):
+        for name, want_m in zip(('floormask', 'halfmask'), host_masks(level, n, bgset)):
             got = bytes(cpu.mem[sym[name]:sym[name] + len(want_m)])
             dm = [i for i in range(len(want_m)) if got[i] != want_m[i]]
             if dm:

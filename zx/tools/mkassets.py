@@ -107,9 +107,14 @@ FLAME_TABLE = [0x52, 0x53, 0x54, 0x55, 0x56, 0x61, 0x62, 0x63, 0x64,
 FLAME_UP = 43
 
 INK_ROOM = 0x05                 # cyan on black, the whole room
+# The palace is the dungeon's blue and white in orange and white on the
+# Apple: yellow on black, the Spectrum's nearest to that sandstone.
+INK_PALACE = 0x46              # bright: the user found plain yellow too dark
+INK_OF_SET = {'DUN': INK_ROOM, 'PAL': INK_PALACE}
 INK_FLAME_TOP = 0x02            # and where a torch burns: dark red at the
 INK_FLAME_MID = 0x42            # tip, bright red in the middle and yellow
-INK_FLAME_LOW = 0x06            # where it comes off the torch
+INK_FLAME_LOW = 0x06            # where it comes off the torch -- in the
+                                # palace, all yellow already, the room's own
 ROOM_PX = ROOM_BYTES * 8
 CAM_MAX = ROOM_BYTES - 32
 
@@ -156,13 +161,15 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 3
+LEVELS = 4
+START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
 # LOADLEVEL reads it off the disk with the blueprint when it is not the one
 # in memory already.  Level three's is the skeleton's; one and two have the
-# guard the tape starts with.
-CHSET = {3: 'IMG.CHTAB4.SKEL'}
+# guard the tape starts with, and four has him back.
+CHSET_OF_LEVEL = [0, 0, 0, 1, 2, 2, 3, 2, 2, 2, 2, 2, 4, 5, 5]
+CHSET_TABLE = {0: 'IMG.CHTAB4.GD', 1: 'IMG.CHTAB4.SKEL', 2: 'IMG.CHTAB4.GD'}
 
 
 def level_path(n):
@@ -179,18 +186,25 @@ def kid_place(block, face):
                   block // 10, 1 if face == 0xff else 0])
 
 
-def level_head(n, chset_len=0):
+def level_head(n, chset_len=0, nxt=(0, 0)):
     """
     STARTKID's normal start worked out here, where the tables are, whether
-    another level follows this one on the tape, and how long the block of
-    its character set is that follows it there, nought for none.
+    another level follows this one on the tape, how long the block of its
+    character set is that follows it there, nought for none, where the next
+    level's block goes in the background bank and how long it is -- the
+    blueprint, or for a level of the other set the bank up to it -- and the
+    set's colour and number.
     """
     scrn, block, face = poplevel.Level(level_path(n)).kid_start
+    bgset = bgexport.level_bgset(n)
     return (kid_place(block, face) + bytes([1 if n < LEVELS else 0])
-            + chset_len.to_bytes(2, 'little'))
+            + chset_len.to_bytes(2, 'little')
+            + nxt[0].to_bytes(2, 'little') + nxt[1].to_bytes(2, 'little')
+            + bytes([INK_OF_SET[bgset], bgexport.BGSETS.index(bgset)]))
 
 
-LEVEL_HEAD = 8
+LEVEL_HEAD = 14
+LH_NEXT, LH_NEXTLEN, LH_INK, LH_SET = 8, 10, 12, 13
 
 # STARTKID's :special3 and milestone3 in AUTO.S: level three's milestone is
 # passed when he goes left out of the room right of the first gate, and from
@@ -328,6 +342,8 @@ CPC_FOR_SOUND = {'PlateDown': 2, 'LooseCrash': 1,
                  'LoweringGate': 13, 'GateSlam': 0, 'SwordClash1': 7,
                  'SwordClash2': 7, 'GateTop': 14, 'Spikes': 6, 'Stabbed': 8,
                  'DoorShut': 3, 'Drink': 15, 'Slicer': 5,
+                 # nor for the mirror's: a floor's crash, glass breaking
+                 'MirrorCrack': 1,
                  # the CPC has none of its own for these: the blow's, as the
                  # user asked
                  'SmackWall': 8, 'Splat': 8, 'Impaled': 8}
@@ -368,7 +384,7 @@ def sword_table():
 FF_ROWS = 16                    # the foot's row and fifteen above it
 
 
-def chset_block(tabname, alt, alt_base, spans, tables, fdy_at):
+def chset_block(tabname, alt, alt_base, spans, tables, fdy_at, extra=()):
     """
     rdch4 in MASTER.S, for the tape: another fourth character table in place
     of the guard's -- the skeleton's, for level three.  The opponent is
@@ -382,6 +398,8 @@ def chset_block(tabname, alt, alt_base, spans, tables, fdy_at):
     a count of pieces, each one's bank, address and length, then the bytes
     of them all, one after another -- for levelgo to put where they go.
     """
+    if tabname is None:             # only the pieces in extra
+        return _parts_block(list(extra))
     t = popimg.Table(os.path.join(popframe.IMAGES, tabname))
     room = [[b, lo, hi, bytearray()] for b, lo, hi in spans]
     at = {}                     # a picture laid once, however many use it
@@ -412,22 +430,30 @@ def chset_block(tabname, alt, alt_base, spans, tables, fdy_at):
              for b, lo, hi, data in room if data]
     parts += [(BANK_CANVAS, tables + 6 * alt_base, bytes(recs)),
               (BANK_CANVAS, fdy_at + alt_base, bytes(fdy))]
+    return _parts_block(parts + list(extra))
+
+
+def _parts_block(parts):
+    """A count, each part's bank, address and length, then their bytes."""
     head = bytearray([len(parts)])
     for bank, addr, data in parts:
         head += (bytes([bank]) + addr.to_bytes(2, 'little')
                  + len(data).to_bytes(2, 'little'))
-    return bytes(head) + b''.join(p[2] for p in parts)
+    block = bytes(head) + b''.join(p[2] for p in parts)
+    assert PAGE_WINDOW + len(block) <= 0x10000 - 12, 'a character set is over the art bank'
+    return block
 
 
-def falling_floor(shift=0):
+def falling_floor(shift=0, bgset='DUN', minw=0):
     """(width in bytes, the rows as (mask, data) pairs), laid shift pixels
     into its first byte: 28 pixels a block leaves a block's left edge on a
-    byte or four pixels into one."""
+    byte or four pixels into one.  At least minw bytes wide, so that the
+    palace's can go where the dungeon's was."""
     bgd, x, y = renderroom.bg, 8, 100
     f = bgd.Ffalling
 
     def render(fill):
-        r = renderroom.Room('DUN')
+        r = renderroom.Room(bgset)
         if fill:
             for line in r.canvas:
                 for i in range(len(line)):
@@ -443,7 +469,7 @@ def falling_floor(shift=0):
     left, rows = x * 7, range(y - FF_ROWS + 1, y + 1)
     own = [c for c in range(left, min(len(clear[0]), left + 8 * 8))
            if any(clear[r][c] == solid[r][c] for r in rows)]
-    width = (own[-1] - left + shift + 8) // 8
+    width = max(minw, (own[-1] - left + shift + 8) // 8)
     out = bytearray()
     for r in rows:
         for b in range(width):
@@ -708,13 +734,17 @@ def main(argv):
     used += [f for f in (161,) if f not in used]
     table, blobs, trims = build_sprites(used)
     # A falling floor is nobody's frame, so it goes one past his own, in the
-    # bank the last of the sprites leave half empty.
-    ff_w, ff_data = falling_floor()
+    # bank the last of the sprites leave half empty.  It is the set's own
+    # loose floor, as wide whichever set, so that a level of the other set
+    # can bring its own over it (ff_parts).
+    start_set = bgexport.level_bgset(START_LEVEL)
+    ffw = [max(falling_floor(s, b)[0] for b in bgexport.BGSETS) for s in (0, 4)]
+    ff_w, ff_data = falling_floor(0, start_set, ffw[0])
     ff_frame = len(table) // 6
     ff_at = ((len(blobs) - 1) << BANK_SHIFT) | len(blobs[-1])
     table += bytes([ff_w, FF_ROWS, 0, 0]) + ff_at.to_bytes(2, 'little')
     blobs[-1] += ff_data
-    ff_w4, ff_data4 = falling_floor(4)
+    ff_w4, ff_data4 = falling_floor(4, start_set, ffw[1])
     ff_at4 = len(blobs[-1])
     blobs[-1] += ff_data4
     ff_at0 = ff_at & ((1 << BANK_SHIFT) - 1)
@@ -824,21 +854,35 @@ def main(argv):
     # The background bank: the two dungeon image tables, the piece tables of
     # BGDATA.S and the level's blueprint, in a shape a Z80 can index.  A room
     # is composed out of these when it is walked into, the way POP does it.
-    bgblob, bgat, bgoffs = bgexport.build(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), '..', '..',
-        '01 POP Source', 'Levels', ROOM[0]))
+    bgblob, bgat, bgoffs = bgexport.build(level_path(START_LEVEL), start_set)
+    # The levels after the first on the tape: each one's block is its
+    # blueprint and head, or for a level of the other set the whole bank up
+    # to them, its set's tables, code and pictures -- and each head says
+    # where the next one goes and how long it is.
+    later = list(range(START_LEVEL + 1, LEVELS + 1))
+    switch = {n: bgexport.level_bgset(n) != bgexport.level_bgset(n - 1)
+              for n in later}
+    nxt = {n - 1: ((PAGE_WINDOW if switch[n] else PAGE_WINDOW + bgat['level']),
+                   (bgat['level'] if switch[n] else 0) + 2304 + LEVEL_HEAD)
+           for n in later}
     # After the blueprint, what the Z80 needs to start a level: see
-    # level_head.  Level one's is only there to keep the shape; the next
-    # levels come off the tape as blueprint and head together, over it.
+    # level_head.  The first level's gives its set and the way to the next;
+    # the next levels come off the tape as blueprint and head together, over
+    # it.
     assert bgat['level'] + 2304 == len(bgblob)
-    bgblob = bytes(bgblob) + level_head(1)
+    bgblob = bytes(bgblob) + level_head(START_LEVEL, 0,
+                                        nxt.get(START_LEVEL, (0, 0)))
+    # Which files carry which set's code, for build.sh to put in once it is
+    # assembled: see bgovl.asm.
+    ovl = ['build/bin/bank_bg.bin %d %d'
+           % (bgat['bgovl'], bgexport.BGSETS.index(start_set))]
     # The torch flames go in after the level.  They are read a frame at a
     # time, into a buffer, before they are laid over the room -- which is
     # in the art bank, so they could not be read from here directly -- and
     # the fixed half of the map has code to hold instead.
     flames_at = len(bgblob)
     bgblob = bytes(bgblob) + bytes(flames)
-    assert len(bgblob) <= BANK_SIZE, 'the background bank is full'
+    assert len(bgblob) <= BANK_SIZE - 12, 'the background bank is full'
     open(os.path.join(binout, 'bank_bg.bin'), 'wb').write(bgblob)
     # The canvas bank is bank 7, whose first 6912 bytes are the 128K's
     # second screen.  The tape still drops the frame table and the sequences
@@ -854,23 +898,58 @@ def main(argv):
     # tape's blocks in order, for build.sh.
     fdy_at = tables + len(table) + len(code) + len(entry) + 2 * top
     tape = []
-    for n in range(2, LEVELS + 1):
-        chset = (chset_block(CHSET[n], alt, alt_base, alt_spans,
-                             tables, fdy_at) if n in CHSET else b'')
-        blob = bgexport.level_blob(level_path(n)) + level_head(n, len(chset))
+    ffbank = BANK_SPR[ff_blob]
+
+    def ff_parts(bgset):
+        """The set's falling floor over the other's, both shifts."""
+        return [(ffbank, PAGE_WINDOW + ff_at0,
+                 falling_floor(0, bgset, ffw[0])[1]),
+                (ffbank, PAGE_WINDOW + ff_at4,
+                 falling_floor(4, bgset, ffw[1])[1])]
+
+    for n in later:
+        new_ch = CHSET_OF_LEVEL[n] != CHSET_OF_LEVEL[n - 1]
+        extra = ff_parts(bgexport.level_bgset(n)) if switch[n] else []
+        chset = (chset_block(CHSET_TABLE[CHSET_OF_LEVEL[n]] if new_ch else None,
+                             alt, alt_base, alt_spans, tables, fdy_at, extra)
+                 if new_ch or extra else b'')
+        head = level_head(n, len(chset), nxt.get(n, (0, 0)))
+        blob = bgexport.level_blob(level_path(n)) + head
+        if switch[n]:
+            blob = bgexport.set_blob(bgexport.level_bgset(n)) + blob
+            ovl.append('build/bin/level%d.bin %d %d'
+                       % (n, bgat['bgovl'],
+                          bgexport.BGSETS.index(bgexport.level_bgset(n))))
+        assert len(blob) == nxt[n - 1][1]
         open(os.path.join(binout, 'level%d.bin' % n), 'wb').write(blob)
         tape.append('build/bin/level%d.bin' % n)
+        print('level%d.bin  %d байт%s' % (n, len(blob),
+                                         ', с картинками дворца' if switch[n]
+                                         and bgexport.level_bgset(n) == 'PAL'
+                                         else ''))
         if chset:
             open(os.path.join(binout, 'chset%d.bin' % n), 'wb').write(chset)
             tape.append('build/bin/chset%d.bin' % n)
-            print('chset%d.bin  %d байт: %s' % (n, len(chset), CHSET[n]))
-    open(os.path.join(binout, 'tape.lst'), 'w', newline='').write('\n'.join(tape) + '\n')
+            print('chset%d.bin  %d байт: %s%s'
+                  % (n, len(chset),
+                     CHSET_TABLE[CHSET_OF_LEVEL[n]] if new_ch else '',
+                     ', падающий пол' if extra else ''))
+    open(os.path.join(binout, 'tape.lst'), 'w', newline='').write(''.join(t + '\n' for t in tape))
+    open(os.path.join(binout, 'ovl.lst'), 'w', newline='').write('\n'.join(ovl) + '\n')
     # The sounds go after the last of the sprites, in the canvas's bank:
     # which CPC effect each of POP's sounds and tunes is, the effects' table
     # and their data, read with that bank paged in for a moment.
     while len(blobs) < 3:
         blobs.append(b'')
     sfxtab, sfxdata = cpcsound.build(binout)
+    # A tune plays out: the CPC's effects that are POP's songs get a
+    # priority over every sound effect (the highest is 8), so a slicer's
+    # chop no longer cuts the victory short -- the user asked.  A tune still
+    # takes over from a tune.
+    sfxtab = bytearray(sfxtab)
+    for e in set(CPC_FOR_SONG.values()):
+        sfxtab[3 * e + 2] = 9
+    sfxtab = bytes(sfxtab)
     sfxmap = bytes(CPC_FOR_SOUND.get(n, NONE) for n in SOUNDS)
     sfxmap += bytes(CPC_FOR_SONG.get(n, NONE) for n in range(SONGS))
     sfxmap_at = PAGE_WINDOW + len(blobs[2])
@@ -1092,7 +1171,9 @@ def main(argv):
         f.write('BANK_ART    equ %d' % BANK_ART + chr(10))
         for i, n in enumerate(BANK_SPR):
             f.write('BANK_SPR%d   equ %d' % (i + 1, n) + chr(10))
-        f.write('INK_ROOM    equ %d' % INK_ROOM + chr(10))
+        f.write('INK_ROOM    equ %d' % INK_OF_SET[start_set] + chr(10))
+        f.write('INK_DUN     equ %d' % INK_OF_SET['DUN'] + chr(10))
+        f.write('INK_PAL     equ %d' % INK_OF_SET['PAL'] + chr(10))
         f.write('INK_FLAME_TOP equ %d' % INK_FLAME_TOP + chr(10))
         f.write('INK_FLAME_MID equ %d' % INK_FLAME_MID + chr(10))
         f.write('INK_FLAME_LOW equ %d' % INK_FLAME_LOW + chr(10))
@@ -1132,6 +1213,11 @@ def main(argv):
         f.write('LV_ARMED1   equ %d\n' % (1 if LEVELS > 1 else 0))
         f.write('LV_KIDSCRN  equ %d\n' % (poplevel.INFO + poplevel.KidStartScrn))
         f.write('LV_HEAD     equ 2304\n')
+        f.write('LH_NEXT     equ %d\n' % LH_NEXT)
+        f.write('LH_NEXTLEN  equ %d\n' % LH_NEXTLEN)
+        f.write('LH_INK      equ %d\n' % LH_INK)
+        f.write('LH_SET      equ %d\n' % LH_SET)
+        f.write('BGOVL_LEN   equ %d\n' % bgexport.BGOVL_LEN)
         f.write('MS3_X       equ %d\n' % (MILESTONE3[0] | MILESTONE3[1] << 8))
         f.write('MS3_Y       equ %d\n' % MILESTONE3[2])
         f.write('MS3_ROW     equ %d\n' % MILESTONE3[3])

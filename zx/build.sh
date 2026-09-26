@@ -36,6 +36,30 @@ PY
 cd src
 ../tools/pasmo.exe --bin cut1.asm ../build/cut1code.bin ../build/cut1.sym
 cd ..
+# Each background set's own code (bgovl.asm), in the background bank with
+# its pictures: the same way, the game's symbols for what it uses.
+python - <<'PY'
+import re
+sym = {}
+for line in open('build/pop.sym'):
+    m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
+    if m:
+        sym[m.group(1)] = int(m.group(2), 16)
+text = ''.join(l.split(';')[0] + ' ' for l in open('src/bgovl.asm'))
+used = set(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', text))
+own = {m.group(1) for l in open('src/bgovl.asm')
+       for m in [re.match(r'([A-Za-z_][A-Za-z0-9_]*)(:|\s+equ\s)', l, re.I)] if m}
+with open('src/bgsyms.inc', 'w') as f:
+    f.write('; what bgovl.asm uses of the game: build.sh -- do not edit\n')
+    for name in sorted((used & set(sym)) - own):
+        f.write('%-15s equ     0x%04X\n' % (name, sym[name]))
+PY
+cd src
+for s in 0 1; do
+    echo "OVLSET          equ     $s" > ovlset.inc
+    ../tools/pasmo.exe --bin bgovl.asm ../build/bgovl$s.bin ../build/bgovl$s.sym
+done
+cd ..
 # The control code is assembled at its place in the canvas bank: cut it out
 # of the program and put it after the tables it travels up with.
 python - <<'PY'
@@ -100,6 +124,21 @@ assert sym['hiend'] <= 0xC000, 'the fight does not fit under the window'
 spare = open('build/bin/bank_spare.bin', 'rb').read()
 assert len(spare) == sym['SPARE_LEN'], 'the tables are not where MODORG says'
 open('build/bin/bank_spare.bin', 'wb').write(spare + mod)
+# The sets' code into the bank's image and the blocks that bring a set.
+ovl = [open('build/bgovl%d.bin' % s, 'rb').read() for s in (0, 1)]
+for s, o in enumerate(ovl):
+    assert len(o) <= sym['BGOVL_LEN'], 'код набора %d длиннее BGOVL_LEN' % s
+print('код наборов: подземелье %d, дворец %d байт из %d'
+      % (len(ovl[0]), len(ovl[1]), sym['BGOVL_LEN']))
+for line in open('build/bin/ovl.lst'):
+    if not line.strip():
+        continue
+    path, off, s = line.split()
+    off, s = int(off), int(s)
+    b = bytearray(open(path, 'rb').read())
+    assert not any(b[off:off + sym['BGOVL_LEN']]), path
+    b[off:off + len(ovl[s])] = ovl[s]
+    open(path, 'wb').write(b)
 print('управление %04X..%04X, %d байт в банке 7, свободно там %d'
       % (sym['MODORG'], sym['modend'], len(mod), 0x10000 - sym['modend']))
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'

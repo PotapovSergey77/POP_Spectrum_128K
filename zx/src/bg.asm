@@ -473,11 +473,11 @@ draw_b:         ld      a, (objid)
                 cp      BG_FLOOR
                 jr      z, dbfloor
                 cp      BG_BLOCK
-                jr      z, dbblock
+                jp      z, dbblock
 
                 call    tab_pieceb
                 or      a
-                ret     z
+                jr      z, dbstripe
                 ld      c, a
                 ld      a, (bgtables + T_PANELB0)
                 cp      c
@@ -489,7 +489,9 @@ draw_b:         ld      a, (objid)
                 pop     bc
                 ld      a, c
                 ld      c, BG_ORA
-                jp      bglay
+                call    bglay
+dbstripe:       call    page_bg         ; and the palace adds a stripe on the
+                jp      ovstripe        ; wall: the set's own code, bgovl.asm
 dbpanel:        ld      a, (bgtables + T_NUMPANS)
                 ld      c, a
                 ld      a, (spreced)
@@ -1091,13 +1093,13 @@ draw_front:     call    page_bg
                 ld      hl, frydy
                 add     a, (hl)
                 call    bgay
+                ld      a, (objid)      ; maddfore: a halo cleared round it,
+                ld      c, BG_MASK      ; as POP lays it -- for the bottle,
+dfpost:         cp      BG_POSTS        ; and in the palace the posts too:
+                jr      z, dfsta        ; the dungeon's are stamped, and
+                cp      BG_FLASK        ; newroom points this at dfgo for
+                jr      z, dfgo         ; the palace's
                 ld      c, BG_ORA
-                ld      a, (objid)
-                cp      BG_FLASK        ; maddfore: the bottle with a halo
-                jr      nz, dfnotfl     ; cleared round it, as POP lays it
-                ld      c, BG_MASK
-dfnotfl:        cp      BG_POSTS
-                jr      z, dfsta
                 cp      BG_ARCHTOP2
                 jr      c, dfgo
 dfsta:          ld      c, BG_STA
@@ -1532,17 +1534,15 @@ nfront:         db      0
 FLOORCAN        equ     MASKCAN         ; in the pixels' bank, past the canvas
 HALFCAN         equ     FLOORCAN + CANVAS_W * 45
 
-; The tiles that have a half piece in the dungeon set.  Anything else falls
-; back to the whole floorpiece, exactly as FRAMEADV.S does.
+; DRAWHALF's piece for the tile: CUpiece for the tiles that have a half
+; piece, and in the palace CUpost for a post and the foot of an arch -- the
+; set's table says, halfimg.  Out: NZ and A the piece, or Z for none, and
+; the whole floorpiece instead, exactly as FRAMEADV.S does.  The bank in.
 
 halfpiece:      ld      a, (objid)
-                cp      BG_FLOOR
-                ret     z
-                cp      BG_TORCH
-                ret     z
-                cp      BG_DPRESSPLATE
-                ret     z
-                cp      BG_EXIT
+                ld      hl, bgtables + T_HALFIMG
+                call    bgentry
+                or      a
                 ret
 
 ; One block's floorpiece, into whichever mask is in hand.
@@ -1555,7 +1555,8 @@ floorpiece:     ld      a, (preced)     ; drawfloor and drawhalf both begin
                 dec     a
                 jr      z, fpwhole      ; the first mask is the whole piece
                 call    halfpiece
-                jr      nz, fpwhole
+                jr      z, fpwhole
+                push    af
                 ld      a, (ay)         ; CUmask and CUpiece, the short one
                 ld      c, a
                 ld      a, (objid)
@@ -1570,7 +1571,7 @@ fpcu:           ld      (yco), a
                 call    page_bg
                 ld      a, (ay)
                 ld      (yco), a
-                ld      a, (bgtables + T_CUPIECE)
+                pop     af
                 ld      c, BG_ORA
                 call    bglay
                 jp      draw_d
@@ -3125,8 +3126,8 @@ mobpass:        ld      hl, moblevel
 mobknock:       call    mobtrob         ; that floor is space now
                 ld      a, BG_SPACE
                 call    trobtype
-                xor     a
-                ld      (trobst), a
+mkspace1:       ld      a, 0            ; MAKESPACE: the palace's space has
+                ld      (trobst), a     ; its stripe, spec 1 -- see newroom
                 call    trobsave
                 ld      a, (mobvel)
                 srl     a
@@ -3181,9 +3182,11 @@ mobrubble:      call    mobtrob
                 ret     nz
                 jr      mbrput
 mbrjam:         ld      a, BG_RUBBLE    ; jammed: the gates it holds stay open
-                call    trobtype
+                call    trobtype        ; -- PUSHPP reads the block, rubble
+                ld      a, BG_RUBBLE    ; now, and its gates open for good
+                jr      mbrpush
 mbrpp:          ld      a, (mobunder)
-                call    pushpp
+mbrpush:        call    pushpp
                 call    mobtrob
 mbrput:         ld      a, BG_RUBBLE
                 call    trobtype
@@ -3735,7 +3738,7 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 call    trobtype
                 ld      a, 1            ; and the wedges with it
                 ld      (mskwant), a
-                xor     a               ; the id stays the loose floor's, so
+mkspace2:       ld      a, 0            ; the id stays the loose floor's, so
                 ld      (trobst), a     ; that the space it leaves goes to the
                 call    mobstart        ; front of the queue; and it falls
                 jp      stopobj
