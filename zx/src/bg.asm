@@ -1873,6 +1873,7 @@ BOTCUT          equ     215             ; ScrnBottom + 24
 ; stairs, when the next level is loaded; 0 when there is none.
 
 lvflag:         db      LV_ARMED1
+cuttimer:       db      0
 
 nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
                 cp      2               ; has: LoadNextLevel, by way of the
@@ -1891,13 +1892,18 @@ nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
                 ld      a, c
                 jr      nrcall
 
-cutchar:        ld      a, (charact)    ; falling: only the bottom counts
+; CUTCHECK: none for two frames once a room is drawn -- CUTTIMER, which
+; drawbg sets.  Level seven's start wants it: he comes in above the top of
+; the room, and has run round it before he is looked at.
+
+cutchar:        ld      hl, cuttimer
+                dec     (hl)
+                ret     p
+                inc     (hl)            ; run out: nought it stays
+                ld      a, (charact)    ; falling: only the bottom counts
+                sub     3               ; -- 3, 4 and 5
                 cp      3
-                jr      z, ccnotup
-                cp      4
-                jr      z, ccnotup
-                cp      5
-                jr      z, ccnotup
+                jr      c, ccnotup
                 ld      a, (chary)
                 cp      TOPCUTPL
                 jr      c, nrup

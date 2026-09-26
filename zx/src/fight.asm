@@ -2959,4 +2959,3 @@ ztemp:          db      0
 cacount:        db      0               ; CHECKALERT's ]Xcount and ]Xend, as
 caend:          db      0               ; block columns
 
-BASICSTR        equ     3               ; basicstrength for level 1

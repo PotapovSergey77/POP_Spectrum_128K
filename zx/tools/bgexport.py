@@ -32,6 +32,7 @@ import struct
 
 import bgdata as bg
 import popimg
+import poplevel
 
 IMAGES = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..',
                       '01 POP Source', 'Images')
@@ -455,11 +456,26 @@ def level_moved(n, level):
     return bytes(level)
 
 
+# STARTKID in SUBS.S: on the WTLESS level, starting in screen 17, the kid is
+# cut down at once into the room below it, and falls in from the top.  The
+# game starts him there: KidStartScrn is that room, and the level's head
+# (mkassets) has his place worked out past the cut.
+WTLESS_CUT = (7, 17)
+
+
+def kid_cut(n, level):
+    level = bytearray(level)
+    at = poplevel.INFO + poplevel.KidStartScrn
+    if (n, level[at]) == WTLESS_CUT:
+        level[at] = level[poplevel.MAP + (level[at] - 1) * 4 + 3]
+    return bytes(level)
+
+
 def level_blob(level_path):
     """A level's blueprint as the game keeps it."""
     n = int(os.path.basename(level_path)[5:])
-    return gates_set(flasks_set(guards_fixed(
-        level_moved(n, open(level_path, 'rb').read()))))
+    return kid_cut(n, gates_set(flasks_set(guards_fixed(
+        level_moved(n, open(level_path, 'rb').read())))))
 
 
 # The background bank is laid out once for both sets: the piece tables, the

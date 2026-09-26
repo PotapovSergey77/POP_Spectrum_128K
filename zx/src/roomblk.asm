@@ -1121,7 +1121,7 @@ nrcut:          ld      a, (nrwhich)    ; the stub has the room already: all
                 dec     a
                 jr      z, nrcleft
                 dec     a
-                jr      nz, levelgo
+                jp      nz, levelgo
 
                 ld      hl, (charx)     ; right
                 ld      de, -280
@@ -1183,6 +1183,8 @@ nrcgo:          xor     a               ; nothing of the last room's still
                 ld      (mbold + 6), a
                 ld      (mbshow + 2), a
                 ld      (mbshow + 6), a
+                ld      a, 2            ; drawbg's CUTTIMER: no cut for two
+                ld      (cuttimer), a   ; frames
                 jp      nrfinish        ; and out of this block first: the
                                         ; repaint goes straight over it
 
@@ -1618,12 +1620,16 @@ agrect:         ld      (hl), a
                 ld      (refract), a
                 ld      (justblocked), a
                 ld      a, (guardprog)  ; his strength, from his program
-                ld      e, a
+                ld      e, a            ; and his level (getgdstrength)
                 ld      d, 0
                 ld      hl, extrastrength
                 add     hl, de
+                ld      a, (curlev)
+                ld      e, a
                 ld      a, (hl)
-                add     a, BASICSTR
+                ld      hl, basicstrength
+                add     hl, de
+                add     a, (hl)
                 jr      agstr
 agdead:         ld      a, 1
                 ld      (charlife), a
@@ -1636,6 +1642,8 @@ agnone:         pop     af
                 jp      pageset
 
 extrastrength:  db      0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0
+basicstrength:  db      3, 3, 3, 3, 4, 5, 4     ; levels 1-7, as far as the
+                                                ; tape goes
 
 ; CUTCHECK in AUTO.S: the kid is going into room A the way C says -- 0 up,
 ; 1 down, 2 left, 3 right.  A live guard en garde close to that side goes

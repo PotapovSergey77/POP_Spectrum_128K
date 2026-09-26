@@ -163,7 +163,7 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 6
+LEVELS = 7
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
@@ -200,7 +200,14 @@ def level_head(n, chset_len=0, nxt=(0, 0)):
     """
     scrn, block, face = poplevel.Level(level_path(n)).kid_start
     bgset = bgexport.level_bgset(n)
-    return (kid_place(block, face) + bytes([1 if n < LEVELS else 0])
+    place = bytearray(kid_place(block, face))
+    if (n, scrn) == bgexport.WTLESS_CUT:
+        # the WTLESS level's: STARTKID cuts him down into the room below
+        # (CUT's Cdown), CharY 189 up and the block row three, round a
+        # byte; the blueprint's KidStartScrn is that room (level_blob)
+        place[2] = (place[2] - 189) & 0xff
+        place[3] = (place[3] - 3) & 0xff
+    return (bytes(place) + bytes([1 if n < LEVELS else 0])
             + chset_len.to_bytes(2, 'little')
             + nxt[0].to_bytes(2, 'little') + nxt[1].to_bytes(2, 'little')
             + bytes([INK_OF_SET[bgset], bgexport.BGSETS.index(bgset)])

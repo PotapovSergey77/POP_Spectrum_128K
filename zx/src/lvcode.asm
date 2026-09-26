@@ -364,8 +364,8 @@ thptr:          dw      0               ; and PreRecPtr, where it points
 ; the kid, jumping it, is at posn 43 short of the middle of the screen, the
 ; shadow steps forward onto the plate -- DoPress, DoFwd.  And falling off
 ; screen 1 is no cut to the room below: CharY runs on round, and under 20
-; the next level has him.  The tape has no level after this one yet, so
-; there the level begins again.
+; the next level has him -- level seven, which STARTKID begins with him
+; falling in (mkassets' level_head).
 
 PLSCRN          equ     1
 PLX             equ     2 * (0x51 - 58) ; shadpos6a's CharX, our pixels

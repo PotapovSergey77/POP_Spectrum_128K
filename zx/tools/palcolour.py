@@ -38,6 +38,10 @@ DOORS = {bg.pieceb[bg.exit_], bg.pieceb[bg.exit2],
 # a pixel or two in the arches' last row of cells.
 NEUTRAL = {bg.pieceb[bg.torch], bg.pieced[bg.archtop1]}
 DOOR_FLOOR = 48                 # the posts' pictures have the floor below
+# The balcony's pictures (window, window2) carry the floor it stands on from
+# this row down: grey, as the floor either side of it (the user).
+BALCONY = {bg.pieceb[bg.window], bg.pieceb[bg.window2]}
+BALCONY_FLOOR = 46
 PANEL = 0x80 | bgexport.PANEL_IMG
 
 
@@ -131,6 +135,8 @@ def kind(own):
         return 'R'                      # blue, if all of it can be: rails
     if img in FLOOR_RAILS or img == bg.bstripe[bg.floor]:
         return 'F'                      # the same rail, where he walks
+    if img in BALCONY and r >= BALCONY_FLOOR:
+        return '.'
     if img in WINDOWS:
         return 'Y'
     if img in DOORS and r < DOOR_FLOOR:
