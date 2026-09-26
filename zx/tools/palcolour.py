@@ -77,9 +77,13 @@ FLOOR_RAILS = {bg.floorb[1], bg.floorb[2], bg.pieceb[bg.floor],
                bg.pieceb[bg.rubble], bg.pieceb[bg.bones]}
 
 
+def panel_rows(r):
+    return bgexport.PANEL_PAT[1] <= r < bgexport.PANEL_FIELD[3]
+
+
 def panel_blue(x, r):
     px, py = bgexport.PANEL_PAT
-    return px <= x < px + 5 and py <= r < bgexport.PANEL_FIELD[3]
+    return px <= x < px + len(bgexport.DIAMOND[0]) and panel_rows(r)
 
 
 class Owned(R.Room):
@@ -133,6 +137,8 @@ def kind(own):
         return None                     # its own shape: door_cells
     if img == PANEL and panel_blue(x, r):
         return 'B'
+    if img == PANEL:
+        return 'P'                      # its frame: see cells
     if arch_blue(img, x, r):
         return 'B'
     return '.'
@@ -166,10 +172,19 @@ def door_cells(room, grid, entrance):
         for side in (lambda x: x < mid, lambda x: x > mid):
             cols = [x // 8 for x, y in d
                     if side(x) and top + 2 < y // 8 <= bot]
+            main = max(set(cols), key=cols.count)
             if entrance:
-                posts.add(max(set(cols), key=cols.count))
+                posts.add(main)
             else:
-                posts |= set(range(min(cols), max(cols) + 1))
+                span = set(range(min(cols), max(cols) + 1))
+                # but not a column on the door's inside with less than
+                # half the post in it: only its thin edge (the user, level
+                # five's exit)
+                inner = max(span) if side(0) else min(span)
+                if (len(span) > 1 and inner != main
+                        and cols.count(inner) * 2 < cols.count(main)):
+                    span.discard(inner)
+                posts |= span
         deep = 2
         for cy in range(top, top + deep):
             for cx in range(min(posts), max(posts) + 1):
@@ -226,6 +241,15 @@ def cells(level, n):
                         own = room.owner[y][x]
                         ks.add(kind(own) if own else '.')
             ks.discard(None)
+            # A cell with some of the panel's chain is blue whatever of the
+            # panel's own frame shares it -- its last link with the frame's
+            # foot, or four pixels along the cells its side -- or the chain
+            # stops short, or is not blue at all (the user).  Something
+            # else in it still keeps it grey.
+            if 'P' in ks:
+                ks.discard('P')
+                if ks != {'B'}:
+                    ks.add('.')
             line += ('f' if 'F' in ks else 'r' if 'R' in ks and ks != {'R'}
                      else ks.pop() if len(ks) == 1 and ks != {'.'} else ' ')
         raw.append(line)

@@ -166,6 +166,8 @@ start:          xor     a               ; the kid shown whole, unless the
 ; After the frame's moves, before it is drawn: the level's own.
 
 post:           ld      a, (curlev)
+                cp      LEVEL5
+                jp      z, thief
                 cp      LEVEL4
                 ret     nz
                 ld      a, (exitopen)   ; MIRAPPEAR, called by MOVER when
@@ -359,9 +361,116 @@ shadow:         ld      a, (reflon)
                 add     hl, de
                 bit     7, h
                 jp      nz, gd_gone     ; VANISHCHAR
-                ld      a, 0xff         ; DoFwd
+                ld      a, 1            ; DoFwd
                 ld      (shadkey), a
                 ret
+
+; ---------------------------------------------------------------- the thief
+;
+; Level five's (ShadLevel5 and ADDGUARD's :not5 in AUTO.S): in screen 24,
+; while its flask is there, the shadowman stands just off the left of it
+; (shadpos5); once the gate in its top row is up past 20 he plays back
+; ShadProg5 -- runs in, drinks the flask, turns and runs off -- and past
+; CharX 15 he is gone.  Made here the frame the kid is in the room without
+; him, which is ADDGUARD's moment: nothing else ever stands there.
+
+LEVEL5          equ     4
+FLASKSCRN       equ     24              ; flaskscrn, flaskx, flasky
+FLASKAT         equ     0 * 10 + 3
+THGATE          equ     0 * 10 + 1      ; ShadLevel5's rdblock 1, 0
+THX             equ     2 * (0x37 - 58) ; shadpos5's CharX, our pixels
+THOUT           equ     X_MIN + 2       ; ShadLevel5's CharX 15 is -86 of
+                                        ; ours, past move_by's backstop at
+                                        ; X_MIN: gone there, well out of sight
+
+thief:          ld      a, (roomnum)
+                cp      FLASKSCRN
+                ret     nz
+                ld      a, (gdhere)
+                or      a
+                jr      nz, thplay
+                ld      a, (roomids + FLASKAT)
+                and     0x1f
+                cp      BG_FLASK
+                ret     nz
+
+; csps shadpos5: posn 15, standing, facing right, on the top row's floor,
+; stand next, and the shadow's strength, four.  He never fights, so no
+; program: ShadowProg is his, and plays him back.
+
+                ld      hl, threc
+                ld      de, oprec
+                ld      bc, CHRECLEN
+                ldir
+                ld      a, 4            ; shadstrength
+                ld      (oppstr), a
+                ld      hl, shprog5     ; PlayCount and PreRecPtr nought
+                ld      (thptr), hl
+                xor     a
+                ld      (playcount), a
+                inc     a
+                ld      (gdhere), a
+                                        ; and on: nothing pressed yet -- not
+                                        ; the last shadow's forward
+
+; AUTOPLAYBACK: a frame's count, and the command whose frame it has come
+; to -- or the one before it again -- for the next frame's keys.  Not
+; begun until the gate is up.
+
+thplay:         xor     a
+                ld      (shadkey), a
+                ld      a, (charid + OP)
+                dec     a
+                ret     nz
+                ld      hl, playcount
+                ld      a, (hl)
+                or      a
+                jr      nz, thgo
+                ld      a, (roomids + 30 + THGATE)
+                cp      20
+                ret     c
+thgo:           ld      a, (hl)
+                cp      254
+                jr      nc, thout
+                inc     (hl)
+                ld      a, (hl)
+                ld      hl, (thptr)
+                cp      (hl)
+                jr      c, thlast       ; not there yet: the last again
+                inc     hl
+                ld      a, (hl)
+                inc     hl
+                ld      (thptr), hl
+                jr      thset
+thlast:         dec     hl
+                ld      a, (hl)
+thset:          ld      (shadkey), a
+thout:          ld      hl, (charx + OP)
+                ld      de, -THOUT
+                add     hl, de
+                bit     7, h
+                jp      nz, gd_gone     ; VANISHCHAR
+                ret
+
+; ShadProg5: frame, command -- 0 let go, 1 forward, 2 back, 6 press, 7
+; release, 254 the end.
+
+shprog5:        db      0, 0, 1, 1, 14, 0, 18, 6, 29, 7, 45, 2, 49, 1
+                db      255, 254
+
+; shadpos5 as the second character's record: CharX, CharY, facing right,
+; posn 15, stand, the top row, standing, no sword, the shadowman, alive,
+; nothing of him drawn, and his picture whole.
+
+threc:          dw      THX
+                db      55, 1, 15
+                dw      seqs + SO_STAND
+                db      0, 0, 0, 0, 1, 0xff
+                ds      CHRECLEN - 14
+                db      192
+
+playcount:      db      0               ; PlayCount
+thptr:          dw      0               ; and PreRecPtr, where it points
 
 ; ---------------------------------------------------------------- colour
 ;

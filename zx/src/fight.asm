@@ -460,11 +460,10 @@ gd_gone:        xor     a
                 ld      (neww + OP), a
                 ret
 
-; ShadowProg: what the shadow presses, bgovl.asm has said.
+; ShadowProg: what the shadow presses, bgovl.asm has said -- c1shad.
 
-acshad:         ld      a, (shadkey)
-                ld      (jstkx), a
-                ret
+acshad:         ld      hl, c1shad
+                jp      c1call
 
 ; ---------------------------------------------------------------- AUTO.S
 ;

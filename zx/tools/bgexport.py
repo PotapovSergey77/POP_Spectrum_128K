@@ -170,20 +170,22 @@ def set_table(n, bgset='DUN'):
 # the Apple fills with blue by lighting every other pixel -- on the Spectrum,
 # one ink to the cell, that is grey stripes.  The user asked for a pattern
 # there instead, in blue, with the frame left grey: so the field is cleared
-# and a chain of diamonds drawn down the one column of cells that lies
-# wholly inside it where the panel stands in the top row at the left of a
-# room, which is where it is seen (palcolour.py colours those cells).
+# and a chain drawn down it, which palcolour.py colours.  A block is 28
+# pixels, so a panel stands either on the cells or four pixels along them:
+# the chain is four wide, x 8 to 11, the pixels the cells either way have
+# inside the field (the user chose it narrower over a panel half grey).
 PANEL_IMG = 1                   # in the second table
 PANEL_FIELD = (6, 16, 5, 46)    # x from, to; rows from, to: the stripes
-PANEL_PAT = (8, 6)              # the pattern's left pixel and top row:
-DIAMOND = ('..#..',             # five wide, a pixel left of the field's
-           '.#.#.',             # middle, as the user asked, and so in
-           '#...#',             # the one cell
-           '#.#.#',
-           '#.#.#',
-           '#...#',
-           '.#.#.',
-           '..#..')
+PANEL_PAT = (8, 8)              # the pattern's left pixel and top row:
+                                # row 8, so its first link has a cell of
+                                # its own in every block row
+DIAMOND = ('.##.',              # a link of it, seven rows: five of them
+           '#..#',              # to the field, and only whole ones
+           '#..#',
+           '#..#',
+           '#..#',
+           '.##.',
+           '....')
 
 
 def pal_panel(table):
@@ -214,8 +216,8 @@ def pal_panel(table):
             if rows[x] and not rows[x - 1] and not rows[x + 1]:
                 put(x, y, 0)
     px, py = PANEL_PAT
-    for y in range(py, y1):
-        for x, c in enumerate(DIAMOND[(y - py) % 8]):
+    for y in range(py, py + (y1 - py) // len(DIAMOND) * len(DIAMOND)):
+        for x, c in enumerate(DIAMOND[(y - py) % len(DIAMOND)]):
             put(px + x, y, c == '#')
     table.images[PANEL_IMG] = popimg.Image(img.index, img.width, img.height,
                                            bytes(data))
@@ -467,7 +469,7 @@ def level_blob(level_path):
 # blueprint off the tape in one block, and a level of the same set only its
 # blueprint.  An offset is from its table's own count byte, round 65536, and
 # may reach any picture in the bank.
-BGOVL_LEN = 631
+BGOVL_LEN = 796
 
 
 def set_parts(bgset):

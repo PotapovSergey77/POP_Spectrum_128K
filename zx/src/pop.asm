@@ -6289,8 +6289,10 @@ c1anim:         ld      de, ovstart     ; the set's own first: a reflection
                 ld      hl, animtrans
                 call    c1far
                 call    bonesrise
+                ld      a, (charid + OP)        ; CHECKALERT leaves out the
+                dec     a                       ; shadowman but on level 12:
                 ld      hl, checkalert  ; the sequences are in the canvas bank
-                call    c1mod
+                call    nz, c1mod
                 jp      page_canvas
 
 ; The prince standing still is the same picture in the same place frame
@@ -7457,6 +7459,34 @@ cgp1:           ld      a, (hl)
                 sub     l
                 ld      h, a
                 djnz    cgp1
+                ret
+
+; The shadow's keys, from do_shad's autoctrl by c1call: the command his
+; level's code (bgovl.asm) has left in shadkey, AUTOPLAYBACK's -- 1 DoFwd,
+; 2 DoBack, 6 DoPress; any other is nothing, DoRelease having let go of
+; everything already.
+
+c1shad:         ld      a, (shadkey)
+                ld      hl, clrf
+                dec     a
+                jr      z, csfwd
+                inc     hl              ; clrb
+                dec     a
+                jr      z, csback
+                sub     4
+                ret     nz
+                dec     a
+                ld      (clrbtn), a
+                ld      (btn), a
+                ret
+csfwd:          dec     a
+                ld      (hl), a
+                ld      (jstkx), a
+                ret
+csback:         dec     a
+                ld      (hl), a
+                ld      a, 1
+                ld      (jstkx), a
                 ret
 
 ;               strike  0   1   2   3   4   5   6   7   8   9   10  11

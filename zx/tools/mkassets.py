@@ -163,7 +163,7 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 4
+LEVELS = 5
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
@@ -1242,6 +1242,9 @@ def main(argv):
         for n, label in sorted(seq.entries.items()):
             if n in KID_SEQS:
                 f.write('SQ_%-12s equ %d' % (label.upper(), n) + chr(10))
+        # and where stand begins among them, for code that has no jumpseq to
+        # hand (bgovl.asm's thief): seqptr is seqs plus this
+        f.write('SO_STAND    equ %d' % seq.at[seq.entries[2]] + chr(10))
         f.write('START_X     equ %d\n'
                 % (popframe.screen_x(popframe.char_x(START_COL)) - START_NUDGE))
         f.write('START_Y    equ %d\n' % popframe.char_y(START_ROW))
