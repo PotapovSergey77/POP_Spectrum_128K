@@ -7,7 +7,7 @@
 set -e
 cd "$(dirname "$0")"
 python tools/mkassets.py build
-cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/bin/*.bin src/
+cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc
 cd src
 ../tools/pasmo.exe --bin pop.asm ../build/pop.bin ../build/pop.sym
@@ -35,7 +35,7 @@ with open('src/popsyms.inc', 'w') as f:
         f.write('%-15s equ     0x%04X\n' % (name, sym[name]))
 PY
 cd src
-for k in 1 2 3; do
+for k in 1 2 3 4; do
     cp cut$k.inc cutsel.inc
     cp cutfixed$k.bin cutsel.bin
     ../tools/pasmo.exe --bin cut1.asm ../build/cut${k}code.bin ../build/cut$k.sym
@@ -105,7 +105,7 @@ base = sym['stubs']
 # code where it runs and jump there, the room, the pictures and the tune,
 # and the code.
 lens = {}
-for k in (1, 2, 3):
+for k in (1, 2, 3, 4):
     csym = {}
     for line in open('build/cut%d.sym' % k):
         m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())

@@ -169,7 +169,7 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 8
+LEVELS = 9
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
@@ -229,8 +229,8 @@ LH_NEXT, LH_NEXTLEN, LH_INK, LH_SET, LH_CUT = 8, 10, 12, 13, 14
 # level's (cut1.asm), and the head of the level before it says how long.
 # Level six's is PlayCut3, which SUBS.S plays as
 # PlayCut1: the same block again; level eight's is PlayCut8, the princess
-# sending the mouse out.
-CUT_BEFORE = {2: 1, 4: 2, 6: 1, 8: 3}
+# sending the mouse out, and nine's PlayCut4, the mouse coming back.
+CUT_BEFORE = {2: 1, 4: 2, 6: 1, 8: 3, 9: 4}
 
 # basicstrength in AUTO.S, by level: a guard's strength is this and his
 # program's extrastrength (getgdstrength).  Each level's is the last byte
@@ -1080,12 +1080,15 @@ def main(argv):
     # is put to it by build.sh.  PlayCut1 waiting before level two, and
     # off the second side's pictures PlayCut2 lying down before level four
     # and PlayCut8 sending the mouse out before level eight -- whose song,
-    # s_Heartbeat, the CPC has none of: the tune of its PlayCut1 plays.
+    # s_Heartbeat, the CPC has none of: the tune of its PlayCut1 plays --
+    # and PlayCut4 the mouse coming back before level nine, which has no
+    # song, and no tune on the tape.
     scenes = {1: (princess.cut1(), 'A'), 2: (princess.cut2(), 'B'),
-              3: (princess.cut8(), 'B')}
+              3: (princess.cut8(), 'B'), 4: (princess.cut4(), 'B')}
     for k, (frames, side) in scenes.items():
         sced, scefix, sceneinc, scelow = princessscr.build1(
-            cpcmusic.tunes((6,))[0], RBROOM, frames, side, k == 2)
+            cpcmusic.tunes((6,))[0] if k != 4 else b'', RBROOM, frames,
+            side, k == 2)
         open(os.path.join(binout, 'cut%ddata.bin' % k), 'wb').write(sced)
         open(os.path.join(binout, 'cutfixed%d.bin' % k), 'wb').write(scefix)
         with open(os.path.join(out, 'cut%d.inc' % k), 'w') as f:

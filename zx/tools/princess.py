@@ -295,6 +295,47 @@ def cut8():
     return frames
 
 
+PCROUCH, MRAISE = 112, 114
+
+
+def cut4():
+    """PlayCut4, the mouse coming back to the princess, before level nine:
+    the hourglass as PlayCut1 has it, STARTP4 -- STARTP1 at CharX 142 and
+    CharY floorY + 3, standing -- in the shadow's place, and STARTM4's
+    mouse -- CharX 199, floorY + 1, facing left, scurrying in -- in the
+    kid's; five frames, she crouches, nine more, the mouse lifts his head,
+    and fifty-eight more.  No song: the scene ends with its last frame."""
+    seq = popseq.load()
+    frames = []
+    prn = Char(seq, 120, FLOOR_Y, -1)
+    prn.jumpseq(PSTAND)
+    prn.animchar()
+    prn.face = 0
+    prn.x, prn.y = 142, FLOOR_Y + 3
+    prn.jumpseq(PSTAND)
+    prn.animchar()
+    mouse = Char(seq, 199, FLOOR_Y + 1, -1)
+    mouse.jumpseq(MSCURRY)
+    mouse.animchar()
+
+    def play(n):
+        for _ in range(n):
+            mouse.animchar()
+            prn.animchar()
+            frames.append({
+                'speed': 12,
+                'vizier': (mouse.posn, mouse.x, mouse.y, mouse.face),
+                'princess': (prn.posn, prn.x, prn.y, prn.face),
+                'glass': CUT1_GLASS, 'sand': True, 'flash': False})
+
+    play(5)
+    prn.jumpseq(PCROUCH)
+    play(9)
+    mouse.jumpseq(MRAISE)
+    play(58)
+    return frames
+
+
 ALT = None
 T6 = T7 = None
 MAIN = None
