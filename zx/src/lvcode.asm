@@ -563,7 +563,7 @@ mrec:           dw      MOUSEX
 
                 endif
 
-                if      LVNUM < 4 or LVNUM = 7 or LVNUM = 9
+                if      LVNUM < 4 or LVNUM = 7 or LVNUM >= 9
 post:           ret
                 endif
 
