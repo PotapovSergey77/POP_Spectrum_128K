@@ -214,8 +214,51 @@ def cut1():
     return frames
 
 
+PLIE = 103
+
+
+def cut2():
+    """PlayCut2, the princess lying down before level four: the same as
+    PlayCut1 but for STARTP2 -- STARTP0 at CharX 89, jumped to Plie -- and
+    the song, s_Heartbeat, which the CPC has none of: its PlayCut1 tune
+    plays instead."""
+    seq = popseq.load()
+    frames = []
+    prn = Char(seq, 89, FLOOR_Y, -1)
+    prn.jumpseq(PLIE)
+    prn.animchar()
+
+    def play(n):
+        for _ in range(n):
+            prn.animchar()
+            frames.append({
+                'speed': 12, 'vizier': None,
+                'princess': (prn.posn, prn.x, prn.y, prn.face),
+                'glass': CUT1_GLASS, 'sand': True, 'flash': False})
+
+    play(2)
+    play(1)
+    frames[-1]['tune'] = True
+    play(1)
+    frames[-1]['hold'] = True
+    return frames
+
+
 ALT = None
 T6 = T7 = None
+CHTAB6B = os.path.join(HERE, '..', '..', '01 POP Source', 'Images',
+                       'IMG.CHTAB6.B')
+
+
+def side(which):
+    """The characters' pictures as LoadStage2 leaves them: side A's, for
+    the titles and PlayCut1, or side B's (LoadStage2B) for the scenes the
+    game plays from the second side -- the lying princess is there, and
+    the post is another."""
+    global T6
+    picture(1)
+    T6 = (popimg.Table(CHTAB6B) if which == 'B' else
+          popimg.Table.from_memory(poprincess.memory(), poprincess.CHTABLE6))
 
 
 def picture(posn):

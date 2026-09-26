@@ -6226,6 +6226,10 @@ tm2:            ld      a, (hl)
                 inc     d
                 djnz    tm2
                 pop     de
+                ld      d, 0x59         ; and its cell grey, whatever the
+                ld      a, 7            ; room before left in it (the user's
+                ld      (de), a         ; colour for these two lines)
+                ld      d, 0x48
                 pop     hl
                 inc     hl
                 inc     e

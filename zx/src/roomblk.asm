@@ -1222,11 +1222,13 @@ levelgo:        xor     a
                 jr      z, lgagain      ; with
                 call    page_pixels     ; the next level off the tape: the
                 call    c1start         ; player told to start it, and to
-                ld      a, (curlev)     ; stop it again once it has loaded
-                or      a               ; (c1stop) -- and before level two
-                jr      nz, lgnocut     ; the princess's room, which comes
-                ld      hl, 0xC000      ; first on the tape, into the art
-cut1len:        ld      de, 0           ; bank: its length is build.sh's
+                call    page_bg         ; stop it again once it has loaded
+                ld      de, (level + LV_HEAD + LH_CUT)  ; (c1stop) -- and
+                push    de              ; before some levels a scene in the
+                ld      a, d            ; princess's room, which comes first
+                or      e               ; on the tape, into the art bank:
+                jr      z, lgnocut      ; this level's head has its length
+                ld      hl, 0xC000
                 ld      a, BANK_ART
                 call    tapeblk
 lgnocut:        call    tapeload
@@ -1236,15 +1238,19 @@ lgnocut:        call    tapeload
                 or      l
                 jr      z, lgnochs
                 ex      de, hl
-                ld      hl, 0xC000      ; into the art bank, whose room is
-                ld      a, BANK_ART     ; built again after this
+                pop     hl              ; into the art bank, whose room is
+                push    hl              ; built again after this -- past
+                ld      bc, 0xC000      ; the scene, if one came first, which
+                add     hl, bc          ; it would put out of the way
+                ld      a, BANK_ART
                 call    tapeblk
                 call    chset_put
 lgnochs:        call    page_pixels
                 call    c1stop
-                ld      a, (curlev)     ; PlayCut1: see cut1.asm
-                or      a
-                jr      nz, lgwent
+                pop     hl              ; the scene: see cut1.asm
+                ld      a, h
+                or      l
+                jr      z, lgwent
                 call    page_art
                 call    0xC000
 lgwent:         ld      hl, curlev      ; kept as it begins
@@ -1378,9 +1384,8 @@ lgseq:          push    bc
 CHSBUF          equ     work
 CHSCHUNK        equ     2048
 
-chset_put:      ld      a, BANK_ART
+chset_put:      ld      a, BANK_ART     ; HL: where it is in the art bank
                 call    pageset
-                ld      hl, 0xC000
                 ld      a, (hl)
                 ld      (chsleft), a
                 or      a

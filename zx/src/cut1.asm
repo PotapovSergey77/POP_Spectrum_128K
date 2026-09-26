@@ -4,6 +4,8 @@
 ; which TOPCTRL.S plays before level two begins -- the room, the hourglass
 ; with its sand running, the princess standing, and the song, s_Timer, the
 ; Amstrad CPC's tune 6.  A key ends it, as a button does the Apple's.
+; Assembled once for each scene the tape has (build.sh): PlayCut2, before
+; level four, is the same but for the princess lying down.
 ;
 ; It is not in the program.  The tape has it before level two, a block of
 ; its own that levelgo loads into the art bank with the level, and runs at
@@ -20,7 +22,7 @@
 ; the art bank is left nought, as start leaves it for the first room.
 
                 include "popsyms.inc"
-                include "cut1.inc"
+                include "cutsel.inc"    ; the scene's: build.sh
 
                 org     work
 
@@ -74,5 +76,5 @@ tunes:          dw      CUT1_TUNE, CUT1_TUNEND
 
                 include "cutplay.asm"
 
-cutfixed:       incbin  "cutfixed1.bin"
+cutfixed:       incbin  "cutsel.bin"
 cut1end:

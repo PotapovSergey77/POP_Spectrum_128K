@@ -330,6 +330,9 @@ def build_blobs(scene_frames=None):
     """(bank blob pieces, fixed blob, equates)."""
     sprites, frames = scene(scene_frames)
     eq = {}
+    # the band's first column: COL0, or where a character further left
+    # begins -- PlayCut2's princess lies on the floor left of it
+    col0 = min([COL0] + [x >> 3 for _, (x, _) in scene_boxes(sprites, frames)])
     # the hourglass's states the scene has, the first of them CUT_GL0
     states = sorted({st['glass'] for st, _ in frames if st['glass'] is not None})
     assert 1 <= len(states) <= 2, states
@@ -415,7 +418,7 @@ def build_blobs(scene_frames=None):
         x = STAR_X + px
         # TWINKLE puts a star straight on both screens, outside the band's
         # columns: where on a screen it is
-        assert x >> 3 < COL0
+        assert x >> 3 < col0
         stars += zxscreen.bitmap_offset(x >> 3, y).to_bytes(2, 'little')
         stars.append(0x80 >> (x & 7))
     put('CUT_STARS', stars)
@@ -491,12 +494,10 @@ def build_blobs(scene_frames=None):
         for n, x in rec:
             script += bytes([n, x])
     eq['CUT_FRAMES'] = len(frames)
-    eq['CUT_COL0'] = COL0
-    for n, (x, _) in scene_boxes(sprites, frames):
-        assert x >> 3 >= COL0, x
+    eq['CUT_COL0'] = col0
     for name in ('CUT_FL0_AT', 'CUT_FL1_AT', 'CUT_GL_AT', 'CUT_FW_AT',
                  'CUT_PO_AT'):
-        assert eq[name] % 32 >= COL0, name
+        assert eq[name] % 32 >= col0, name
     del eq['CUT_FLTAB']
     return table, pics, bytes(script), fixed, at, eq, len(sprites)
 
@@ -604,10 +605,61 @@ def build(bank_base, bank_room):
 CUT1_STUB = 14
 
 
-def build1(tune, rb_len):
-    """(data after the stub, fixed blob, include lines)."""
-    table, pics, script, fixed, at, eq, count = build_blobs(princess.cut1())
-    room_packed = titlescr.pack(room())
+def draw_char(s, sprites, n, x):
+    """A character's picture over a SCREEN$ the way cutplay.asm lays it:
+    its pixels, and a pixel's width of black round them.  Out: the cells
+    her pixels are in."""
+    cells = set()
+    posn, c0, r0, w, h, data, img = sprites[n & 0x7F]
+    top = sprite_top(img, r0)
+    for j in range(h):
+        row = data[j * w:(j + 1) * w]
+        bits = [(row[k >> 3] >> (7 - (k & 7))) & 1 for k in range(8 * w)]
+        if n & MIRROR:
+            bits = bits[::-1]
+        dil = [any(bits[k + d] for d in (-1, 0, 1) if 0 <= k + d < len(bits))
+               for k in range(len(bits))]
+        for k in range(-1, len(bits) + 1):
+            xx = x + k
+            if not 0 <= xx < 256:
+                continue
+            m = dil[k] if 0 <= k < len(bits) else \
+                (bits[0] if k == -1 else bits[-1])
+            v = bits[k] if 0 <= k < len(bits) else 0
+            if m or v:
+                a = zxscreen.bitmap_offset(xx >> 3, top + j)
+                bit = 0x80 >> (xx & 7)
+                s[a] = (s[a] | bit) if v else (s[a] & ~bit)
+                if v:
+                    cells.add(((top + j) >> 3) * 32 + (xx >> 3))
+    return cells
+
+
+def build1(tune, rb_len, frames=None, side='A', still=False):
+    """(data after the stub, fixed blob, include lines): PlayCut1's, or
+    another scene played the same way, off the given side's pictures.
+    still: the princess never moves, and is drawn into the room once --
+    PlayCut2's lies left of the band, which would have to be wider for her
+    and its code with it, past where it may go."""
+    princess.side(side)
+    try:
+        frames = princess.cut1() if frames is None else frames
+        scr = bytearray(room())
+        if still:
+            assert len({f['princess'] for f in frames}) == 1
+            assert all(f['vizier'] is None for f in frames)
+            sprites, recs = scene(frames[:1])
+            for n, x in recs[0][1]:
+                if n != NONE:
+                    # and white, as the band's characters are, where she
+                    # lies over the rug's colours (the user asked)
+                    for c in draw_char(scr, sprites, n, x):
+                        scr[6144 + c] = BRIGHT << 6 | BLACK << 3 | WHITE
+            frames = [dict(f, princess=None) for f in frames]
+        table, pics, script, fixed, at, eq, count = build_blobs(frames)
+    finally:
+        princess.side('A')
+    room_packed = titlescr.pack(bytes(scr))
     top = 0x10000 - 12
     rbsave = top - rb_len
     clean = rbsave - BAND_ROWS * 32

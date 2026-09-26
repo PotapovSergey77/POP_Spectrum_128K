@@ -7,7 +7,8 @@
 set -e
 cd "$(dirname "$0")"
 python tools/mkassets.py build
-cp build/assets.inc build/bg.inc build/cut1.inc build/bin/*.bin src/
+cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/bin/*.bin src/
+cp build/cut1.inc src/cutsel.inc
 cd src
 ../tools/pasmo.exe --bin pop.asm ../build/pop.bin ../build/pop.sym
 cd ..
@@ -34,7 +35,11 @@ with open('src/popsyms.inc', 'w') as f:
         f.write('%-15s equ     0x%04X\n' % (name, sym[name]))
 PY
 cd src
-../tools/pasmo.exe --bin cut1.asm ../build/cut1code.bin ../build/cut1.sym
+for k in 1 2; do
+    cp cut$k.inc cutsel.inc
+    cp cutfixed$k.bin cutsel.bin
+    ../tools/pasmo.exe --bin cut1.asm ../build/cut${k}code.bin ../build/cut$k.sym
+done
 cd ..
 # Each background set's own code (bgovl.asm), in the background bank with
 # its pictures: the same way, the game's symbols for what it uses.
@@ -63,7 +68,7 @@ cd ..
 # The control code is assembled at its place in the canvas bank: cut it out
 # of the program and put it after the tables it travels up with.
 python - <<'PY'
-import re
+import os, re
 sym = {}
 for line in open('build/pop.sym'):
     m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
@@ -71,34 +76,53 @@ for line in open('build/pop.sym'):
         sym[m.group(1)] = int(m.group(2), 16)
 data = open('build/pop.bin', 'rb').read()
 base = sym['stubs']
-# PlayCut1's tape block: at 0xC000 a few bytes that put its code where it
-# runs and jump there, the room, the pictures and the tune, and the code.
-csym = {}
-for line in open('build/cut1.sym'):
-    m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
-    if m:
-        csym[m.group(1)] = int(m.group(2), 16)
-code = open('build/cut1code.bin', 'rb').read()
-cdata = open('build/bin/cut1data.bin', 'rb').read()
-org = csym['cut1go']
-assert len(code) == csym['cut1end'] - org
-assert csym['CUT1_CODE'] == 0xC000 + 14 + len(cdata)
-stub = (bytes([0x21]) + csym['CUT1_CODE'].to_bytes(2, 'little')     # ld hl
-        + bytes([0x11]) + org.to_bytes(2, 'little')                 # ld de
-        + bytes([0x01]) + len(code).to_bytes(2, 'little')           # ld bc
-        + bytes([0xED, 0xB0, 0xC3]) + org.to_bytes(2, 'little'))    # ldir, jp
-block = stub + cdata + code
-open('build/bin/cut1.bin', 'wb').write(block)
-print('принцесса 1: блок %d байт, код %04X..%04X, свободно до постройки '
-      'комнаты %d, в банке заставки до распакованного %d'
-      % (len(block), org, csym['cut1end'], sym['roomblk'] - csym['cut1end'],
-         csym['CUT1_LOW'] - 0xC000 - len(block)))
-assert csym['cut1end'] <= sym['roomblk'], 'принцесса 1 налезла на постройку комнаты'
-assert 0xC000 + len(block) <= csym['CUT1_LOW'], 'принцесса 1 не влезла в банк'
-assert csym['RB1LEN'] <= 3275
+# The princess's scenes' tape blocks: at 0xC000 a few bytes that put the
+# code where it runs and jump there, the room, the pictures and the tune,
+# and the code.
+lens = {}
+for k in (1, 2):
+    csym = {}
+    for line in open('build/cut%d.sym' % k):
+        m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
+        if m:
+            csym[m.group(1)] = int(m.group(2), 16)
+    code = open('build/cut%dcode.bin' % k, 'rb').read()
+    cdata = open('build/bin/cut%ddata.bin' % k, 'rb').read()
+    org = csym['cut1go']
+    assert len(code) == csym['cut1end'] - org
+    assert csym['CUT1_CODE'] == 0xC000 + 14 + len(cdata)
+    stub = (bytes([0x21]) + csym['CUT1_CODE'].to_bytes(2, 'little')     # ld hl
+            + bytes([0x11]) + org.to_bytes(2, 'little')                 # ld de
+            + bytes([0x01]) + len(code).to_bytes(2, 'little')           # ld bc
+            + bytes([0xED, 0xB0, 0xC3]) + org.to_bytes(2, 'little'))    # ldir, jp
+    block = stub + cdata + code
+    lens[k] = len(block)
+    open('build/bin/cut%d.bin' % k, 'wb').write(block)
+    print('принцесса %d: блок %d байт, код %04X..%04X, свободно до постройки '
+          'комнаты %d, в банке заставки до распакованного %d'
+          % (k, len(block), org, csym['cut1end'], sym['roomblk'] - csym['cut1end'],
+             csym['CUT1_LOW'] - 0xC000 - len(block)))
+    assert csym['cut1end'] <= sym['roomblk'], 'принцесса %d налезла на постройку комнаты' % k
+    assert 0xC000 + len(block) <= csym['CUT1_LOW'], 'принцесса %d не влезла в банк' % k
+    assert csym['RB1LEN'] <= 3275
 assert sym['TAILLEN'] <= sym['RB1LEN'], 'надписи заставки длиннее кода постройки комнаты'
-at = sym['cut1len'] + 1 - base          # levelgo's LD-BYTES length
-data = data[:at] + len(block).to_bytes(2, 'little') + data[at + 2:]
+# and each scene's length into the head of the level before it, which
+# levelgo reads it from (LH_CUT)
+for line in open('build/bin/cuts.lst'):
+    if not line.strip():
+        continue
+    path, off, k = line.split()
+    b = bytearray(open(path, 'rb').read())
+    b[int(off):int(off) + 2] = lens[int(k)].to_bytes(2, 'little')
+    open(path, 'wb').write(b)
+# levelgo loads a level's character set into the art bank past the scene
+# that came before it on the tape, and puts it away before the scene plays
+tape = [t.strip() for t in open('build/bin/tape.lst') if t.strip()]
+for i, t in enumerate(tape):
+    m = re.match(r'build/bin/cut(\d+)\.bin$', t)
+    if m and i + 2 < len(tape) and 'chset' in tape[i + 2]:
+        assert 0xC000 + lens[int(m.group(1))] + os.path.getsize(tape[i + 2]) \
+            <= 0x10000 - 12, 'a scene and the character set after it are over the art bank'
 mod = data[sym['MODORG'] - base:sym['modend'] - base]
 assert len(mod) == sym['MODLEN'], 'the control code did not come out whole'
 # The canvas bank's own code, assembled at CODE1, rides at the end of the
@@ -144,7 +168,7 @@ print('управление %04X..%04X, %d байт в банке 7, свобо�
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'
 assert sym['modend'] <= 0x10000 - 12 and sym['modend'] > sym['MODORG'], 'the control code does not fit under the interrupt stub'
 PY
-python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin L:build/bin/cut1.bin $(tr -d '\r' < build/bin/tape.lst | sed 's/^/L:/')
+python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin $(tr -d '\r' < build/bin/tape.lst | sed 's/^/L:/')
 python - <<'PY'
 import re, json, os
 sym = {}
