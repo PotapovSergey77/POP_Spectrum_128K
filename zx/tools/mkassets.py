@@ -169,7 +169,7 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 10
+LEVELS = 11
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
