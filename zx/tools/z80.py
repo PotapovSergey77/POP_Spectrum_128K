@@ -642,7 +642,16 @@ class Z80:
             return
         self.cycles += (8, 8, 11, 16, 4, 10, 4, 5)[z]    # the prefix's four on
         if op in (0x67, 0x6F):                          # rrd, rld
-            raise NotImplementedError('ED %02X at %04X' % (op, self.pc - 2))
+            self.cycles += 9                            # eighteen in all
+            m = self.rb(self.hl)
+            if op == 0x67:
+                v, a = ((self.a << 4) | (m >> 4)) & 0xff, m & 0x0f
+            else:
+                v, a = ((m << 4) | (self.a & 0x0f)) & 0xff, m >> 4
+            self.wb(self.hl, v)
+            self.a = (self.a & 0xf0) | a
+            self.f = (self.f & CF) | self.sz(self.a) | PARITY[self.a]
+            return
         if op in (0x44, 0x4C, 0x54, 0x5C, 0x64, 0x6C, 0x74, 0x7C):   # neg
             self.a = self.sub8(0, self.a)
             return

@@ -40,6 +40,7 @@ import titlescr
 import popseq
 import princessscr
 import poplevel
+import palcolour
 import renderroom
 import zxscreen
 
@@ -109,7 +110,7 @@ FLAME_UP = 43
 INK_ROOM = 0x05                 # cyan on black, the whole room
 # The palace is the dungeon's blue and white in orange and white on the
 # Apple: yellow on black, the Spectrum's nearest to that sandstone.
-INK_PALACE = 0x46              # bright: the user found plain yellow too dark
+INK_PALACE = 0x07              # grey, as the user asked: yellow looked ugly
 INK_OF_SET = {'DUN': INK_ROOM, 'PAL': INK_PALACE}
 INK_FLAME_TOP = 0x02            # and where a torch burns: dark red at the
 INK_FLAME_MID = 0x42            # tip, bright red in the middle and yellow
@@ -862,8 +863,16 @@ def main(argv):
     later = list(range(START_LEVEL + 1, LEVELS + 1))
     switch = {n: bgexport.level_bgset(n) != bgexport.level_bgset(n - 1)
               for n in later}
+    # A palace level's colours come after its head: which cells of each
+    # room are yellow or blue (palcolour.py).  Room is kept for the most
+    # any level on the tape has, and the flames go after that.
+    colours = {n: (palcolour.level_colours(level_path(n))
+                   if bgexport.level_bgset(n) == 'PAL' else b'')
+               for n in [START_LEVEL] + later}
+    colmax = max(len(c) for c in colours.values())
     nxt = {n - 1: ((PAGE_WINDOW if switch[n] else PAGE_WINDOW + bgat['level']),
-                   (bgat['level'] if switch[n] else 0) + 2304 + LEVEL_HEAD)
+                   (bgat['level'] if switch[n] else 0) + 2304 + LEVEL_HEAD
+                   + len(colours[n]))
            for n in later}
     # After the blueprint, what the Z80 needs to start a level: see
     # level_head.  The first level's gives its set and the way to the next;
@@ -872,6 +881,7 @@ def main(argv):
     assert bgat['level'] + 2304 == len(bgblob)
     bgblob = bytes(bgblob) + level_head(START_LEVEL, 0,
                                         nxt.get(START_LEVEL, (0, 0)))
+    bgblob += colours[START_LEVEL].ljust(colmax, bytes(1))
     # Which files carry which set's code, for build.sh to put in once it is
     # assembled: see bgovl.asm.
     ovl = ['build/bin/bank_bg.bin %d %d'
@@ -879,10 +889,15 @@ def main(argv):
     # The torch flames go in after the level.  They are read a frame at a
     # time, into a buffer, before they are laid over the room -- which is
     # in the art bank, so they could not be read from here directly -- and
-    # the fixed half of the map has code to hold instead.
+    # the fixed half of the map has code to hold instead.  Only the flames
+    # at the even column's alignment: the odd column's are those four
+    # pixels on, and the copy moves them there (bgovl.asm).  And only the
+    # first two of a row's three bytes, the third being empty either way.
     flames_at = len(bgblob)
-    bgblob = bytes(bgblob) + bytes(flames)
-    assert len(bgblob) <= BANK_SIZE - 12, 'the background bank is full'
+    even = flames[:len(flames) // 2]
+    assert not any(even[2::3]) and not any(flames[len(flames) // 2 + 2::3])
+    bgblob = bytes(bgblob) + bytes(b for i, b in enumerate(even) if i % 3 != 2)
+    assert len(bgblob) <= BANK_SIZE - 12, 'the background bank is full: %d' % len(bgblob)
     open(os.path.join(binout, 'bank_bg.bin'), 'wb').write(bgblob)
     # The canvas bank is bank 7, whose first 6912 bytes are the 128K's
     # second screen.  The tape still drops the frame table and the sequences
@@ -914,7 +929,7 @@ def main(argv):
                              alt, alt_base, alt_spans, tables, fdy_at, extra)
                  if new_ch or extra else b'')
         head = level_head(n, len(chset), nxt.get(n, (0, 0)))
-        blob = bgexport.level_blob(level_path(n)) + head
+        blob = bgexport.level_blob(level_path(n)) + head + colours[n]
         if switch[n]:
             blob = bgexport.set_blob(bgexport.level_bgset(n)) + blob
             ovl.append('build/bin/level%d.bin %d %d'
@@ -1053,6 +1068,8 @@ def main(argv):
     for k, v in bgat.items():
         inc.append('%-11s equ %d' % (k, PAGE_WINDOW + v))
     inc.append('flames      equ %d' % (PAGE_WINDOW + flames_at))
+    inc.append('palcols     equ %d' % (PAGE_WINDOW + bgat['level'] + 2304
+                                       + LEVEL_HEAD))
     inc.append('FLAME_BYTES equ %d' % (FLAME_W * FLAME_H))
     for i, cells in enumerate(flcells):
         inc.append('FLCELLS%d    equ %d' % (i, cells))
@@ -1177,6 +1194,9 @@ def main(argv):
         f.write('INK_FLAME_TOP equ %d' % INK_FLAME_TOP + chr(10))
         f.write('INK_FLAME_MID equ %d' % INK_FLAME_MID + chr(10))
         f.write('INK_FLAME_LOW equ %d' % INK_FLAME_LOW + chr(10))
+        f.write('INK_PALWIN  equ %d' % palcolour.INK_YELLOW + chr(10))
+        f.write('INK_PALBLUE equ %d' % palcolour.INK_BLUE + chr(10))
+        f.write('PALISTMAX   equ %d' % palcolour.LISTMAX + chr(10))
         f.write('BLK_BLOCK   equ %d' % renderroom.bg.block + chr(10))
         f.write('F_CHECK     equ %d' % 0x40 + chr(10))
         f.write('F_FOOTMARK  equ %d' % 0x1f + chr(10))
@@ -1257,7 +1277,7 @@ def main(argv):
     print('floor masks %d rows, %d bytes each' % (len(band), len(fmask)))
     print('art bank    %d of %d bytes' % (len(art) + 2, BANK_SIZE))
     print('bg bank     %d of %d bytes' % (len(bgblob), BANK_SIZE))
-    print('flames      %d bytes over two alignments' % len(flames))
+    print('flames      %d bytes, the odd columns made from them' % (len(flames) // 3))
     print('START_X=%d START_Y=%d'
           % (popframe.screen_x(popframe.char_x(START_COL)),
              popframe.char_y(START_ROW)))

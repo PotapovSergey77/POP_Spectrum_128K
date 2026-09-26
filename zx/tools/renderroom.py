@@ -53,6 +53,8 @@ class Room:
         if bgset == 'DUN':
             bgexport.edge_shafts(self.tab1)
         self.tab2 = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB2.' + bgset))
+        if bgset == 'PAL':
+            bgexport.pal_panel(self.tab2)
         self.palace = (bgset == 'PAL')
         self.canvas = [bytearray(WIDTH_BYTES) for _ in range(HEIGHT)]
         self.missing = set()
@@ -386,7 +388,7 @@ class Room:
         # fills in solid.  `fronti[posts]` is piecea's own columns 7..27 to
         # the pixel, so stamping it instead puts the tile's art back exactly
         # as drawn and takes the neighbour's B section out of the balusters.
-        op = STA if (x >= bg.archtop2 or x == bg.posts) else ORA
+        op = STA if (x >= bg.archtop2 or x in (bg.posts, bg.block)) else ORA
         if self.palace and x == bg.posts:
             op = HALO                   # drawfrnt's maddfore in the palace
         # A flask in an odd column goes five pixels back, a byte less and two

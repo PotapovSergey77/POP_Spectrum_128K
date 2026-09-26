@@ -94,7 +94,8 @@ mtpix:          ld      a, l
                 inc     hl
                 ld      (hl), 16        ; sixteen down
                 inc     hl
-                ld      (hl), 48        ; the size of one frame
+                ld      (hl), 32        ; the size of one frame, in the bank:
+                                        ; ovflame makes its rows three bytes
                 inc     hl
                 ld      de, 0           ; which shift of the nine to use
                 ld      a, (mtal)

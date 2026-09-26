@@ -2929,6 +2929,15 @@ mmprev:         db      0               ; the places drawn the time before
 mflash:         db      0
 bullet:         incbin  "bullet.bin"
 
+; The palace's colours over the grey: ovattr copies the code that lays them
+; and this room's rectangles into imgbuf, and they are laid from there with
+; the bank set_attrs had in -- then the flasks, as for the dungeon.  Up here
+; for the room.
+
+palattr:        ld      de, ovattr
+                call    bgcall
+                jp      imgbuf
+
 ; ---------------------------------------------------------------- state
 
 gdhere:         db      0               ; a guard in this room: ShadFace <> 86

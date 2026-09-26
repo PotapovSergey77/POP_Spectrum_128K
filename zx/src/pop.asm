@@ -82,6 +82,8 @@ MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 ovstart         equ     bgovl + 3       ; the top of a frame, from c1anim
 ovpost          equ     bgovl + 6       ; after the frame's moves, c1post
 ovset           equ     bgovl + 9       ; the set into the program: newroom
+ovflame         equ     bgovl + 12      ; a torch's frame into flbuf
+ovattr          equ     bgovl + 15      ; the palace's colours, into imgbuf
 
 ; And between the last system variable the 48K ROM's interrupt touches and
 ; the bottom of the stack, what 48K BASIC kept its channels in: nothing uses
@@ -746,6 +748,15 @@ pgbits:         or      0x10            ; another bank can put this one back
 bgjp:           call    page_bg
                 ex      de, hl
                 jp      (hl)
+
+; And from the fixed half, DE the entry and HL what it takes: the bank that
+; was in, back after it.
+
+bgcall:         ld      a, (nowbank)
+                push    af
+                call    bgjp
+                pop     af
+                jr      pageset
 
 c1call:         ld      a, (nowbank)
                 push    af
@@ -2736,9 +2747,8 @@ flame_one:      ld      hl, (flrec)
                 jr      z, flmask1
                 ld      bc, flamemask + 3
 flmask1:        ld      (flmbase), bc
-                ld      hl, flames      ; the record carries an offset
-                add     hl, de
-                ld      (flsrc), hl
+                ld      hl, flames      ; the frames are the same for both:
+                ld      (flsrc), hl     ; ovflame moves them for the mask
 
                 ld      hl, (flst)
                 ld      a, (hl)
@@ -2763,14 +2773,10 @@ flmask1:        ld      (flmbase), bc
                 ld      e, a
 flmul:          add     hl, de
                 djnz    flmul
-flgot:          ld      a, (nowbank)    ; the flames are in the background
-                push    af              ; bank and the room they go over is
-                call    page_bg         ; in the art bank, so the one frame
-                ld      de, flbuf       ; wanted is brought across first
-                ld      bc, FLAME_BYTES
-                ldir
-                pop     af
-                call    pageset
+flgot:          ld      de, ovflame     ; the flames are in the background
+                call    bgcall          ; bank and the room they go over is
+                                        ; in the art bank, so the one frame
+                                        ; wanted is brought across first
                 ld      a, (flrect)     ; how much of it is in view
                 call    flvis
                 or      a
@@ -2898,7 +2904,7 @@ set_attrs_at:   ld      a, 1            ; the meters' colours go with it
                 ld      bc, 767
 saink:          ld      (hl), INK_ROOM  ; the set's: newroom puts it here
                 ldir
-                call    flask_attrs
+saflask:        call    flask_attrs     ; or palattr, the palace's first
 
                 ld      a, (torches)    ; and red where a torch burns
                 or      a

@@ -1112,6 +1112,9 @@ dfpost:         cp      BG_POSTS        ; and in the palace the posts too:
                 jr      z, dfsta        ; the dungeon's are stamped, and
                 cp      BG_FLASK        ; newroom points this at dfgo for
                 jr      z, dfgo         ; the palace's
+                cp      BG_BLOCK        ; a block's face is stamped, as
+                jr      z, dfsta        ; drawfrnt has it: it covers the
+                                        ; spikes' B half, which is laid in it
                 ld      c, BG_ORA
                 cp      BG_ARCHTOP2
                 jr      c, dfgo

@@ -161,7 +161,65 @@ def set_table(n, bgset='DUN'):
     """IMG.BGTAB1 or 2 of a set, as this port draws them: the palace's
     long pillars are the dungeon's, and thickened the same."""
     t = popimg.Table(os.path.join(IMAGES, 'IMG.BGTAB%d.%s' % (n, bgset)))
+    if n == 2 and bgset == 'PAL':
+        pal_panel(t)
     return edge_shafts(t) if n == 1 else t
+
+
+# The palace's panel over a gate (panelb[2], $81) is a frame round a field
+# the Apple fills with blue by lighting every other pixel -- on the Spectrum,
+# one ink to the cell, that is grey stripes.  The user asked for a pattern
+# there instead, in blue, with the frame left grey: so the field is cleared
+# and a chain of diamonds drawn down the one column of cells that lies
+# wholly inside it where the panel stands in the top row at the left of a
+# room, which is where it is seen (palcolour.py colours those cells).
+PANEL_IMG = 1                   # in the second table
+PANEL_FIELD = (6, 16, 5, 46)    # x from, to; rows from, to: the stripes
+PANEL_PAT = (8, 6)              # the pattern's left pixel and top row:
+DIAMOND = ('..#..',             # five wide, a pixel left of the field's
+           '.#.#.',             # middle, as the user asked, and so in
+           '#...#',             # the one cell
+           '#.#.#',
+           '#.#.#',
+           '#...#',
+           '.#.#.',
+           '..#..')
+
+
+def pal_panel(table):
+    img = table.images[PANEL_IMG]
+    data = bytearray(img.data)
+
+    def put(x, y, on):
+        i, bit = y * img.width + x // 7, 1 << (x % 7)
+        data[i] = data[i] | bit if on else data[i] & ~bit
+
+    x0, x1, y0, y1 = PANEL_FIELD
+    for y in range(y0, y1):
+        for x in range(x0, x1):
+            put(x, y, 0)
+    # and the stripes under the frame's slanting foot, left of it
+    for y in range(y1, y1 + 8):
+        rows = [(data[y * img.width + x // 7] >> (x % 7)) & 1
+                for x in range(img.px_width)]
+        foot = next(x for x in range(x0, x1 + 2) if rows[x] and rows[x + 1])
+        for x in range(x0, foot):
+            put(x, y, 0)
+    # and what is left of them in the corner above, right of the frame's
+    # slanting top: lone pixels on the stripes' columns
+    for y in range(y0):
+        rows = [(data[y * img.width + x // 7] >> (x % 7)) & 1
+                for x in range(img.px_width)]
+        for x in range(x0 + 2, x1, 2):
+            if rows[x] and not rows[x - 1] and not rows[x + 1]:
+                put(x, y, 0)
+    px, py = PANEL_PAT
+    for y in range(py, y1):
+        for x, c in enumerate(DIAMOND[(y - py) % 8]):
+            put(px + x, y, c == '#')
+    table.images[PANEL_IMG] = popimg.Image(img.index, img.width, img.height,
+                                           bytes(data))
+    return table
 
 
 def dungeon_table(n):
@@ -409,7 +467,7 @@ def level_blob(level_path):
 # blueprint off the tape in one block, and a level of the same set only its
 # blueprint.  An offset is from its table's own count byte, round 65536, and
 # may reach any picture in the bank.
-BGOVL_LEN = 429
+BGOVL_LEN = 631
 
 
 def set_parts(bgset):

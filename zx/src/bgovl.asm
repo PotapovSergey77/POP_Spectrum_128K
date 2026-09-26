@@ -18,7 +18,7 @@
                 org     bgovl
 
 ; The entries, three bytes apart, where pop.asm has them: ovstripe, ovstart,
-; ovpost and ovset.  The dungeon has only the last.
+; ovpost, ovset, ovflame and ovattr.  The dungeon has only ovset and ovflame.
 
                 ret                     ; (drawb's stripe was here: bg.asm)
                 ds      2
@@ -32,6 +32,10 @@
                 ds      2
                 endif
                 jp      setup
+                jp      flame
+                if      OVLSET
+                jp      attrs
+                endif
 
 ; The set into the program, from newroom: the room's colour, and the meters'
 ; empty cells; the flame's foot, yellow in the dungeon and the room's own in
@@ -41,12 +45,14 @@
 
                 if      OVLSET
 SETINK          equ     INK_PAL
-SETFLAME        equ     INK_PAL
+SETFLAME        equ     INK_FLAME_LOW
 SETDF           equ     dfgo - dfpost - 4
+SETATTR         equ     palattr
                 else
 SETINK          equ     INK_DUN
 SETFLAME        equ     INK_FLAME_LOW
 SETDF           equ     dfsta - dfpost - 4
+SETATTR         equ     flask_attrs
                 endif
 
 setup:          ld      a, SETINK
@@ -57,6 +63,63 @@ setup:          ld      a, SETINK
                 ld      (mkspace1 + 1), a       ; and mkspace2 reads it
                 ld      a, SETDF
                 ld      (dfpost + 3), a
+                ld      hl, SETATTR     ; and the palace's own colours before
+                ld      (saflask + 1), hl       ; the flasks'
+                if      OVLSET
+                ld      a, (roomnum)    ; this room's, of the level's
+                add     a, a            ; rectangles: how many yellow and
+                dec     a               ; three bytes each, then how many
+                ld      b, a            ; blue and theirs
+                ld      hl, palcols
+                jr      sucount
+sunext:         ld      a, (hl)
+                ld      e, a
+                add     a, a
+                add     a, e
+                inc     a
+                add     a, l
+                ld      l, a
+                jr      nc, sucount
+                inc     h
+sucount:        djnz    sunext
+                ld      (palist), hl
+                endif
+                ret
+
+; A frame of a torch's flame, from DE into flbuf, for flame_one.  The bank
+; has each frame once, as it stands over an even column, and two bytes of
+; each row, the third being empty; over an odd column it is four pixels
+; further right, and the copy moves it there -- the mask flame_one has
+; picked says which.
+
+flame:          ex      de, hl
+                ld      de, flbuf
+                ld      b, FLAME_BYTES / 3
+flrow:          ld      a, (hl)
+                ld      (de), a
+                inc     hl
+                inc     de
+                ld      a, (hl)
+                ld      (de), a
+                inc     hl
+                inc     de
+                xor     a
+                ld      (de), a
+                inc     de
+                djnz    flrow
+                ld      a, (flmbase)
+                cp      flamemask & 0xff
+                ret     z
+                ld      hl, flbuf
+                ld      b, FLAME_BYTES / 3
+flshift:        xor     a
+                rrd
+                inc     hl
+                rrd
+                inc     hl
+                rrd
+                inc     hl
+                djnz    flshift
                 ret
 
                 if      OVLSET
@@ -299,6 +362,109 @@ shadow:         ld      a, (reflon)
                 ld      a, 0xff         ; DoFwd
                 ld      (shadkey), a
                 ret
+
+; ---------------------------------------------------------------- colour
+;
+; The palace is grey, and some of its cells are not: its windows yellow,
+; the frames of its exit doors, the panels over its gates and the arches'
+; lattice blue -- the user's choice, the last two as the Apple has them.
+; Which cells, room by room, mkassets works out (palcolour.py) and puts
+; after the level's head: rectangles of cells in the room's own columns.
+; set_attrs lays them over the grey, before the flasks and the torches, by
+; way of palattr -- which may have the other screen's bank in, where this
+; one is, so what does it is copied down into imgbuf with this room's
+; rectangles after it, and run there.  Nothing in it may jump to itself but
+; by jr.
+
+attrs:          ld      hl, pacode
+                ld      de, imgbuf
+                ld      bc, PALEN
+                ldir
+                ld      hl, (palist)
+                ld      bc, PALISTMAX   ; the most a room has
+                ldir
+                ret
+
+; In imgbuf, with whatever bank set_attrs had in.  A rectangle is its left
+; cell in the room, its top row * 8 + its rows - 1, and its width; the
+; camera takes its cells off the left, and the view's edges cut it.  How
+; many blue ones and then they, and the same for the yellow, laid over
+; them.
+
+pacode:         ld      hl, imgbuf + PALEN
+                ld      c, INK_PALBLUE
+                call    imgbuf + parun - pacode
+                ld      c, INK_PALWIN
+                call    imgbuf + parun - pacode
+                jp      flask_attrs
+parun:          ld      b, (hl)         ; how many
+                inc     hl
+                inc     b
+                jr      pa9
+pa1:            push    bc
+                ld      a, (cam)
+                ld      e, a
+                ld      a, (hl)         ; the left cell, less the camera:
+                inc     hl              ; -34 to 34
+                sub     e
+                ld      e, a
+                ld      a, (hl)         ; row and rows
+                inc     hl
+                ld      d, (hl)         ; the width
+                push    hl
+                ld      b, a
+                and     0xf8            ; the row, thirty two cells a row
+                ld      l, a
+                ld      h, 0
+                add     hl, hl
+                add     hl, hl
+                ld      a, b
+                and     7
+                inc     a
+                ld      b, a            ; B = rows
+                ld      a, e
+                add     a, d            ; its right, in the view
+                bit     7, a
+                jr      nz, pa8         ; all of it left of the view
+                cp      33
+                jr      c, pa2
+                ld      a, 32
+pa2:            bit     7, e
+                jr      z, pa3
+                ld      e, 0
+pa3:            sub     e               ; what the view has of it
+                jr      z, pa8
+                jr      c, pa8
+                ld      d, a
+                ld      a, l            ; a row's first cell has the low five
+                add     a, e            ; bits clear
+                ld      l, a
+                push    de
+                ld      de, (atbase)
+                add     hl, de
+                pop     de
+pa4:            push    hl
+                push    bc
+                ld      b, d
+pa5:            ld      (hl), c
+                inc     hl
+                djnz    pa5
+                pop     bc
+                pop     hl
+                ld      a, l
+                add     a, 32
+                ld      l, a
+                jr      nc, pa6
+                inc     h
+pa6:            djnz    pa4
+pa8:            pop     hl
+                inc     hl
+                pop     bc
+pa9:            djnz    pa1
+                ret
+PALEN           equ     $ - pacode
+
+palist:         dw      0               ; this room's rectangles
 
 reflon:         db      0               ; the second character is a reflection
 lastroom:       db      0
