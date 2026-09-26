@@ -65,6 +65,31 @@ for s in 0 1; do
     ../tools/pasmo.exe --bin bgovl.asm ../build/bgovl$s.bin ../build/bgovl$s.sym
 done
 cd ..
+# And each level's own code (lvcode.asm), which rides with its blueprint:
+# what it uses of the game's and of the palace's code, their symbols.
+python - <<'PY2'
+import re
+sym = {}
+for path in ('build/pop.sym', 'build/bgovl1.sym'):
+    for line in open(path):
+        m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
+        if m:
+            sym.setdefault(m.group(1), int(m.group(2), 16))
+text = ''.join(l.split(';')[0] + ' ' for l in open('src/lvcode.asm'))
+used = set(re.findall(r'[A-Za-z_][A-Za-z0-9_]*', text))
+own = {m.group(1) for l in open('src/lvcode.asm')
+       for m in [re.match(r'([A-Za-z_][A-Za-z0-9_]*)(:|\s+equ\s)', l, re.I)] if m}
+with open('src/lvsyms.inc', 'w') as f:
+    f.write('; what lvcode.asm uses of the game: build.sh -- do not edit\n')
+    for name in sorted((used & set(sym)) - own):
+        f.write('%-15s equ     0x%04X\n' % (name, sym[name]))
+PY2
+cd src
+for n in $(tr -d '\r' < ../build/bin/lvc.lst | awk '{print $3}'); do
+    echo "LVNUM           equ     $n" > lvnum.inc
+    ../tools/pasmo.exe --bin lvcode.asm ../build/lvcode$n.bin ../build/lvcode$n.sym
+done
+cd ..
 # The control code is assembled at its place in the canvas bank: cut it out
 # of the program and put it after the tables it travels up with.
 python - <<'PY'
@@ -163,6 +188,25 @@ for line in open('build/bin/ovl.lst'):
     assert not any(b[off:off + sym['BGOVL_LEN']]), path
     b[off:off + len(ovl[s])] = ovl[s]
     open(path, 'wb').write(b)
+# Each level's own code into its block.
+for line in open('build/bin/lvc.lst'):
+    if not line.strip():
+        continue
+    path, off, n = line.split()
+    off = int(off)
+    code = open('build/lvcode%s.bin' % n, 'rb').read()
+    lsym = {}
+    for l in open('build/lvcode%s.sym' % n):
+        m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', l.strip())
+        if m:
+            lsym[m.group(1)] = int(m.group(2), 16)
+    assert lsym['post'] == lsym['lvcode'], 'уровень %s: вход не в начале' % n
+    assert len(code) <= sym['LVCODE_LEN'], 'код уровня %s длиннее LVCODE_LEN' % n
+    b = bytearray(open(path, 'rb').read())
+    assert not any(b[off:off + sym['LVCODE_LEN']]), path
+    b[off:off + len(code)] = code
+    open(path, 'wb').write(b)
+    print('код уровня %s: %d байт из %d' % (n, len(code), sym['LVCODE_LEN']))
 print('управление %04X..%04X, %d байт в банке 7, свободно там %d'
       % (sym['MODORG'], sym['modend'], len(mod), 0x10000 - sym['modend']))
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'

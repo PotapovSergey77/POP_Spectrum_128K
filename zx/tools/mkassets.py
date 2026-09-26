@@ -163,15 +163,16 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 5
+LEVELS = 6
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
 # LOADLEVEL reads it off the disk with the blueprint when it is not the one
 # in memory already.  Level three's is the skeleton's; one and two have the
-# guard the tape starts with, and four has him back.
+# guard the tape starts with, four has him back, and six the fat one.
 CHSET_OF_LEVEL = [0, 0, 0, 1, 2, 2, 3, 2, 2, 2, 2, 2, 4, 5, 5]
-CHSET_TABLE = {0: 'IMG.CHTAB4.GD', 1: 'IMG.CHTAB4.SKEL', 2: 'IMG.CHTAB4.GD'}
+CHSET_TABLE = {0: 'IMG.CHTAB4.GD', 1: 'IMG.CHTAB4.SKEL', 2: 'IMG.CHTAB4.GD',
+               3: 'IMG.CHTAB4.FAT'}
 
 
 def level_path(n):
@@ -213,7 +214,9 @@ LH_NEXT, LH_NEXTLEN, LH_INK, LH_SET, LH_CUT = 8, 10, 12, 13, 14
 # tape has: the level, the scene's number and the side of the Apple's disk
 # its pictures come from.  Each is a tape block of its own before the
 # level's (cut1.asm), and the head of the level before it says how long.
-CUT_BEFORE = {2: 1, 4: 2}
+# Level six's is PlayCut3, which SUBS.S plays as
+# PlayCut1: the same block again.
+CUT_BEFORE = {2: 1, 4: 2, 6: 1}
 
 # STARTKID's :special3 and milestone3 in AUTO.S: level three's milestone is
 # passed when he goes left out of the room right of the first gate, and from
@@ -878,9 +881,12 @@ def main(argv):
                    if bgexport.level_bgset(n) == 'PAL' else b'')
                for n in [START_LEVEL] + later}
     colmax = max(len(c) for c in colours.values())
+    # And the level's own code after the colours, the same room kept for
+    # it in every level: see lvcode.asm.
+    lvtail = colmax + bgexport.LVCODE_LEN
     nxt = {n - 1: ((PAGE_WINDOW if switch[n] else PAGE_WINDOW + bgat['level']),
                    (bgat['level'] if switch[n] else 0) + 2304 + LEVEL_HEAD
-                   + len(colours[n]))
+                   + lvtail)
            for n in later}
     # After the blueprint, what the Z80 needs to start a level: see
     # level_head.  The first level's gives its set and the way to the next;
@@ -897,6 +903,8 @@ def main(argv):
                         % (len(bgblob) - LEVEL_HEAD + LH_CUT,
                            CUT_BEFORE[START_LEVEL + 1]))
     bgblob += colours[START_LEVEL].ljust(colmax, bytes(1))
+    lvc = ['build/bin/bank_bg.bin %d %d' % (len(bgblob), START_LEVEL)]
+    bgblob += bytes(bgexport.LVCODE_LEN)
     # Which files carry which set's code, for build.sh to put in once it is
     # assembled: see bgovl.asm.
     ovl = ['build/bin/bank_bg.bin %d %d'
@@ -944,16 +952,19 @@ def main(argv):
                              alt, alt_base, alt_spans, tables, fdy_at, extra)
                  if new_ch or extra else b'')
         head = level_head(n, len(chset), nxt.get(n, (0, 0)))
-        blob = bgexport.level_blob(level_path(n)) + head + colours[n]
+        blob = (bgexport.level_blob(level_path(n)) + head
+                + colours[n].ljust(colmax, bytes(1)))
         if switch[n]:
             blob = bgexport.set_blob(bgexport.level_bgset(n)) + blob
             ovl.append('build/bin/level%d.bin %d %d'
                        % (n, bgat['bgovl'],
                           bgexport.BGSETS.index(bgexport.level_bgset(n))))
+        lvc.append('build/bin/level%d.bin %d %d' % (n, len(blob), n))
+        blob += bytes(bgexport.LVCODE_LEN)
         assert len(blob) == nxt[n - 1][1]
         if n + 1 in CUT_BEFORE and n < LEVELS:
             cutheads.append('build/bin/level%d.bin %d %d'
-                            % (n, len(blob) - len(colours[n]) - LEVEL_HEAD
+                            % (n, len(blob) - lvtail - LEVEL_HEAD
                                + LH_CUT, CUT_BEFORE[n + 1]))
         open(os.path.join(binout, 'level%d.bin' % n), 'wb').write(blob)
         if n in CUT_BEFORE:
@@ -972,6 +983,7 @@ def main(argv):
                      ', падающий пол' if extra else ''))
     open(os.path.join(binout, 'tape.lst'), 'w', newline='').write(''.join(t + '\n' for t in tape))
     open(os.path.join(binout, 'ovl.lst'), 'w', newline='').write('\n'.join(ovl) + '\n')
+    open(os.path.join(binout, 'lvc.lst'), 'w', newline='').write('\n'.join(lvc) + '\n')
     open(os.path.join(binout, 'cuts.lst'), 'w', newline='').write(
         ''.join(c + '\n' for c in cutheads))
     # The sounds go after the last of the sprites, in the canvas's bank:
@@ -1098,6 +1110,8 @@ def main(argv):
     inc.append('flames      equ %d' % (PAGE_WINDOW + flames_at))
     inc.append('palcols     equ %d' % (PAGE_WINDOW + bgat['level'] + 2304
                                        + LEVEL_HEAD))
+    inc.append('lvcode      equ %d' % (PAGE_WINDOW + bgat['level'] + 2304
+                                       + LEVEL_HEAD + colmax))
     inc.append('FLAME_BYTES equ %d' % (FLAME_W * FLAME_H))
     for i, cells in enumerate(flcells):
         inc.append('FLCELLS%d    equ %d' % (i, cells))
@@ -1270,6 +1284,7 @@ def main(argv):
         f.write('LH_SET      equ %d\n' % LH_SET)
         f.write('LH_CUT      equ %d\n' % LH_CUT)
         f.write('BGOVL_LEN   equ %d\n' % bgexport.BGOVL_LEN)
+        f.write('LVCODE_LEN  equ %d\n' % bgexport.LVCODE_LEN)
         f.write('MS3_X       equ %d\n' % (MILESTONE3[0] | MILESTONE3[1] << 8))
         f.write('MS3_Y       equ %d\n' % MILESTONE3[2])
         f.write('MS3_ROW     equ %d\n' % MILESTONE3[3])

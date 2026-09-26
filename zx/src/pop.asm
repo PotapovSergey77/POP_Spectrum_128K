@@ -80,10 +80,12 @@ MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 ; Its entries, three bytes apart.
 
 ovstart         equ     bgovl + 3       ; the top of a frame, from c1anim
-ovpost          equ     bgovl + 6       ; after the frame's moves, c1post
+ovpost          equ     bgovl + 6       ; after the frame's moves, c1post:
+                                        ; the level's own code (lvcode.asm)
 ovset           equ     bgovl + 9       ; the set into the program: newroom
 ovflame         equ     bgovl + 12      ; a torch's frame into flbuf
 ovattr          equ     bgovl + 15      ; the palace's colours, into imgbuf
+ovshad          equ     bgovl + 18      ; the shadow's keys, from autoctrl
 
 ; And between the last system variable the 48K ROM's interrupt touches and
 ; the bottom of the stack, what 48K BASIC kept its channels in: nothing uses
@@ -2397,7 +2399,7 @@ mpc2:
 
 ; COLL.S's :mirror.  A mirror bars the way -- but to the kid on a running
 ; jump, from its right: he goes through, and his reflection comes to life,
-; createshad, which REFLECTION acts on (bgovl.asm).  SMASHMIRROR's spec
+; createshad, which REFLECTION acts on (lvcode.asm).  SMASHMIRROR's spec
 ; nothing reads, and is not kept.  From checkcoll1, in the module, and back.
 
 ckmirr:         ld      a, (charid)
@@ -2416,7 +2418,10 @@ ckmirr:         ld      a, (charid)
 ckmyes:         jp      ckyes
 
 createshad:     db      0               ; 0xFF: the reflection comes to life
-shadkey:        db      0               ; the shadow's JSTKX: see bgovl.asm
+shadkey:        db      0               ; the shadow's keys: see lvcode.asm
+SK_FWD          equ     1               ; DoFwd, DoBack and DoPress, which
+SK_BACK         equ     2               ; ovshad presses for him
+SK_PRESS        equ     4
 lastkidstr:     db      0               ; hurt_flash's: here, where the
                                         ; mirror's CreateShad can set it
 
@@ -6413,9 +6418,9 @@ c1post:         call    nextlevkey      ; a test key first of all
                 call    checkslice
                 call    addsfx
                 call    sl_sync
-                ld      de, ovpost      ; and the set's: level four's mirror,
-                ld      hl, bgjp        ; his reflection in it and the
-                call    c1far           ; shadow that comes out of it
+                ld      de, ovpost      ; and the level's: four's mirror and
+                ld      hl, bgjp        ; the shadow out of it, five's thief,
+                call    c1far           ; six's plunge (lvcode.asm)
 
 ; When he has died and stopped moving, the death song: heroic if he fell in a
 ; fight.  CharLife goes past nought so it is asked for once.
@@ -7459,34 +7464,6 @@ cgp1:           ld      a, (hl)
                 sub     l
                 ld      h, a
                 djnz    cgp1
-                ret
-
-; The shadow's keys, from do_shad's autoctrl by c1call: the command his
-; level's code (bgovl.asm) has left in shadkey, AUTOPLAYBACK's -- 1 DoFwd,
-; 2 DoBack, 6 DoPress; any other is nothing, DoRelease having let go of
-; everything already.
-
-c1shad:         ld      a, (shadkey)
-                ld      hl, clrf
-                dec     a
-                jr      z, csfwd
-                inc     hl              ; clrb
-                dec     a
-                jr      z, csback
-                sub     4
-                ret     nz
-                dec     a
-                ld      (clrbtn), a
-                ld      (btn), a
-                ret
-csfwd:          dec     a
-                ld      (hl), a
-                ld      (jstkx), a
-                ret
-csback:         dec     a
-                ld      (hl), a
-                ld      a, 1
-                ld      (jstkx), a
                 ret
 
 ;               strike  0   1   2   3   4   5   6   7   8   9   10  11

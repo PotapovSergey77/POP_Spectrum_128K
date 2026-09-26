@@ -460,10 +460,10 @@ gd_gone:        xor     a
                 ld      (neww + OP), a
                 ret
 
-; ShadowProg: what the shadow presses, bgovl.asm has said -- c1shad.
+; ShadowProg: what the shadow presses, his level's code has said -- ovshad.
 
-acshad:         ld      hl, c1shad
-                jp      c1call
+acshad:         ld      de, ovshad
+                jp      bgcall
 
 ; ---------------------------------------------------------------- AUTO.S
 ;
@@ -484,7 +484,7 @@ acrel:          ld      (hl), a
                 call    dec_nz
 
                 ld      a, (charid)     ; ShadowProg: the shadow's keys are
-                dec     a               ; his level's to say -- bgovl.asm
+                dec     a               ; his level's to say -- lvcode.asm
                 jr      z, acshad       ; sets them
                 cp      3               ; SkelProg: the skeleton is always
                 jr      nz, acsword     ; en garde

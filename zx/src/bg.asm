@@ -1905,7 +1905,7 @@ cutchar:        ld      a, (charact)    ; falling: only the bottom counts
                 jr      nc, nrup
 ccnotup:        ld      a, (chary)
                 cp      BOTCUT
-                jr      nc, nrdown
+ccdown:         jr      nc, nrdown      ; level six's screen 1 makes it jr +0
 
                 ld      a, (charact)    ; not while he turns
                 cp      7

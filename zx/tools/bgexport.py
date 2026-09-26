@@ -469,7 +469,10 @@ def level_blob(level_path):
 # blueprint off the tape in one block, and a level of the same set only its
 # blueprint.  An offset is from its table's own count byte, round 65536, and
 # may reach any picture in the bank.
-BGOVL_LEN = 796
+BGOVL_LEN = 306
+# And a level's own code (lvcode.asm), which rides with its blueprint, head
+# and colours: the room kept for it in the bank and in every level's block.
+LVCODE_LEN = 363
 
 
 def set_parts(bgset):
