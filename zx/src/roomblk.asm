@@ -1502,7 +1502,9 @@ agclr:          ld      (hl), a
                 inc     hl
                 djnz    agclr
                 ret
-agfresh:        xor     a
+agfresh:        ld      a, 192          ; nobody cut at a mirror's foot
+                ld      (clipb + OP), a
+                xor     a
                 ld      (gdhere), a
                 ld      (offguard), a
                 ld      a, (nowbank)

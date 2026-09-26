@@ -79,7 +79,6 @@ MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 ; The background set's own code, in its bank with its pictures: bgovl.asm.
 ; Its entries, three bytes apart.
 
-ovstripe        equ     bgovl + 0       ; drawb's stripe
 ovstart         equ     bgovl + 3       ; the top of a frame, from c1anim
 ovpost          equ     bgovl + 6       ; after the frame's moves, c1post
 ovset           equ     bgovl + 9       ; the set into the program: newroom
@@ -3074,16 +3073,27 @@ draw_mobs:      ld      hl, mbold       ; last frame's, to be shown with this
                 ld      c, 0
                 ld      hl, mbold       ; a rectangle each: two far apart in
 dmloop:         push    bc              ; one box was most of the screen to
-                push    hl              ; put back, cover and show
-                ld      (dmslot), hl
-                call    mobload
-                call    draw_mob
-                pop     hl
+                ld      (dmslot), hl    ; put back, cover and show -- for the
+                call    mobload         ; first two of this room: the others
+                call    draw_mob        ; are elsewhere, and three falling in
+                ld      hl, (dmslot)    ; one room were more than two slots
+                inc     hl
+                inc     hl
+                ld      a, (hl)
+                dec     hl
+                dec     hl
+                or      a
+                jr      z, dmsame
                 ld      de, 4
                 add     hl, de
-                pop     bc
+                ld      a, l
+                cp      (mbold + 8) & 0xff
+                jr      z, dmfull
+dmsame:         pop     bc
                 inc     c
                 djnz    dmloop
+                ret
+dmfull:         pop     bc
                 ret
 
 draw_mob:       ld      a, (mobvel)
@@ -4422,12 +4432,15 @@ dpnext:         add     hl, de
                 inc     c
                 djnz    dpskip
                 ret
-dpgo:           ld      a, c            ; and none below the foot of it
+dpgo:           ld      a, (clipb)      ; and none below the foot of it, or
+                ld      d, a            ; of the mirror's frame
+                ld      a, c
                 add     a, b
                 jr      c, dpcut
-                cp      193
+                dec     a
+                cp      d
                 jr      c, dpfit
-dpcut:          ld      a, 192
+dpcut:          ld      a, d
                 sub     c
                 ld      b, a
 dpfit:          push    hl
@@ -5692,6 +5705,9 @@ boxh:           db      0
 xvel:           db      0               ; CharXVel: along, in a free fall
 clipl:          db      0               ; FCharCL: the first screen column
                                         ; he shows in -- a mirror's edge
+clipb:          db      192             ; and the line his picture stops
+                                        ; above: the screen's foot, or the
+                                        ; mirror's frame under a reflection
 CHRECLEN        equ     $ - chrec
 oprec:          ds      CHRECLEN
 OP              equ     oprec - chrec
@@ -5857,7 +5873,8 @@ cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
 blocktop:       incbin  "blocktop.bin"
 floorband:      incbin  "floorband.bin"
-torches:        ds      1 + 6 * 7
+torches:        ds      1 + 4 * 7       ; seven bytes a torch, and no room
+                                        ; of the fifteen has more than four
 flametab:       incbin  "flametab.bin"
 flamemask:      incbin  "flamemask.bin"
                 ds      (($ + 255) / 256 * 256) - $
@@ -7719,8 +7736,7 @@ cvbuf           equ     rqs + 4 * RQSMAX
 dirtyq          equ     cvbuf + CANVAS_W            ; col, top, width, height
 belowrow        equ     dirtyq + 4 * DIRTYMAX
 aboverow        equ     belowrow + 20               ; the ceiling: the bottom
-moblist         equ     aboverow + 20               ; row of the room above
-flstate         equ     moblist + MOBLEN * MAXMOB
+flstate         equ     aboverow + 20               ; row of the room above
 cdlast          equ     flstate + 8                 ; each ten on from the
 cdthis          equ     cdlast + 10                 ; one before
 cdabove         equ     cdthis + 10

@@ -20,13 +20,12 @@
 ; The entries, three bytes apart, where pop.asm has them: ovstripe, ovstart,
 ; ovpost and ovset.  The dungeon has only the last.
 
+                ret                     ; (drawb's stripe was here: bg.asm)
+                ds      2
                 if      OVLSET
-                jp      stripe
                 jp      start
                 jp      post
                 else
-                ret
-                ds      2
                 ret
                 ds      2
                 ret
@@ -51,35 +50,16 @@ SETDF           equ     dfsta - dfpost - 4
                 endif
 
 setup:          ld      a, SETINK
-                ld      (saink + 1), a
-                ld      (mmrink + 1), a
+                ld      (saink + 1), a  ; the meters read it there too
                 ld      a, SETFLAME
                 ld      (flcolour + 2), a
                 ld      a, OVLSET
-                ld      (mkspace1 + 1), a
-                ld      (mkspace2 + 1), a
+                ld      (mkspace1 + 1), a       ; and mkspace2 reads it
                 ld      a, SETDF
                 ld      (dfpost + 3), a
                 ret
 
                 if      OVLSET
-
-; DRAWB's :stripe in FRAMEADV.S, the palace's alone: after the B section of
-; the piece to the left, bstripe's picture for it on the wall, 32 lines up
-; from Ay.  In: that B section drawn, the bank paged.
-
-stripe:         ld      a, (preced)
-                ld      hl, bgtables + T_BSTRIPE
-                call    bgentry
-                or      a
-                ret     z
-                ld      c, a
-                ld      a, (ay)
-                sub     32
-                ld      (yco), a
-                ld      a, c
-                ld      c, BG_ORA
-                jp      bglay
 
 ; ---------------------------------------------------------------- the mirror
 ;
@@ -109,7 +89,9 @@ LEVEL4          equ     3               ; curlev is the level less one
 ; second character's place, and nothing of him drawn, so that whatever is
 ; left of him is rubbed out if he is not drawn again.
 
-start:          ld      a, (reflon)
+start:          xor     a               ; the kid shown whole, unless the
+                ld      (clipl), a      ; mirror has him behind it
+                ld      a, (reflon)
                 or      a
                 ret     z
                 xor     a
@@ -123,20 +105,14 @@ start:          ld      a, (reflon)
 post:           ld      a, (curlev)
                 cp      LEVEL4
                 ret     nz
-                call    mirappear
-                call    mirrmusic
+                ld      a, (exitopen)   ; MIRAPPEAR, called by MOVER when
+                or      a               ; the exit opens: the mirror in its
+                jr      z, post1        ; block, as the blueprint has it from
+                ld      a, BG_MIRROR    ; then on
+                ld      (level + (MIRSCRN - 1) * 30 + MIRY * 10 + MIRX), a
+post1:          call    mirrmusic
                 call    reflection
                 jp      shadow
-
-; MIRAPPEAR, called by MOVER when the exit opens: the mirror in its block,
-; as the blueprint has it from then on.
-
-mirappear:      ld      a, (exitopen)
-                or      a
-                ret     z
-                ld      a, BG_MIRROR
-                ld      (level + (MIRSCRN - 1) * 30 + MIRY * 10 + MIRX), a
-                ret
 
 ; mirrmusic in AUTO.S, which CUTCHECK calls going left: out of the screen
 ; right of the mirror on its row, with the exit open, "Danger" -- once.
@@ -150,14 +126,12 @@ mirrmusic:      ld      hl, lastroom
                 ld      a, b
                 cp      MIRRIGHT
                 ret     nz
-                ld      a, (blocky)
-                cp      MIRY
-                ret     nz
-                ld      a, (exitopen)
+                ld      a, (blocky)     ; MIRY, the top row
                 or      a
-                ret     z
-                cp      77
-                ret     z
+                ret     nz
+                ld      a, (exitopen)   ; open, and not yet 77
+                cp      1
+                ret     nz
                 ld      a, 77           ; so we don't repeat theme
                 ld      (exitopen), a
                 ld      a, SONG_DANGER
@@ -172,6 +146,28 @@ reflection:     ld      a, (roomnum)
                 cp      MIRSCRN
                 ld      a, 0
                 jr      nz, rfclip
+                call    base_x          ; the kid's block
+                push    hl
+                call    blockcol_of
+                ld      (rfcol), a
+                cp      MIRX            ; under the mirror, jumping up at it
+                jr      nz, rfnb        ; or hanging from it facing right --
+                ld      a, (blocky)     ; he cannot climb it that way -- he
+                dec     a               ; is behind the glass, which shows
+                jr      nz, rfnb        ; the floor it reflects: not drawn
+                ld      a, (facing)     ; at all, as the user asked, his
+                or      a               ; clip past the screen's right
+                jr      z, rfnb
+                ld      a, (charact)    ; -- only hanging, or jumping up:
+                cp      2               ; standing against the block under
+                jr      z, rfhide       ; it he is before it
+                ld      a, (frame)
+                sub     67
+                cp      14
+                jr      nc, rfnb
+rfhide:         ld      a, 32
+                ld      (clipl), a
+rfnb:           pop     hl
                 ld      a, (gdhere)
                 or      a
                 jr      z, rfkid
@@ -185,12 +181,7 @@ rfedge:         ld      a, (cam)        ; FCharCL on the screen
 rfclip:         ld      (clipl + OP), a
                 ret
 
-rfkid:          call    base_x          ; the kid's block
-                push    hl
-                call    blockcol_of
-                ld      (rfcol), a
-                pop     hl
-                ld      a, (createshad) ; the reflection comes to life,
+rfkid:          ld      a, (createshad) ; the reflection comes to life,
                 inc     a               ; wherever it is
                 jr      z, rfmake
                 ld      a, (rfcol)
@@ -239,25 +230,30 @@ rfmake:         ld      hl, chrec
                 xor     a               ; CharID nought: only the shadow is 1
                 ld      (charid + OP), a
                 ld      (charsword + OP), a
-                ld      a, (rfcol)
-                ld      l, a
-                ld      h, 0
-                add     hl, hl
-                add     hl, hl
-                ld      d, h
-                ld      e, l
-                add     hl, hl
-                add     hl, hl
-                add     hl, hl
-                or      a
-                sbc     hl, de          ; 28 a block
-                ld      de, ANGLE_PX + 6
-                add     hl, de
+                ld      a, (rfcol)      ; 28 a block
+                ld      b, a
+                inc     b
+                ld      hl, ANGLE_PX + 6
+                ld      de, 28
+                jr      rfm2
+rfm1:           add     hl, de
+rfm2:           djnz    rfm1
                 add     hl, hl
                 ld      de, (charx)
                 or      a
                 sbc     hl, de
                 ld      (charx + OP), hl
+                ld      de, -108        ; the frame's foot rises to the right,
+                ld      a, (facing + OP)        ; a line for every two pixels
+                or      a               ; from its left, 57: the reflection
+                jr      z, rff1         ; stops at its top edge under his
+                ld      de, -124        ; middle -- which is behind his anchor
+rff1:           add     hl, de          ; the way he faces -- and only glass
+                sra     h               ; shows him.  Three lines lower, as
+                rr      l               ; the user wanted
+                ld      a, 59           ; (a line up: the far toe off it)
+                sub     l
+                ld      (clipb + OP), a
                 ld      a, (createshad)
                 inc     a
                 jr      z, rfshad
@@ -271,6 +267,8 @@ rfmake:         ld      hl, chrec
 rfshad:         ld      (createshad), a
                 inc     a               ; the shadowman's CharID
                 ld      (charid + OP), a
+                ld      a, 192          ; and stands on the floor
+                ld      (clipb + OP), a
                 ld      a, SND_MIRRORCRACK
                 call    addsound
                 ld      a, (maxkidstr)

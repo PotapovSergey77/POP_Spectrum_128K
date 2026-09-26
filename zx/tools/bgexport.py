@@ -190,6 +190,10 @@ def piece_tables(bgset='DUN'):
     bg.halfimg = half_images(bgset)
     shafts = PAL_SHAFTS if bgset == 'PAL' else SHAFTS
     body = [front_body(n, t1, t2, shafts) for n in bg.fronti]
+    # The mirror's front piece is the foot of its frame, a few thin slanting
+    # lines: laid masked, it stood in front of the reflection's legs as a
+    # solid rectangle and cut them off.  It hides nobody now.
+    body[bg.mirror] = (0, 0)
     # drawfrnt puts a slicer's front piece down itself, one of slicerfrnt
     # by its state, and fronti has none for it: all five are the one size,
     # and it stands in front of him like any other.  But only the foot of it
@@ -206,6 +210,8 @@ def piece_tables(bgset='DUN'):
     out = bytearray()
     for name in BY_PIECE:
         a = list(getattr(bg, name))
+        if name == 'bstripe' and bgset != 'PAL':
+            a = [0] * 30                # the stripe is the palace's alone
         a += [0] * (30 - len(a))
         out += bytes(v & 0xff for v in a[:30])
     for name, n in FIXED:
@@ -240,7 +246,9 @@ REV = [int('{:08b}'.format(b)[::-1], 2) for b in range(256)]
 # no offsets, so each bubble goes in shifted already, with a mask that clears
 # its seven pixels, at the end of the second table: BUBBLES and BUBMASK.
 BUBBLE_IMAGES = (0x2f, 0x30, 0x31)      # $af, $b0, $b1; $b2 is blank
-BUBBLES, BUBMASK = 52, 58               # off 2 first, then off 3
+# In slots neither set lays a picture of its own from (8 to 13, 28 and 29),
+# so the second table's count stops at its last real picture.
+BUBBLES, BUBMASK = 8, 28                # off 2 first, then off 3
 
 
 def flask_images(t):
@@ -288,7 +296,8 @@ def used_images():
         used |= {v & 0xff for v in getattr(bg, name)}
     for name in IMAGE_SINGLES:
         used.add(getattr(bg, name) & 0xff)
-    used |= {0x80 | n for n in range(BUBBLES, BUBMASK + 2)}
+    used |= {0x80 | n for n in list(range(BUBBLES, BUBBLES + 6))
+             + [BUBMASK, BUBMASK + 1]}
     used.discard(0)
     if keep is not None:
         bg.halfimg = keep
@@ -400,7 +409,7 @@ def level_blob(level_path):
 # blueprint off the tape in one block, and a level of the same set only its
 # blueprint.  An offset is from its table's own count byte, round 65536, and
 # may reach any picture in the bank.
-BGOVL_LEN = 400
+BGOVL_LEN = 429
 
 
 def set_parts(bgset):

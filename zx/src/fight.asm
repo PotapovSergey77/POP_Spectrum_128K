@@ -2897,7 +2897,7 @@ mmput:          ld      e, a
                 ld      h, a
                 ld      a, (mmwhat)
                 cp      2
-mmrink:         ld      a, INK_ROOM     ; the room's: see newroom
+                ld      a, (saink + 1)  ; the room's: see ovset
                 jr      z, mmink1
                 ld      a, (mmink)
 mmink1:         ld      (hl), a

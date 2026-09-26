@@ -477,7 +477,7 @@ draw_b:         ld      a, (objid)
 
                 call    tab_pieceb
                 or      a
-                jr      z, dbstripe
+                jp      z, dbstripe
                 ld      c, a
                 ld      a, (bgtables + T_PANELB0)
                 cp      c
@@ -490,8 +490,7 @@ draw_b:         ld      a, (objid)
                 ld      a, c
                 ld      c, BG_ORA
                 call    bglay
-dbstripe:       call    page_bg         ; and the palace adds a stripe on the
-                jp      ovstripe        ; wall: the set's own code, bgovl.asm
+                jp      dbstripe
 dbpanel:        ld      a, (bgtables + T_NUMPANS)
                 ld      c, a
                 ld      a, (spreced)
@@ -559,6 +558,20 @@ dbput:          push    bc              ; A = the offset from Ay, C = image
                 ld      a, c
                 or      a
                 ret     z
+                ld      c, BG_ORA
+                jp      bglay
+
+dbstripe:       call    page_bg         ; and the palace adds a stripe on the
+                ld      a, (preced)     ; wall, 32 lines up from Ay: DRAWB's
+                ld      hl, bgtables + T_BSTRIPE        ; :stripe, BGset1 1
+                call    bgentry         ; alone -- the dungeon's bstripe is
+                or      a               ; noughts
+                ret     z
+                ld      c, a
+                ld      a, (ay)
+                sub     32
+                ld      (yco), a
+                ld      a, c
                 ld      c, BG_ORA
                 jp      bglay
 
@@ -1303,7 +1316,9 @@ blockbot:       db      2, 65, 128, 191, 254
 ; in the lower two block rows, as they always were, and eight in the top
 ; one, sixty five rows down, where seven ran them a row into the next.
 talltop:        db      34 + 23, 98 + 23, 162 + 23
-imgbuf:         ds      384             ; the largest piece is 378 bytes
+imgbuf:         ds      312             ; the largest piece laid is 312 bytes;
+                                        ; a redraw's batch is a slice's rows,
+                                        ; sixteen at most
 
 ; ---------------------------------------------------------------- repack
 ;
@@ -2352,16 +2367,16 @@ rbn1:           ld      (rbleftn), a
 
 ; A batch at a time: the canvas and the room are in two banks, and paging
 ; both for every row was a fifth of the work.  imgbuf is free by now and
-; holds 48 rows of one group, or 24 of two.
+; holds 39 rows of one group, or 19 of two -- more than the slice's sixteen.
 
 rbbatch:        ld      a, (rbleftn)
                 or      a
                 jr      z, rbdone
-                ld      b, 48
+                ld      b, 39
                 ld      a, (rbwide)
                 or      a
                 jr      z, rbb1
-                ld      b, 24
+                ld      b, 19
 rbb1:           ld      a, (rbleftn)
                 cp      b
                 jr      c, rbb2
@@ -2428,7 +2443,10 @@ rbh             equ     0x5C14          ; and how many
 ; room.  That is also why an object's state lives in the blueprint rather than
 ; in the room's own copy of it: the copy is only what is being drawn.
 
-MAXTR           equ     6
+MAXTR           equ     12              ; POP keeps 31: six filled up with
+                                        ; plates, their gates and loose floors
+                                        ; shaking, and a floor's plate then
+                                        ; opened nothing
 PPTIMER         equ     5
 ; How deep a redraw each of them reaches.  POP's loosewipe is 31, but that is
 ; an erase height that has to take a character with it; what actually changes
@@ -2888,7 +2906,9 @@ cpabove:        db      0
 ; falling through, since one that comes out of a ceiling belongs to the room
 ; above and finishes in this one.
 
-MAXMOB          equ     2               ; a floor, and the one it knocks out
+MAXMOB          equ     4               ; POP keeps 15: with only two, a third
+                                        ; floor let go while two fell was lost,
+                                        ; and never came down on its plate
 MOBLEN          equ     5
 FFACCEL         equ     3
 FFTERMVEL       equ     29
@@ -2897,6 +2917,8 @@ DISAPPEARTIME   equ     2               ; or falling off the world
 CRUSHDIST       equ     30
 
 nummob:         db      0
+moblist:        ds      MOBLEN * MAXMOB ; in the fixed half: the buffers under
+                                        ; the loader have no room for more
 
 mobx:           db      0               ; the one in hand, the same five bytes
 moby:           db      0               ; in the same order as a record
@@ -3738,7 +3760,7 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 call    trobtype
                 ld      a, 1            ; and the wedges with it
                 ld      (mskwant), a
-mkspace2:       ld      a, 0            ; the id stays the loose floor's, so
+                ld      a, (mkspace1 + 1)       ; the id stays the loose floor's, so
                 ld      (trobst), a     ; that the space it leaves goes to the
                 call    mobstart        ; front of the queue; and it falls
                 jp      stopobj
