@@ -354,7 +354,8 @@ SOUNDS = ['PlateDown', 'PlateUp', 'GateDown', 'SpecialKey1', 'SpecialKey2',
           'RaisingExit', 'RaisingGate', 'LoweringGate', 'SmackWall',
           'Impaled', 'GateSlam', 'FlashMsg', 'SwordClash1', 'SwordClash2',
           'JawsClash',
-          'GateTop', 'Spikes', 'Stabbed', 'DoorShut', 'Drink', 'Slicer']
+          'GateTop', 'Spikes', 'Stabbed', 'DoorShut', 'Drink', 'Slicer',
+          'Float']
 NONE = 0xff
 CPC_FOR_SOUND = {'PlateDown': 2, 'LooseCrash': 1,
                  'Footstep': 11, 'RaisingExit': 17, 'RaisingGate': 13,
@@ -365,7 +366,10 @@ CPC_FOR_SOUND = {'PlateDown': 2, 'LooseCrash': 1,
                  'MirrorCrack': 1,
                  # the CPC has none of its own for these: the blow's, as the
                  # user asked
-                 'SmackWall': 8, 'Splat': 8, 'Impaled': 8}
+                 'SmackWall': 8, 'Splat': 8, 'Impaled': 8,
+                 # the CPC's own tune while he is weightless, which goes
+                 # round until it is stopped: all the while, the user asked
+                 'Float': 18}
 # SOUNDNAMES.S's game music, by number, to the CPC's tunes.
 CPC_FOR_SONG = {1: 10, 2: 10, 3: 4, 4: 9, 7: 9, 9: 19, 11: 16, 12: 16}
 SONGS = 13

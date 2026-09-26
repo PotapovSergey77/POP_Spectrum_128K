@@ -1691,6 +1691,7 @@ SONG_STAIRS     equ     8
 SONG_UPSTAIRS   equ     9
 SONG_POTION     equ     11
 SONG_SHORTPOT   equ     12
+FLOAT_FX        equ     18              ; the CPC effect SND_FLOAT plays
 
 ; ADDSOUND: A = one of POP's sounds.  CUESONG: A = one of its tunes (C, the
 ; frames POP would let it wait for a still moment, is not wanted).  Each is
@@ -2674,12 +2675,9 @@ smdark:         out     (254), a
                 ld      (hl), 0
                 call    shown_attrs
 smgreen:
-                ld      hl, weightless  ; and weightlessness wears off
-                ld      a, (hl)
-                or      a
-                jr      z, smwt
-                dec     (hl)
-smwt:           call    page_canvas     ; bank 7, in case it is the one shown
+                ld      hl, c1wtless    ; and weightlessness wears off,
+                call    c1call          ; its tune with it
+                call    page_canvas     ; bank 7, in case it is the one shown
                 ld      hl, mflash      ; PAGE, which POP flips every frame
                 inc     (hl)
 

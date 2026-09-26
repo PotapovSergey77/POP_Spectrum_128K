@@ -6468,6 +6468,34 @@ addsfx:         ld      a, (frame)
 ; the Apple's whole screen gone to one colour for a frame; the border here.
 ; The upside down potion, 4, is not done: the screen cannot turn over.
 
+; wtlessflash's count, from show_meters: weightlessness wears off a frame
+; at a time, and all the while the floating tune goes round -- started again
+; whenever something else has taken over and finished.  When it is over, or
+; he is not weightless any more for whatever reason, the tune stops (the
+; user asked for it the whole time, and only then).
+
+c1wtless:       ld      hl, weightless
+                ld      a, (hl)
+                or      a
+                jr      z, c1wtoff
+                dec     (hl)
+                jr      z, c1wtoff
+                ld      a, (sfxtimer)
+                or      a
+                ret     nz
+                ld      a, SND_FLOAT
+                jp      addsound
+c1wtoff:        ld      a, (sfxcur)
+                cp      FLOAT_FX
+                ret     nz
+                ld      a, (sfxtimer)
+                or      a
+                ret     z
+                di                      ; the handler writes the AY too
+                call    ststop
+                ei
+                ret
+
 potion_effect:  ld      a, (charid)
                 or      a
                 ret     nz
@@ -6513,9 +6541,8 @@ pe3:            cp      3
                 jr      nz, pe5
                 ld      a, 200          ; wtlesstimer
                 ld      (weightless), a
-                ld      a, SONG_SHORTPOT
-                ld      c, 25
-                jp      cue_song
+                ld      a, SND_FLOAT    ; and the CPC's floating tune, not
+                jp      addsound        ; s_ShortPot: see c1wtless
 pe5:            cp      5
                 ret     nz
                 ld      a, SND_SPLAT
