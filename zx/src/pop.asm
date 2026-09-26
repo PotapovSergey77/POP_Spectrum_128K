@@ -1689,7 +1689,7 @@ seqloop:        ld      a, (hl)
                 cp      SEQ_CHY
                 jr      z, sqchy
                 cp      SEQ_ACT
-                jp      z, sqact
+                jr      z, sqact
                 cp      SEQ_SETFALL
                 jp      z, sqsetfall
                 cp      SEQ_IFWTLESS
@@ -1706,10 +1706,8 @@ seqloop:        ld      a, (hl)
                 jr      nz, seqloop     ; die: no data
                 push    hl
                 ld      hl, lvflag      ; inc NextLevel, if there is one
-                sla     (hl)
-                ld      a, SONG_UPSTAIRS
-                ld      c, 25
-                call    cue_song
+                sla     (hl)            ; (its tune has begun with the
+                                        ; climb: see stairs)
                 pop     hl
                 jr      seqloop
 
@@ -3651,6 +3649,15 @@ gdgot:          srl     a               ; two pixels to the unit
                 ld      a, 13
                 sub     b
                 ret
+
+; The climb up the stairs, and GoneUpstairs's tune with it: as he begins
+; to go in rather than once he is through, as the user asked.
+
+stairseq:       ld      a, SONG_UPSTAIRS
+                ld      c, 25
+                call    cue_song
+                ld      a, SQ_CLIMBSTAIRS
+                jp      jumpseq
 
 ; Out: A = FloorY for the row below his feet -- the plane he lands on.
 

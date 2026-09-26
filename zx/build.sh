@@ -177,6 +177,7 @@ for line in open('build/pop.sym'):
     if m:
         sym[m.group(1)] = int(m.group(2), 16)
 json.dump(sym, open('build/sym.json', 'w'))
+json.dump(sym, open('build/pop.sym.json', 'w'))    # the tape's own, which runtap and fuselike read first
 work = sym['work'] + 6144
 print('код %04X..%04X, рабочий буфер %04X..%04X, до него свободно %d байт,'
       ' и %d перед таблицами сдвигов'

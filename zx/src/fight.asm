@@ -560,6 +560,9 @@ ai_engarde:     ld      a, (frame)
                 ld      a, (droppedout) ; out of sight: follow him down, or
                 or      a               ; back to the alert
                 jp      nz, followkid
+                ld      a, (charid)     ; -- except the skeleton, which
+                cp      4               ; would stand there in alertstand,
+                ret     z               ; where EnGarde does nothing, for good
                 jp      pr_dropguard
 
 aiea2:          call    getopdist       ; a stunned kid is let recover, unless
@@ -682,7 +685,7 @@ inrange:        ld      a, (charsword + OP)
                 ret     nz
                 call    getopdist
                 cp      STRIKETHRES2
-                jp      nc, pr_fwd
+                jr      nc, pr_fwd
                 jp      pr_strike
 
 ; GenFight: face to face, en garde, and too close to advance safely.
@@ -1572,8 +1575,7 @@ stfound:        ld      a, (tilestate)  ; the door far enough up?
                 ld      (facing), a
                 ld      a, (blocky)
                 ld      (strow), a
-                ld      a, SQ_CLIMBSTAIRS
-                call    jumpseq
+                call    stairseq        ; climbstairs, and its tune
                 or      1
                 ret
 
