@@ -16,6 +16,10 @@
 ; the level's block brings with the set -- the level before it is the
 ; palace's.  build.sh puts each part where it goes.
 ;
+; Thirteen's, Jaffar's, changes a few bytes of the game's fixed code for the
+; whole level, and fourteen's -- the way in to the princess -- puts them
+; back.
+;
 ; It runs with the background bank paged, as the set's code does, and the
 ; same rules hold: it calls nothing that leaves another bank in, and its
 ; bytes are its variables.
@@ -1279,6 +1283,229 @@ lvlowend:
 post:           jp      c, start
                 jp      pmain
                 jp      shad
+
+                endif
+
+                if      LVNUM = 13
+
+; ---------------------------------------------------------------- Jaffar
+;
+; Level thirteen's (STARTKID's :special13, CRUMBLE and DEADENEMY in SUBS.S;
+; animfloor, SHAKEM and crushchar in MOVER.S; GoneUpstairs in COLL.S).  The
+; kid comes in running, from the level before.  Into screen 23, or 16, the
+; loose floors of the room above -- blocks 2 to 7 of its bottom row -- give
+; way over him, each after a moment of its own; on this level a floor only
+; wiggling never settles, but falls, and landing shakes none.  (A falling
+; floor crushes him running here, as crushchar has it on this level only:
+; mobcrush in bg.asm does on every level.)  The vizier dead, the exit
+; opens: s_Upstairs, white lightning, and the plate in screen 24 pushed.
+; Up its stairs, no tune.  jaffmusic's s_Jaffar, as the kid goes in to
+; him, the CPC has none of, and the vizier's wait for it to end (Alert in
+; AUTO.S) waits for nothing.
+;
+; What the game does otherwise on this level it does in fixed code, which
+; is changed at the top of every frame; level fourteen puts it back.
+
+CRUMBLE1        equ     23              ; CRUMBLE's screens
+CRUMBLE2        equ     16
+EXITPLATE       equ     24              ; DEADENEMY's rdblock 24, 0, 0
+WHITE           equ     7               ; lightcolor $FF, the border's white
+LIGHTTIME       equ     10
+
+post:           jp      c, start
+
+; After the moves.  PrepCut's CRUMBLE: into a screen, this frame.
+
+                ld      hl, lastroom
+                ld      a, (roomnum)
+                cp      (hl)
+                ld      (hl), a
+                call    nz, crumble
+
+; DEADENEMY's :wingame: the vizier newly dead -- SHADCTRL's tune, s_Upstairs
+; put in for s_Vict, is on already.
+
+                ld      a, (exitopen)
+                or      a
+                ret     nz
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (charlife + OP)
+                or      a
+                ret     nz
+                inc     a
+                ld      (exitopen), a
+                ld      a, WHITE
+                ld      (lightcolor), a
+                ld      a, LIGHTTIME
+                ld      (lightning), a
+                ld      a, EXITPLATE    ; the exit opened
+                ld      (trscrn), a
+                xor     a
+                ld      (trloc), a
+                call    trobat
+                jp      pushpp
+
+; CRUMBLE: blocks 7 down to 2 of the bottom row of the screen above, each a
+; loose floor not held from below and not on its way down already set going
+; (BREAKLOOSE1) from a state of nought to fifteen below nought.
+
+crumble:        cp      CRUMBLE1
+                jr      z, cr1
+                cp      CRUMBLE2
+                ret     nz
+cr1:            ld      a, (links + 2)  ; scrnAbove
+                or      a
+                ret     z
+                ld      (trscrn), a
+                ld      a, 2 * 10 + 7
+cr2:            ld      (trloc), a
+                call    trobat
+                cp      BG_LOOSE
+                jr      nz, cr3
+                ld      hl, (blueptr)   ; reqmask
+                bit     5, (hl)
+                jr      nz, cr3
+                ld      a, (trobst)     ; wiggling, or not going yet
+                or      a
+                jr      z, cr2a
+                jp      p, cr3
+cr2a:           call    rnd
+                and     0x0f
+                neg
+                ld      (trobst), a
+                call    trobsave
+                xor     a               ; down
+                ld      (trdirec), a
+                call    addtrob
+                ld      a, LOOSEWIPE
+                ld      (redh), a
+                call    redplate
+cr3:            ld      a, (trloc)
+                dec     a
+                cp      2 * 10 + 2
+                jr      nc, cr2
+                ret
+
+; The top of the frame, before anything moves.  The level begun, or begun
+; again -- levelgo leaves createshad nought: STARTKID's :special13, which
+; jumps him to running where it would have turned him -- CharX and CharFace
+; as they were before the turn, and ANIMCHAR once -- and CRUMBLE for the
+; screen he starts in.
+
+start:          ld      a, (createshad)
+                or      a
+                jr      nz, st1
+                ld      (lastroom), a
+                inc     a
+                ld      (createshad), a
+                ld      a, (roomnum)    ; a test tape begun elsewhere starts
+                ld      hl, level + LV_KIDSCRN  ; him where it says
+                cp      (hl)
+                jr      nz, st1
+                ld      hl, (level + LV_HEAD)
+                ld      (charx), hl
+                ld      a, (level + LV_HEAD + 4)
+                ld      (facing), a
+                ld      hl, trun
+                ld      de, imgbuf
+                ld      bc, trunend - trun
+                ldir
+                call    imgbuf
+
+; And the level's own ways, in the fixed code: animfloor's wiggling floor
+; not settled (its ret c a ret), SHAKEM left out (a ret at slrow, past
+; taking the jar off), s_Upstairs for the vizier's death, and the stairs
+; climbed past their tune (stairsq).  And a floor due to fall waits,
+; still, for room among the falling (ibff): six of them come down at once
+; here, and moblist has room for four -- the fifth and sixth were lost, and
+; never landed.  Still, for its shaking would be drawn first, and nothing
+; falls while a picture waits to go first (animmobs).
+
+st1:            ld      a, 0xC9         ; ret
+                ld      (afwiggle + 2), a
+                ld      (slrow), a
+                ld      a, SONG_UPSTAIRS
+                ld      (scvict + 1), a
+                ld      hl, stairsq
+                ld      (stcall + 1), hl
+                ld      hl, ibff
+                ld      de, imgbuf
+                ld      bc, ibffend - ibff
+                ldir
+                ld      a, 0xCD         ; call imgbuf
+                ld      (affall), a
+                ld      hl, imgbuf
+                ld      (affall + 1), hl
+                ret
+
+; animfloor's cp BG_FFALLING and ret c, from imgbuf, where start puts it
+; each frame: animtrans comes straight after, and nothing between.
+
+ibff:           cp      BG_FFALLING
+                jr      c, ibff1
+                ld      a, (nummob)
+                cp      MAXMOB
+                ret     c
+                xor     a               ; no room: it waits, still -- a floor
+                ld      (redwant), a    ; wiggling holds up those falling
+ibff1:          pop     hl              ; not yet: out of animfloor
+                ret
+ibffend:
+
+; Run from imgbuf: the sequences are in the canvas bank.
+
+trun:           call    page_canvas
+                ld      a, SQ_RUNNING
+                call    jumpseq
+                call    page_canvas
+                call    step_seq
+                jp      page_bg
+trunend:
+
+lastroom:       db      0               ; the screen he was in last frame
+
+                endif
+
+                if      LVNUM = 14
+
+; ---------------------------------------------------------------- the princess
+;
+; Level fourteen's (PrepCut and YouWin in TOPCTRL.S): out of screen 1 to the
+; left is the princess's room, screen 5, which is never shown as a room --
+; the game is won.  cutprincess, PlayCut7 and the Epilog come off the tape
+; the way the next level would, the scene first: in screen 1 the way left
+; is the way to the next level (nrlevel), and this level's head has the
+; scene's length (LH_CUT) and the Epilog's place.  The scene never comes
+; back.
+;
+; And level thirteen's changes to the fixed code are put back, every frame
+; after the moves: see there.
+
+YOUWINSCRN      equ     1               ; the screen right of screen 5
+
+post:           ld      a, 0xD8         ; ret c
+                ld      (afwiggle + 2), a
+                ld      (affall + 2), a
+                ld      hl, BG_FFALLING * 256 + 0xFE    ; cp BG_FFALLING
+                ld      (affall), hl
+                ld      a, 0x4F         ; ld c, a
+                ld      (slrow), a
+                ld      a, SONG_VICT
+                ld      (scvict + 1), a
+                ld      hl, stairseq
+                ld      (stcall + 1), hl
+                ld      a, (roomnum)
+                cp      YOUWINSCRN
+                ld      a, 0x3A         ; ld a, (links)
+                ld      hl, links
+                jr      nz, pw1
+                ld      a, 0xC3         ; jp nrlevel
+                ld      hl, nrlevel
+pw1:            ld      (nrleft), a
+                ld      (nrleft + 1), hl
+                ret
 
                 endif
 

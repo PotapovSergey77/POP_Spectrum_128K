@@ -169,7 +169,7 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 12
+LEVELS = 14
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
@@ -181,7 +181,7 @@ START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 # none comes off the tape for it.
 CHSET_OF_LEVEL = [0, 0, 0, 1, 2, 2, 3, 2, 2, 2, 2, 2, 4, 5, 5]
 CHSET_TABLE = {0: 'IMG.CHTAB4.GD', 1: 'IMG.CHTAB4.SKEL', 2: 'IMG.CHTAB4.GD',
-               3: 'IMG.CHTAB4.FAT', 4: None}
+               3: 'IMG.CHTAB4.FAT', 4: None, 5: 'IMG.CHTAB4.VIZ'}
 
 
 def level_path(n):
@@ -205,7 +205,8 @@ def level_head(n, chset_len=0, nxt=(0, 0)):
     character set is that follows it there, nought for none, where the next
     level's block goes in the background bank and how long it is -- the
     blueprint, or for a level of the other set the bank up to it -- and the
-    set's colour and number.
+    set's colour and number.  Every level has one after it: the last, the
+    ending, which comes off the tape the way a level does.
     """
     scrn, block, face = poplevel.Level(level_path(n)).kid_start
     bgset = bgexport.level_bgset(n)
@@ -216,7 +217,8 @@ def level_head(n, chset_len=0, nxt=(0, 0)):
         # byte; the blueprint's KidStartScrn is that room (level_blob)
         place[2] = (place[2] - 189) & 0xff
         place[3] = (place[3] - 3) & 0xff
-    return (bytes(place) + bytes([1 if n < LEVELS else 0])
+    # (the last level's "next" is the ending: see ENDING_CUT)
+    return (bytes(place) + bytes([1])
             + chset_len.to_bytes(2, 'little')
             + nxt[0].to_bytes(2, 'little') + nxt[1].to_bytes(2, 'little')
             + bytes([INK_OF_SET[bgset], bgexport.BGSETS.index(bgset)])
@@ -237,10 +239,43 @@ LH_NEXT, LH_NEXTLEN, LH_INK, LH_SET, LH_CUT = 8, 10, 12, 13, 14
 # run out (GETGLASS 7 on) -- and the Spectrum keeps no clock: see CUT1_GLASS.
 CUT_BEFORE = {2: 1, 4: 2, 6: 1, 8: 3, 9: 4, 12: 1}
 
+# And the ending (YouWin in TOPCTRL.S): into the princess's room from the
+# last level, cutprincess and PlayCut7, the happy ending, and the Epilog.
+# They come off the tape as a next level would: the scene, cut1.asm again,
+# as the scene before it -- its length in the last level's head -- and the
+# Epilog's screens and tune as the level itself, into the background bank
+# where the head says (see ending_block).  The scene never comes back.
+ENDING_CUT = 5
+
 # basicstrength in AUTO.S, by level: a guard's strength is this and his
 # program's extrastrength (getgdstrength).  Each level's is the last byte
-# kept for its own code (LVSTR, lvcode.asm), which add_guard reads.
-BASIC_STRENGTH = [4, 3, 3, 3, 3, 4, 5, 4, 4, 5, 5, 5, 4, 6]
+# kept for its own code (LVSTR, lvcode.asm), which add_guard reads.  The
+# table stops at thirteen: fourteen's guards stand where the way to the
+# princess never goes, and have thirteen's.
+BASIC_STRENGTH = [4, 3, 3, 3, 3, 4, 5, 4, 4, 5, 5, 5, 4, 6, 6]
+
+
+def ending_block(cache_dir, level_at):
+    """
+    The Epilog, the ending's "level" (EPILOG and Epilog in MASTER.S): the
+    story's end and the splash, packed, and the CPC's tune 8 -- the
+    Amstrad's ending has the one, where the Apple plays s_Epilog and then
+    s_Curtain -- and after them eight noughts, over the first eight bytes of
+    the last level's head: levelgo reads it again once the block is in, and
+    finds no character set to load.  The block ends there, over the
+    blueprint, which is done with.  Out: the block, where it goes, and the
+    equates cut1.asm wants for the ending.
+    """
+    epilog, splash = titlescr.ending(cache_dir)
+    tune = cpcmusic.tunes((8,))[0]
+    block = epilog + splash + tune + bytes(8)
+    at = level_at + 2304 + 8 - len(block)
+    assert at >= PAGE_WINDOW, 'the Epilog is bigger than the background bank'
+    inc = ['EPI_SCREEN  equ %d' % at,
+           'EPI_SPLASH  equ %d' % (at + len(epilog)),
+           'EPI_TUNE    equ %d' % (at + len(epilog) + len(splash)),
+           'EPI_TUNEND  equ %d' % (at + len(epilog) + len(splash) + len(tune))]
+    return block, at, inc
 
 
 def lvcode_room(n):
@@ -931,6 +966,11 @@ def main(argv):
                    (bgat['level'] if switch[n] else 0) + 2304 + LEVEL_HEAD
                    + lvtail)
            for n in later}
+    # and after the last, the ending's
+    epiblock, epi_at, epiinc = ending_block(binout, PAGE_WINDOW + bgat['level'])
+    nxt[LEVELS] = (epi_at, len(epiblock))
+    open(os.path.join(binout, 'epilog.bin'), 'wb').write(epiblock)
+    print('эпилог  %d байт, в банке фона с %04X' % (len(epiblock), epi_at))
     # After the blueprint, what the Z80 needs to start a level: see
     # level_head.  The first level's gives its set and the way to the next;
     # the next levels come off the tape as blueprint and head together, over
@@ -945,6 +985,9 @@ def main(argv):
         cutheads.append('build/bin/bank_bg.bin %d %d'
                         % (len(bgblob) - LEVEL_HEAD + LH_CUT,
                            CUT_BEFORE[START_LEVEL + 1]))
+    if START_LEVEL == LEVELS:
+        cutheads.append('build/bin/bank_bg.bin %d %d'
+                        % (len(bgblob) - LEVEL_HEAD + LH_CUT, ENDING_CUT))
     bgblob += colours[START_LEVEL].ljust(colmax, bytes(1))
     lvc = ['build/bin/bank_bg.bin %d %d' % (len(bgblob), START_LEVEL)]
     bgblob += lvcode_room(START_LEVEL)
@@ -1009,6 +1052,10 @@ def main(argv):
             cutheads.append('build/bin/level%d.bin %d %d'
                             % (n, len(blob) - lvtail - LEVEL_HEAD
                                + LH_CUT, CUT_BEFORE[n + 1]))
+        if n == LEVELS:
+            cutheads.append('build/bin/level%d.bin %d %d'
+                            % (n, len(blob) - lvtail - LEVEL_HEAD
+                               + LH_CUT, ENDING_CUT))
         open(os.path.join(binout, 'level%d.bin' % n), 'wb').write(blob)
         if n in CUT_BEFORE:
             tape.append('build/bin/cut%d.bin' % CUT_BEFORE[n])
@@ -1024,6 +1071,7 @@ def main(argv):
                   % (n, len(chset),
                      CHSET_TABLE[CHSET_OF_LEVEL[n]] or '' if new_ch else '',
                      ', падающий пол' if extra else ''))
+    tape += ['build/bin/cut%d.bin' % ENDING_CUT, 'build/bin/epilog.bin']
     open(os.path.join(binout, 'tape.lst'), 'w', newline='').write(''.join(t + '\n' for t in tape))
     open(os.path.join(binout, 'ovl.lst'), 'w', newline='').write('\n'.join(ovl) + '\n')
     open(os.path.join(binout, 'lvc.lst'), 'w', newline='').write('\n'.join(lvc) + '\n')
@@ -1087,19 +1135,26 @@ def main(argv):
     # and PlayCut8 sending the mouse out before level eight -- whose song,
     # s_Heartbeat, the CPC has none of: the tune of its PlayCut1 plays --
     # and PlayCut4 the mouse coming back before level nine, which has no
-    # song, and no tune on the tape.
+    # song, and no tune on the tape.  Last, the ending's: PlayCut7, the
+    # CPC's tune 7 its s_Embrace, and the room's code not put by -- the
+    # game does not come back to it -- and the Epilog after it.
     scenes = {1: (princess.cut1(), 'A'), 2: (princess.cut2(), 'B'),
-              3: (princess.cut8(), 'B'), 4: (princess.cut4(), 'B')}
+              3: (princess.cut8(), 'B'), 4: (princess.cut4(), 'B'),
+              ENDING_CUT: (princess.cut7(), 'B')}
     for k, (frames, side) in scenes.items():
+        ending = k == ENDING_CUT
+        tune = cpcmusic.tunes((7 if ending else 6,))[0] if k != 4 else b''
         sced, scefix, sceneinc, scelow = princessscr.build1(
-            cpcmusic.tunes((6,))[0] if k != 4 else b'', RBROOM, frames,
-            side, k == 2)
+            tune, 0 if ending else RBROOM, frames, side, k == 2)
         open(os.path.join(binout, 'cut%ddata.bin' % k), 'wb').write(sced)
         open(os.path.join(binout, 'cutfixed%d.bin' % k), 'wb').write(scefix)
         with open(os.path.join(out, 'cut%d.inc' % k), 'w') as f:
             f.write('; generated by mkassets.py -- do not edit\n')
             f.write('\n'.join(sceneinc) + '\n')
             f.write('CUT1_LOW    equ %d\n' % scelow)
+            f.write('CUT_ENDING  equ %d\n' % ending)
+            if ending:
+                f.write('\n'.join(epiinc) + '\n')
         print('принцесса %d комната, картинки и мелодия %d байт на плёнке, '
               'код отдельно' % (k, len(sced)))
     # The clean copy of the princess's band goes over the splash, which is

@@ -12,6 +12,11 @@ there, by MASTER.S's "hi bytes of crunch data":
     pacProlog   $7c aux    the story, part 1, a whole screen
     pacSumup    $60 main   the story, part 2
 
+and LoadStage1B, for the Epilog, side B's track 18 on into auxmem $4000 --
+the same splash, and
+
+    pacEpilog   $76 aux    the story's end, when the game is won
+
 DBLEXPAND unpacks a whole screen column by column, even lines then odd; a
 column is a run of bytes, each either one byte (bit 7 clear) or a byte
 (bit 7 set, and taken off) and a count.  DELTAEXPPOP lays changes over the screen there: a byte with bit 7
@@ -32,9 +37,11 @@ import popdisk
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DISK = os.path.join(HERE, '..', 'disk', 'Prince of Persia side A.nib')
+DISK_B = os.path.join(HERE, '..', 'disk', 'Prince of Persia side B.nib')
 
 SPLASH, PRESENTS, BYLINE, TITLE, PROLOG = 0x40, 0x70, 0x72, 0x74, 0x7c
 SUMUP = 0x60
+EPILOG = 0x76
 
 
 def memory():
@@ -48,6 +55,17 @@ def memory():
         at = 0x6000 + i * 0x1200
         main[at:at + 0x1200] = disk.track(t)
     return bytes(aux), bytes(main)
+
+
+def memory_b():
+    """auxmem as LoadStage1B leaves it: side B from track 18, where ]lsub
+    reads its five tracks."""
+    disk = popdisk.Disk(DISK_B)
+    aux = bytearray(0x10000)
+    for i, t in enumerate(range(18, 23)):
+        at = 0x4000 + i * 0x1200
+        aux[at:at + 0x1200] = disk.track(t)
+    return bytes(aux)
 
 
 def blank():
@@ -115,6 +133,8 @@ def _seq1(scr, x, y, v, n):
 
 def screen(name):
     """The screen as it is shown: the splash with its credit, or a story."""
+    if name == 'epilog':
+        return dbl_expand(memory_b(), EPILOG)
     aux, main = memory()
     if name == 'prolog':
         return dbl_expand(aux, PROLOG)
@@ -128,7 +148,7 @@ def screen(name):
     return scr
 
 
-NAMES = ['splash', 'presents', 'byline', 'title', 'prolog', 'sumup']
+NAMES = ['splash', 'presents', 'byline', 'title', 'prolog', 'sumup', 'epilog']
 
 
 def dots(scr):

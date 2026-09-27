@@ -338,11 +338,23 @@ def build_blobs(scene_frames=None):
     col0 = min([COL0] + [x >> 3 for _, (x, _) in scene_boxes(sprites, frames)])
     # the hourglass's states the scene has, the first of them CUT_GL0
     states = sorted({st['glass'] for st, _ in frames if st['glass'] is not None})
-    assert 1 <= len(states) <= 2, states
+    assert len(states) <= 2, states
     flowing = {st['glass'] for st, _ in frames if st['sand']}
     botcut = {min(FLOW_Y + 1, GLASS_Y - SANDHT[s]) for s in flowing}
-    assert len(botcut) == 1, botcut     # one flow picture for the scene
-    botcut = botcut.pop()
+    assert len(botcut) == (1 if states else 0), botcut  # one flow picture
+    botcut = botcut.pop() if botcut else None
+    # PlayCut7 has no hourglass: none of its code, and the flag that said
+    # which of two it was says a frame is held while the tune plays out
+    eq['CUT_NOGLASS'] = 0 if states else 1
+    # SPEED, where it is not 12: seven, or PlayCut7's eight -- its eighths
+    # of a fiftieth a frame (cutplay.asm), between seven's and twelve's
+    slow = {st['speed'] for st, _ in frames} - {12}
+    assert len(slow) <= 1, slow
+    eq['CUT_QA'] = {7: 59, 8: 60}[slow.pop() if slow else 7]
+    # the widest picture blitted, in bytes: cutplay.asm's row work is made
+    # for five, and one of PlayCut7's embraces is six across
+    eq['CUT_WMAX'] = max([5] + [sprites[n & 0x7F][3] for _, rec in frames
+                                for n, _ in rec if n != NONE])
 
     # the characters' pictures and their table: per id the address of its
     # rows, width, height, top band row, and the pmask's place or NONE
@@ -387,6 +399,11 @@ def build_blobs(scene_frames=None):
     eq['CUT_FLTAB'] = None
     put('CUT_FLTAB', bytes(n - 1 for n in TORCH_FLAMES))
 
+    if not states:                      # nothing of it is ever drawn
+        eq.update(CUT_GL_AT=0, CUT_GL_W=1, CUT_GL_H=1, CUT_FW_AT=0,
+                  CUT_FW_W=1, CUT_FW_H=1)
+        for name in ('CUT_GL_EXT', 'CUT_GL0', 'CUT_FW_EXT', 'CUT_FW'):
+            at[name] = 0
     for s, n in enumerate(GLASSIMG[g] for g in states):
         im = ch6(n)
         col, w, d, ext = aligned([list(l) for l in im.pixels()], GLASS_X)
@@ -396,7 +413,7 @@ def build_blobs(scene_frames=None):
         put('CUT_GL%d' % s, d)
 
     data = bytearray()
-    for n in FLOW_IMAGES:
+    for n in FLOW_IMAGES if states else ():
         im = ch6(n)
         rows = [list(l) for l in im.pixels()]
         top = FLOW_Y - im.height + 1        # BOTCUT: the lines from the
@@ -405,8 +422,9 @@ def build_blobs(scene_frames=None):
         eq['CUT_FW_AT'] = band_row(top) * 32 + col
         eq['CUT_FW_W'], eq['CUT_FW_H'] = w, len(rows)
         data += d
-    put('CUT_FW_EXT', ext)
-    put('CUT_FW', data)
+    if states:
+        put('CUT_FW_EXT', ext)
+        put('CUT_FW', data)
 
     im = ch6(POST_IMAGE)
     col, w, d, _ = aligned([list(l) for l in im.pixels()], POST_X)
@@ -479,14 +497,21 @@ def build_blobs(scene_frames=None):
         if st['glass'] != last_glass:
             f |= 4 | (8 if states.index(st['glass']) else 0)
             last_glass = st['glass']
+        if st.get('songhold'):
+            assert not states
+            f |= 8
         if st['sand'] and not sand:
             f |= 16
             sand = True
         assert not any(covered(rec, c) for c in left_cells)
         # the frame between (cutplay.asm, cmid) burns the right flame on
-        # only while neither cell is covered: its box must be in them
+        # only while neither cell is covered: its box must be in them --
+        # or, with no hourglass and flag 16 free for it, a frame whose box
+        # is over the flame's bytes and not its cells says so itself
         if not (covered(rec, tip) or covered(rec, body)):
-            assert not boxed(rec, TORCHES[1])
+            if boxed(rec, TORCHES[1]):
+                assert not states, 'a box over the flame, not its cells'
+                f |= 16
         if covered(rec, tip):
             f |= 32
         if covered(rec, body):
@@ -498,8 +523,8 @@ def build_blobs(scene_frames=None):
             script += bytes([n, x])
     eq['CUT_FRAMES'] = len(frames)
     eq['CUT_COL0'] = col0
-    for name in ('CUT_FL0_AT', 'CUT_FL1_AT', 'CUT_GL_AT', 'CUT_FW_AT',
-                 'CUT_PO_AT'):
+    for name in ('CUT_FL0_AT', 'CUT_FL1_AT', 'CUT_PO_AT') + (
+            ('CUT_GL_AT', 'CUT_FW_AT') if states else ()):
         assert eq[name] % 32 >= col0, name
     del eq['CUT_FLTAB']
     return table, pics, bytes(script), fixed, at, eq, len(sprites)

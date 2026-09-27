@@ -36,6 +36,7 @@ PSTAND, VSTAND, VAPPROACH, VSTOP, PALERT, PBACK, VEXIT, VRAISE = \
 PSLUMP = 113
 
 GOTO, ABOUTFACE, CHX, CHY, ACT = 0xFF, 0xFE, 0xFB, 0xFA, 0xF9
+JARU, JARD, EFFECT, TAP = 0xF5, 0xF4, 0xF3, 0xF2
 
 
 def load_altset2():
@@ -84,8 +85,10 @@ class Char:
                 self.ptr += 1
             elif b == GOTO:
                 self.ptr = self.table.at[self.table.target(self.ptr + 1)]
-            elif b == ACT:
+            elif b in (ACT, EFFECT, TAP):
                 self.ptr += 2
+            elif b in (JARU, JARD):
+                self.ptr += 1
             else:
                 self.posn = b
                 self.ptr += 1
@@ -336,6 +339,69 @@ def cut4():
     return frames
 
 
+# PlayCut7, the happy ending: the kid runs in to the princess, they embrace,
+# and the mouse comes in after him.  PlayCut7 in SUBS.S: SPEED 8 all through;
+# STARTP7 -- STARTP0 at CharX 136, CharY floorY - 2, waiting -- in the
+# shadow's place, and STARTK7's kid -- CharX 198, floorY - 2, facing left,
+# startrun -- in the kid's; Pembrace, the kid's runstop, and on the eighth
+# frame of the embrace (KidPosn nought) the kid is gone: she holds him in
+# her own pictures.  Then PlaySong's s_Embrace, the CPC's tune 7, the frame
+# held while it plays ('songhold'); STARTM7 -- STARTM4's mouse at floorY - 2 --
+# scurries in, and climbs (Mclimb) to the end.
+
+KID = 0x100                 # the kid's frames: the main set's, as the mouse's
+STARTRUN, RUNSTOP = 1, 13
+PEMBRACE, PWAITING, MCLIMB = 108, 109, 101
+
+
+def cut7():
+    seq = popseq.load()
+    frames = []
+    prn = Char(seq, 120, FLOOR_Y, -1)
+    prn.jumpseq(PSTAND)
+    prn.animchar()
+    prn.x, prn.y = 136, FLOOR_Y - 2
+    prn.jumpseq(PWAITING)
+    prn.animchar()
+    who = [None, 0]             # the kid's slot, and what his frames add
+
+    def play(n):
+        for _ in range(n):
+            k, add = who
+            if k is not None:
+                k.animchar()
+            prn.animchar()
+            frames.append({
+                'speed': 8,
+                'vizier': None if k is None else (add + k.posn, k.x, k.y, k.face),
+                'princess': (prn.posn, prn.x, prn.y, prn.face),
+                'glass': None, 'sand': False, 'flash': False})
+
+    play(8)
+    kid = Char(seq, 198, FLOOR_Y - 2, -1)        # STARTK7
+    kid.jumpseq(STARTRUN)
+    kid.animchar()
+    who[:] = [kid, KID]
+    play(8)
+    prn.jumpseq(PEMBRACE)
+    play(5)
+    kid.jumpseq(RUNSTOP)
+    play(2)
+    who[:] = [None, 0]                           # KidPosn nought
+    play(9)
+    frames[-1]['tune'] = True                    # s_Embrace, and PlaySong
+    frames.append(dict(frames[-1], tune=False, songhold=True))  # holds it
+    mouse = Char(seq, 199, FLOOR_Y + 1, -1)      # STARTM7
+    mouse.jumpseq(MSCURRY)
+    mouse.animchar()
+    mouse.y = FLOOR_Y - 2
+    who[:] = [mouse, 0]
+    play(12)
+    mouse.jumpseq(MCLIMB)
+    play(30)
+    return frames
+
+
 ALT = None
 T6 = T7 = None
 MAIN = None
@@ -358,7 +424,8 @@ def side(which):
 def picture(posn):
     """The frame's image, its Fdx and Fdy, and Fcheck.  ALTSET2's go up to
     85; the mouse's, 186 to 188, are the main set's (USEALTSETS leaves
-    CharID 24 in it), out of chtable2."""
+    CharID 24 in it), out of chtable2 -- and so are the kid's, CharID 0,
+    which the scenes give as KID + his frame."""
     global ALT, T6, T7, MAIN
     if ALT is None:
         ALT = load_altset2()
@@ -368,7 +435,7 @@ def picture(posn):
     if posn >= 150:
         if MAIN is None:
             MAIN = popframe.load()
-        f = MAIN[posn]
+        f = MAIN[posn & 0xFF]
         if f.table not in MAIN_TABLES:
             MAIN_TABLES[f.table] = popimg.Table(os.path.join(
                 popframe.IMAGES, popframe.TABLES[f.table]))

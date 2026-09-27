@@ -7,7 +7,7 @@
 set -e
 cd "$(dirname "$0")"
 python tools/mkassets.py build
-cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/bin/*.bin src/
+cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/cut5.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc
 cd src
 ../tools/pasmo.exe --bin pop.asm ../build/pop.bin ../build/pop.sym
@@ -35,7 +35,7 @@ with open('src/popsyms.inc', 'w') as f:
         f.write('%-15s equ     0x%04X\n' % (name, sym[name]))
 PY
 cd src
-for k in 1 2 3 4; do
+for k in 1 2 3 4 5; do
     cp cut$k.inc cutsel.inc
     cp cutfixed$k.bin cutsel.bin
     ../tools/pasmo.exe --bin cut1.asm ../build/cut${k}code.bin ../build/cut$k.sym
@@ -103,9 +103,10 @@ data = open('build/pop.bin', 'rb').read()
 base = sym['stubs']
 # The princess's scenes' tape blocks: at 0xC000 a few bytes that put the
 # code where it runs and jump there, the room, the pictures and the tune,
-# and the code.
+# and the code.  The fifth is the ending's, which composes its band past
+# its code (CUT_BUFOFF) and never gives the room's code back.
 lens = {}
-for k in (1, 2, 3, 4):
+for k in (1, 2, 3, 4, 5):
     csym = {}
     for line in open('build/cut%d.sym' % k):
         m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
@@ -123,12 +124,17 @@ for k in (1, 2, 3, 4):
     block = stub + cdata + code
     lens[k] = len(block)
     open('build/bin/cut%d.bin' % k, 'wb').write(block)
-    print('принцесса %d: блок %d байт, код %04X..%04X, свободно до постройки '
-          'комнаты %d, в банке заставки до распакованного %d'
-          % (k, len(block), org, csym['cut1end'], sym['roomblk'] - csym['cut1end'],
-             csym['CUT1_LOW'] - 0xC000 - len(block)))
-    assert csym['cut1end'] <= sym['roomblk'], 'принцесса %d налезла на постройку комнаты' % k
-    assert 0xC000 + len(block) <= csym['CUT1_LOW'], 'принцесса %d не влезла в банк' % k
+    band = sym['roomblk'] + csym['CUT_BUFOFF']
+    print('принцесса %d: блок %d байт, код %04X..%04X, свободно до полосы '
+          '%d, в банке заставки до распакованного %d'
+          % (k, len(block), org, csym['cut1end'], band - csym['cut1end'],
+             csym['CUT1_LOW'] - csym['CUT1_CODE']))
+    assert csym['cut1end'] <= band, 'принцесса %d налезла на свою полосу' % k
+    assert band + csym['BAND_BYTES'] <= sym['HICODE'], 'полоса принцессы %d налезла на код боя' % k
+    # the code goes to where it runs before anything is unpacked: only what
+    # is read after that -- the room, the pictures, the tune -- must stay
+    # below what the unpacking writes
+    assert csym['CUT1_CODE'] <= csym['CUT1_LOW'], 'принцесса %d не влезла в банк' % k
     assert csym['RB1LEN'] <= 3275
 assert sym['TAILLEN'] <= sym['RB1LEN'], 'надписи заставки длиннее кода постройки комнаты'
 # and each scene's length into the head of the level before it, which

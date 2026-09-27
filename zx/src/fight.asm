@@ -400,7 +400,8 @@ shadctrl:       ld      a, (charlife)
                 or      a
                 jr      nz, sccont
                 ld      (charlife), a
-                ld      a, SONG_VICT    ; DEADENEMY
+scvict:         ld      a, SONG_VICT    ; DEADENEMY (level thirteen's is
+                                        ; s_Upstairs: its code puts it here)
                 ld      c, 25
                 call    cue_song
 sccont:         call    autoctrl
@@ -1577,7 +1578,8 @@ stfound:        ld      a, (tilestate)  ; the door far enough up?
                 ld      (facing), a
                 ld      a, (blocky)
                 ld      (strow), a
-                call    stairseq        ; climbstairs, and its tune
+stcall:         call    stairseq        ; climbstairs, and its tune (level
+                                        ; thirteen's calls past it: stairsq)
                 or      1
                 ret
 

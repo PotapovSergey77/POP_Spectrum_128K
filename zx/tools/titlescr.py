@@ -867,9 +867,12 @@ def letters(pix, mask, y0, y1, x0, x1, ground=None, ink=LETTER):
 
 # The story screens: white letters on a ground of dark blue, a dot in every
 # other colour in a check with black, inside the border -- colours 8 to
-# 131, lines 14 to 167.  A letter's dot is lit and not the ground's.
-STORY = ('prolog', 'sumup')
+# 131, lines 14 to 167.  A letter's dot is lit and not the ground's.  The
+# Epilog's ground is crimson, and red here.
+STORY = ('prolog', 'sumup', 'epilog')
 GROUND = A_DKBLUE
+STORY_GROUND = {'prolog': (A_DKBLUE, BLUE), 'sumup': (A_DKBLUE, BLUE),
+                'epilog': (A_CRIMSON, RED)}
 
 
 # The story's text: the Apple sets it in dots, four to a colour, and two of
@@ -893,16 +896,30 @@ STORY_TEXT = {
               (32, 111, 'loves.  Little does she know'),
               (32, 127, 'that he is already a prisoner'),
               (32, 144, "in Jaffar's dungeons. . . .")],
+    # The Epilog's lines are longer, eight to its page where the others
+    # have seven: its letters no further apart than "presents" has them,
+    # a space two pixels, and the lines under the initial started where
+    # the border lets the longest end inside it.
+    'epilog': [(63, 44, 'he tyrant Jaffar lies dead, his'),
+               (63, 58, 'power shattered.  Through-'),
+               (63, 72, 'out the land the people of'),
+               (16, 87, 'Persia hail their Princess . . . and the'),
+               (16, 101, 'brave youth who saved her from the'),
+               (16, 115, 'forces of darkness.  No longer a'),
+               (16, 129, 'stranger, he shall from this day forth'),
+               (16, 144, 'be known as . . . PRINCE OF PERSIA.')],
 }
 INITIAL = 16                # taller than this, a letter is the initial
-STORY_GAP = 2               # between letters: the lines as long as the Apple's
+# between letters: the lines as long as the Apple's; and a space's width
+STORY_GAP = {'prolog': (2, 3), 'sumup': (2, 3), 'epilog': (1, 2)}
 
 
 def story(pix, cols, dots, name):
+    ground, paper = STORY_GROUND[name]
     for y in range(TOP + 2, FOOT):
         for x in range(SIDE + 1, 255 - SIDE):
-            pix[y][x] = zx(BLUE)
-    mask = [[bool(dots[y][d]) and cols[y][d >> 2] != GROUND
+            pix[y][x] = zx(paper)
+    mask = [[bool(dots[y][d]) and cols[y][d >> 2] != ground
              for d in range(560)] for y in range(192)]
     initial = [[False] * 560 for _ in range(192)]
     for left, top, bits in components(mask, TOP + 2, FOOT, 8 * 4, 132 * 4):
@@ -912,9 +929,10 @@ def story(pix, cols, dots, name):
                     if c == '#':
                         initial[top + j][left + i] = True
     letters(pix, initial, TOP + 2, FOOT, 8 * 4, 132 * 4)
+    gap, space = STORY_GAP[name]
     for x, baseline, text in STORY_TEXT[name]:
-        assert x + big_width(text, STORY_GAP) <= 255 - SIDE - 1, text
-        big_text(pix, text, None, baseline, left=x, gap=STORY_GAP)
+        assert x + big_width(text, gap, space) <= 255 - SIDE - 1, text
+        big_text(pix, text, None, baseline, left=x, gap=gap, space=space)
 
 
 def credit(pix, apple, cols, dots, splash, upto=FOOT, ink=LETTER):
@@ -1017,20 +1035,32 @@ BIG.update({
     ':': ['##', '##', '..', '..', '..', '##', '##'],
     "'": ['##', '##', '.#', '#.', '..', '..', '..', '..', '..', '..'],
 })
-DESCENDS = ('p', 'g', 'y')
+# and what the Epilog has besides
+BIG.update({
+    'C': ['.####.', '##..##'] + ['##....'] * 6 + ['##..##', '.####.'],
+    'E': ['######'] + ['##....'] * 3 + ['#####.'] + ['##....'] * 4
+         + ['######'],
+    'I': ['##'] * 10,
+    'N': ['##..##', '###.##', '###.##', '######', '##.###', '##.###']
+         + ['##..##'] * 4,
+    ',': ['##', '##', '.#', '#.'],
+    '-': ['#####', '.....', '.....', '.....'],
+})
+DESCENDS = {'p': 3, 'g': 3, 'y': 3, ',': 2}
 
 
-def big_width(text, gap=1):
-    return sum(len(BIG[ch][0]) + gap for ch in text) - gap
+def big_width(text, gap=1, space=3):
+    return sum((space if ch == ' ' else len(BIG[ch][0])) + gap
+               for ch in text) - gap
 
 
-def big_text(pix, text, centre, baseline, left=None, gap=1):
+def big_text(pix, text, centre, baseline, left=None, gap=1, space=3):
     """A line of BIG, centred on a pixel or from a left edge, its letters
     sitting on a line, gap pixels apart."""
     x = left if left is not None else centre - big_width(text, gap) // 2
     for ch in text:
-        glyph = BIG[ch]
-        top = baseline - len(glyph) + (3 if ch in DESCENDS else 0)
+        glyph = BIG[ch] if ch != ' ' else ['.' * space]
+        top = baseline - len(glyph) + DESCENDS.get(ch, 0)
         for j, row in enumerate(glyph):
             for i, c in enumerate(row):
                 if c == '#':
@@ -1355,6 +1385,33 @@ def build(cache_dir):
     open(tpath, 'wb').write(tail)
     json.dump([at, tat], open(jpath, 'w'))
     return at, blob, tat, tail
+
+
+def ending(cache_dir):
+    """What the Epilog shows once the game is won, packed, each from
+    nothing: the story's end, and the splash -- the Apple's unpacksplash,
+    with no credit over it.  Kept against the disks and these files, as
+    build() keeps the titles."""
+    import hashlib
+    h = hashlib.sha1()
+    for f in (poptitles.DISK, poptitles.DISK_B, __file__, poptitles.__file__):
+        h.update(open(f, 'rb').read())
+    path = os.path.join(cache_dir, 'ending.%s.bin' % h.hexdigest()[:16])
+    if os.path.exists(path):
+        data = open(path, 'rb').read()
+        n = int.from_bytes(data[:2], 'little')
+        return data[2:2 + n], data[2 + n:]
+    out = []
+    for name in ('epilog', 'splash'):
+        scr = screen(name)
+        data = pack(scr)
+        assert unpack(data) == scr, name
+        out.append(data)
+    for old in os.listdir(cache_dir):
+        if old.startswith('ending.'):
+            os.remove(os.path.join(cache_dir, old))
+    open(path, 'wb').write(len(out[0]).to_bytes(2, 'little') + out[0] + out[1])
+    return out[0], out[1]
 
 
 def main(argv):

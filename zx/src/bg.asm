@@ -1888,8 +1888,8 @@ nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
                 ld      a, (sfxtimer)
                 or      a
                 ret     nz
-                ld      c, 4
-                ld      a, c
+nrlevel:        ld      c, 4            ; (level fourteen's way into the
+                ld      a, c            ; princess's room comes here)
                 jr      nrcall
 
 ; CUTCHECK: none for two frames once a room is drawn -- CUTTIMER, which
@@ -3763,8 +3763,8 @@ animfloor:      ld      a, 1            ; it shakes every frame
                 ld      (trobst), a
                 bit     7, a
                 jr      nz, afwiggle
-                cp      BG_FFALLING
-                ret     c
+affall:         cp      BG_FFALLING     ; (level thirteen's waits here for
+                ret     c               ; room in moblist as well)
                 ld      a, BG_SPACE     ; time it went
                 call    trobtype
                 ld      a, 1            ; and the wedges with it

@@ -13,7 +13,11 @@
 ;   tunes       the tunes, where each begins and the last one's end
 ;   cutfixed    the pictures kept in fixed memory
 ;
-; and the CUT_ equates of princessscr.py.
+; and the CUT_ equates of princessscr.py -- among them CUT_NOGLASS, a scene
+; with no hourglass (PlayCut7), none of whose code is kept, and whose flag
+; for the second of two says instead that the frame is held until the tune
+; has played out; CUT_QA, the frame's time at a SPEED other than 12; and
+; CUT_WMAX, the widest picture, in bytes.
 
 ; Page 1 to page 2.
 
@@ -99,7 +103,7 @@ itune:          add     a, a
                 ld      c, (hl)
                 inc     hl
                 ld      b, (hl)
-                di
+ituneat:        di                      ; (or DE the tune, BC its end)
                 ld      (sfxptr), de
                 ld      (sfxstart), de
                 ld      (sfxend), bc
@@ -135,8 +139,9 @@ ctune:          db      0
 ; room's code is running, cut1.asm puts it by for the scene.
 
 cutbuf          equ     roomblk + CUT_BUFOFF
-CUT_Q7          equ     59              ; eighths of a fiftieth a frame at
-CUT_Q12         equ     65              ; SPEED 7 and at SPEED 12
+CUT_Q12         equ     65              ; eighths of a fiftieth a frame at
+                                        ; SPEED 12 (CUT_QA: at 7, 59; at 8,
+                                        ; PlayCut7's, 60)
 BAND_BYTES      equ     CUT_BAND_ROWS * 32
 
 princess:       call    black7          ; blackout, and the room unpacked
@@ -212,6 +217,7 @@ cnoflash:
                 call    unbox
                 call    unbox
 
+                if      CUT_NOGLASS = 0
                 ld      a, (cflags)     ; the hourglass, when it appears or
                 bit     2, a            ; changes: into the clean band and
                 jr      z, cnoglass     ; the one being composed
@@ -232,6 +238,7 @@ cnoglass:
                 xor     a
                 ld      (psand), a
 cnosand:
+                endif
                 ld      a, (cflags)     ; one of the CPC's tunes for the room:
                 rla                     ; the next of the three
                 jr      nc, cnotune
@@ -275,7 +282,9 @@ cpost:          rept    CUT_PO_W
                 ex      de, hl
                 djnz    cpost
 
+                if      CUT_NOGLASS = 0
                 call    pflow           ; and the sand over them
+                endif
                 call    cshow           ; and the band to the screen not shown
 
 ; PAUSE, SPEED long: seven and three eighths fiftieths a frame at 7, and
@@ -288,7 +297,7 @@ cpost:          rept    CUT_PO_W
 
                 ld      a, (cflags)
                 rrca                    ; carry: SPEED 12
-                ld      a, CUT_Q7
+                ld      a, CUT_QA
                 jr      nc, cq1
                 ld      a, CUT_Q12
 cq1:            ld      hl, ctog        ; eighths of a fiftieth, and what
@@ -330,6 +339,20 @@ cnounflash:
                 ld      (cfirst), a
                 call    copy57
 cnotfirst:
+                if      CUT_NOGLASS
+                ld      a, (cflags)     ; PlaySong mid scene: the frame again
+                and     8               ; until the tune has played out, and
+                jr      z, cnohold      ; not counted
+                ld      a, (sfxtimer)
+                or      a
+                jr      z, cnohold
+                ld      hl, (cptr)
+                ld      de, -5
+                add     hl, de
+                ld      (cptr), hl
+                jr      cmid
+cnohold:
+                endif
                 ld      hl, ccount
                 dec     (hl)
                 jr      nz, cmid
@@ -353,7 +376,11 @@ cnotfirst:
 ; right one, it waits for the next frame, that draws him over it.
 
 cmid:           ld      a, (cflags)
+                if      CUT_NOGLASS
+                and     0x70            ; (16: someone's box over its bytes)
+                else
                 and     0x60
+                endif
                 jr      nz, cmid1
                 inc     a
                 call    pburn
@@ -512,10 +539,12 @@ ubdone:         pop     hl
 
 ; The hourglass, state HL, at DE.  DRAWGLASS: opaque.
 
+                if      CUT_NOGLASS = 0
 glass:          ld      bc, CUT_GL_EXT
                 ld      (lext), bc
                 ld      bc, CUT_GL_H * 256 + CUT_GL_W
                 jr      lay
+                endif
 
 ; LAY at a place of its own, opaque: HL = the picture, DE = where in a
 ; band, B rows of C bytes (four at most), and (lext) the C bytes its box
@@ -606,6 +635,7 @@ pb3:            ld      (lext), bc
 
 ; PFLOW: the sand's next picture, once it flows.
 
+                if      CUT_NOGLASS = 0
 pflow:          ld      a, (psand)
                 or      a
                 ret     m
@@ -626,6 +656,7 @@ pf3:            ld      de, cutbuf + CUT_FW_AT
                 ld      (lext), bc
                 ld      bc, CUT_FW_H * 256 + CUT_FW_W
                 jp      lay
+                endif
 
 ; PSTARS: a twinkle that has run its time is put out, and one frame in
 ; twenty five or so a star twinkles for five to eight.  TWINKLE puts it
@@ -840,7 +871,7 @@ bl3:            ld      (bfetch), hl
 
 brow:           xor     a               ; the row, from nothing
                 ld      hl, rowbuf
-                rept    8
+                rept    CUT_WMAX + 3
                 ld      (hl), a
                 inc     hl
                 endm
@@ -883,7 +914,7 @@ bshift:         ld      a, (bsh)
 bshr:           ld      hl, rowbuf + 1
                 or      a
 bsrj:           jp      bsrend
-                rept    6
+                rept    CUT_WMAX + 1
                 rr      (hl)
                 inc     hl
                 endm
@@ -896,7 +927,7 @@ bshl:           sub     8
 bshl0:          ld      hl, rowbuf
                 or      a
 bslj:           jp      bslend
-                rept    6
+                rept    CUT_WMAX + 1
                 dec     hl
                 rl      (hl)
                 endm
@@ -1006,5 +1037,5 @@ cpmrow:         db      0
 bsh:            db      0
 bcnt:           db      0
 brows:          db      0
-rowbuf:         ds      8
+rowbuf:         ds      CUT_WMAX + 3
 

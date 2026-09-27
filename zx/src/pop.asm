@@ -3661,7 +3661,7 @@ gdgot:          srl     a               ; two pixels to the unit
 stairseq:       ld      a, SONG_UPSTAIRS
                 ld      c, 25
                 call    cue_song
-                ld      a, SQ_CLIMBSTAIRS
+stairsq:        ld      a, SQ_CLIMBSTAIRS
                 jp      jumpseq
 
 ; Out: A = FloorY for the row below his feet -- the plane he lands on.
