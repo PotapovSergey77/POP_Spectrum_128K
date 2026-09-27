@@ -201,14 +201,29 @@ for line in open('build/bin/lvc.lst'):
         if m:
             lsym[m.group(1)] = int(m.group(2), 16)
     assert lsym['post'] == lsym['lvcode'], 'уровень %s: вход не в начале' % n
+    b = bytearray(open(path, 'rb').read())
+    # a dungeon level may have most of its code where the dungeon's pictures
+    # leave room before the blueprint (lvlow at dunfree, up to lvlowend),
+    # in its block when the level brings the set with it
+    low = 0
+    if 'lvlow' in lsym:
+        assert lsym['lvlow'] == sym['dunfree'] and lsym['lvlowend'] <= sym['level'], n
+        low = lsym['lvlowend'] - lsym['lvlow']
+        at = off - (lsym['lvcode'] - lsym['lvlow'])
+        assert at >= 0, 'уровень %s: набора нет в блоке' % n
+        assert not any(b[at:at + low]), path
+        assert not any(code[low:lsym['lvcode'] - lsym['lvlow']])
+        b[at:at + low] = code[:low]
+        code = code[lsym['lvcode'] - lsym['lvlow']:]
     # the last byte of the room is the level's basicstrength (LVSTR)
     assert len(code) <= sym['LVCODE_LEN'] - 1, 'код уровня %s длиннее LVCODE_LEN' % n
-    b = bytearray(open(path, 'rb').read())
     assert not any(b[off:off + sym['LVCODE_LEN'] - 1]), path
     assert 3 <= b[off + sym['LVCODE_LEN'] - 1] <= 6, path
     b[off:off + len(code)] = code
     open(path, 'wb').write(b)
-    print('код уровня %s: %d байт из %d' % (n, len(code), sym['LVCODE_LEN'] - 1))
+    print('код уровня %s: %d байт из %d%s' % (n, len(code), sym['LVCODE_LEN'] - 1,
+          ', и %d за картинками подземелья из %d' % (low, sym['level'] - sym['dunfree'])
+          if low else ''))
 print('управление %04X..%04X, %d байт в банке 7, свободно там %d'
       % (sym['MODORG'], sym['modend'], len(mod), 0x10000 - sym['modend']))
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'

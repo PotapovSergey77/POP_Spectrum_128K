@@ -1666,8 +1666,11 @@ lrnomile:       ld      a, (gdhere)
                 ret     z
                 ld      a, (charid + OP) ; the shadow of level four is no
                 dec     a               ; guard, and is not left behind as
-                jp      z, gd_gone      ; one: VANISHCHAR
-                ld      a, (charlife + OP)
+                jr      nz, lrguard     ; one: VANISHCHAR.  Level twelve's
+                ld      a, (curlev)     ; fights, and goes along en garde as
+                cp      11              ; TRANSFERGUARD takes anyone; and
+                jp      nz, gd_gone     ; update_guard leaves him out
+lrguard:        ld      a, (charlife + OP)
                 or      a
                 jp      p, update_guard ; dead: left behind
                 ld      a, (charsword + OP)
@@ -1753,11 +1756,13 @@ lrdir:          db      0
 ; and no guard was ever made again.  It lives beside gdhere now.
 
 ; UPDATEGUARD: leaving him behind.  A live guard starts over when the kid
-; comes back; a dead one keeps the sequence that laid him down.
+; comes back; a dead one keeps the sequence that laid him down.  Not the
+; shadowman, who stays where he is: his level's code keeps him there
+; (lvcode.asm).  leave_room has asked gdhere already.
 
-update_guard:   ld      a, (gdhere)
-                or      a
-                ret     z
+update_guard:   ld      a, (charid + OP)
+                dec     a
+                jp      z, gd_gone
                 ld      a, (nowbank)
                 push    af
                 call    page_bg

@@ -21,7 +21,8 @@
 ; ovpost, ovset, ovflame, ovattr and ovshad.  ovpost is the level's own code,
 ; which rides with its blueprint (lvcode.asm); the dungeon's ovstart goes
 ; there too, carry set to tell them apart -- level eight's mouse wants the
-; top of the frame.  Its shadowman is the mouse, who presses nothing.
+; top of the frame.  Its shadowman is level eight's mouse, who presses
+; nothing, and level twelve's, whose keys are that level's code's too.
 
                 ret                     ; (drawb's stripe was here: bg.asm)
                 ds      2
@@ -40,13 +41,19 @@
                 else
                 ret                     ; (ovattr: the palace's)
                 ds      2
-                ret
-                ds      2
+                jp      dshad
 
 dstart:         scf
                 jp      lvcode
 dpost:          or      a
                 jp      lvcode
+
+; FinalShad in AUTO.S, six bytes into level twelve's code: see there.
+
+dshad:          ld      a, (curlev)
+                cp      11
+                ret     nz
+                jp      lvcode + 6
                 endif
 
 ; The set into the program, from newroom: the room's colour, and the meters'
@@ -77,6 +84,17 @@ setup:          ld      a, SETINK
                 ld      (dfpost + 3), a
                 ld      hl, SETATTR     ; and the palace's own colours before
                 ld      (saflask + 1), hl       ; the flasks'
+                if      OVLSET = 0
+                ld      a, oppnone - oppjr - 2  ; DRAWOPPMETER: the shadow's
+                ld      (oppjr + 1), a  ; strength shows on level twelve
+                                        ; alone, whose code shows it
+                ld      a, (curlev)     ; GETBELOW in FRAMEADV.S: with no
+                cp      11              ; room down and to the left, what
+                ld      a, BG_BLOCK     ; is there is a block -- and on
+                jr      nz, sublk       ; level twelve space ("sorry
+                ld      a, BG_SPACE     ; Lance!")
+sublk:          ld      (rebcnone + 1), a
+                endif
                 if      OVLSET
                 ld      a, (roomnum)    ; this room's, of the level's
                 add     a, a            ; rectangles: how many yellow and

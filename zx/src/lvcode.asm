@@ -11,6 +11,11 @@
 ; uses of the game and of the set's code comes from their symbols,
 ; lvsyms.inc.  A level with nothing of its own is a ret.
 ;
+; Level twelve's is more than the room holds: all but its entries goes
+; where the dungeon's pictures end, short of the palace's (dunfree), which
+; the level's block brings with the set -- the level before it is the
+; palace's.  build.sh puts each part where it goes.
+;
 ; It runs with the background bank paged, as the set's code does, and the
 ; same rules hold: it calls nothing that leaves another bank in, and its
 ; bytes are its variables.
@@ -18,7 +23,11 @@
                 include "lvsyms.inc"
                 include "lvnum.inc"
 
-                org     lvcode
+                if      LVNUM = 12
+                org     dunfree         ; and the room the dungeon's pictures
+                else                    ; leave before the blueprint: see
+                org     lvcode          ; build.sh
+                endif
 
                 if      LVNUM = 4
 ; ---------------------------------------------------------------- the mirror
@@ -563,7 +572,717 @@ mrec:           dw      MOUSEX
 
                 endif
 
-                if      LVNUM < 4 or LVNUM = 7 or LVNUM >= 9
+                if      LVNUM = 12
+
+; ---------------------------------------------------------------- the shadowman
+;
+; Level twelve's (FinalShad, ADDGUARD, stealsword and CUTCHECK's level
+; twelve in AUTO.S; UNHOLY in MISC.S; the phantom bridge in CTRL.S;
+; chgmeters, misctimers and DRAWKID's mergetimer in TOPCTRL.S and GAMEBG.S;
+; NextFrame's screen 23).  Going right out of screen 18 the shadow steals
+; the sword from screen 15 (block 1 of its top row); coming into 15 without
+; it there, the kid has him drop in on top of him -- held above the screen
+; until the kid is in past X 150.  He fights as a guard does, and every
+; point either of them loses the other loses too; and whichever dies, the
+; other dies with him.  To be rid of him the kid puts his sword away and
+; walks into him: they are one again, the kid a point stronger, flashing
+; between the two for 42 frames -- and from then on a floor is there under
+; his feet wherever he steps into the gap along the top of screens 2 and 13.
+; Out of 13 to the left is the next level.
+;
+; The shadow is the second character, CharID 1, and his keys are pressed
+; here (ovshad, in the dungeon's code) the way AUTO.S presses them.  He
+; stays in a room when the kid leaves it -- UPDATEGUARD leaves him out -- so
+; he is kept here while the kid is elsewhere, and put back when the kid
+; comes back; en garde at the edge he goes along, as any guard does.
+;
+; What the shadow does differently from the kid and from a guard in the
+; control code (the canvas bank, where no room is left) is made so by
+; patching it, a few bytes at a time, for his turn only: see pktab.  What
+; this code calls there, it calls by way of a few bytes it copies into
+; imgbuf, which is free while the moves are made, and which lie in the
+; fixed half of the map: they page the canvas bank in, and this one back.
+
+SWORDSCRN       equ     15              ; swordscrn, swordx, swordy
+SWORDAT         equ     0 * 10 + 1
+STEALFROM       equ     18              ; stealsword: the screen under it,
+STEALTO         equ     19              ; and the one right of that
+EXITSCRN        equ     13              ; out of its left, screen 23: the next
+                                        ; level
+SHADSTR         equ     4               ; shadstrength
+HOLDX           equ     2 * (150 - 58)  ; FinalShad: OpX 150, our pixels
+SWORDTHRES      equ     90
+MAXMAXSTR       equ     10
+MERGETIME       equ     42
+WHITE           equ     7               ; lightcolor $FF, the border's white
+mergetimer      equ     createshad      ; level four's, and zeroed with it
+
+; ---- in imgbuf (IB on from where it is here)
+
+IB              equ     imgbuf - ibsrc
+IBDATA          equ     imgbuf + 200    ; bytes on their way to a bank
+
+; A routine of the control code's, at HL.
+
+lvlow:                                  ; at dunfree: see build.sh
+ibsrc:
+tcall:          call    page_canvas
+                call    jphl
+                jp      page_bg
+
+; BC bytes from HL (in the fixed half) to DE in bank A.
+
+tpoke:          call    pageset
+                ldir
+                jp      page_bg
+
+; The phantom bridge, in startfall's call of c1addsl (cfsl): CHECKFLOOR's
+; level twelve, once the shadow is one with him, on the top row of screen 2,
+; or of 13 from block 6 on -- a floor where his feet find none, and no fall.
+; CODE1's bank is in, as c1call has it.
+
+tphant:         ld      a, (mergetimer)
+                or      a
+                jp      p, c1addsl
+                ld      a, (blocky)     ; CharBlockY nought, before startfall
+                dec     a               ; stepped it on
+                jp      nz, c1addsl
+                ld      a, (roomnum)
+                cp      2
+                jr      z, tph1
+                cp      13
+                jp      nz, c1addsl
+                ld      a, (tempbx)     ; tempblockx, of the block underfoot
+                cp      6
+                jp      c, c1addsl
+tph1:           ld      hl, blocky
+                dec     (hl)
+                ld      a, (tempscrn)   ; sta (BlueType),y, and the block and
+                ld      (trscrn), a     ; the one right of it redrawn
+                ld      a, (tempbx)
+                ld      (trloc), a
+                call    trobat
+                ld      a, BG_FLOOR
+                call    trobtype
+                ld      a, LOOSEWIPE
+                ld      (redh), a
+                call    redplate
+                call    ao_masks
+                pop     hl              ; c1call's way back, the bank it would
+                pop     af              ; have put back, and the rest of
+                pop     hl              ; startfall: straight back from
+                jp      pageset         ; check_floor
+
+; nrleft, in screen 13: into 23 is into the next level, LoadNextLevel -- or,
+; with none on the tape, RESTART.
+
+texit:          ld      hl, lvflag
+                ld      a, (hl)
+                or      a
+                ld      a, 3
+                jr      z, tex1
+                dec     a
+tex1:           ld      (hl), a
+                jp      ststop
+ibend:
+
+; Put there once a frame, when it is first wanted: after the frame's top
+; nothing but a room built uses imgbuf, and after that only tpoke is wanted
+; (tpcopy).
+
+ibc:            ld      hl, ibdone
+                ld      a, (hl)
+                ld      (hl), h
+                or      a
+                ret     nz
+                ld      hl, ibsrc
+                ld      de, imgbuf
+                ld      bc, ibend - ibsrc
+                ldir
+                ret
+
+tpcopy:         ld      hl, tpoke
+                ld      de, tpoke + IB
+                ld      bc, tphant - tpoke
+                ldir
+                ret
+
+; ---- the control code, patched
+;
+; Each patch: where, how many bytes, the ones for the shadow's turn, and the
+; control code's own.  pkset puts the first in, pkclr the second back and
+; leaves HL on the next patch.
+
+pkset:          push    hl
+                call    ibc
+                pop     hl
+                ld      a, 1
+                ld      (patched), a
+                scf
+                jr      pk0
+pkclr:          or      a
+pk0:            ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                ld      c, (hl)
+                inc     hl
+                ld      b, 0
+                jr      c, pk1
+                add     hl, bc
+pk1:            push    de
+                ld      de, IBDATA
+                push    bc
+                ldir
+                pop     bc
+                pop     de
+                push    hl
+                ld      hl, IBDATA
+                ld      a, BANK_CANVAS
+                call    tpoke + IB
+                pop     hl
+                ret
+
+; kid_engarde is the kid's: standing, the shadow goes en garde only as
+; FinalShad has him (the down and forward of CTRL.S's standing -- below).
+
+pktab:
+pkeng:          dw      kid_engarde
+                db      3
+                db      0xAF, 0, 0      ; xor a: no sword to draw
+                db      0x3A            ; ld a, (gotsword)
+                dw      gotsword
+
+; hit_floor: the shadow lands easy from any height short of death (medland).
+
+pkoof:          dw      hfoof + 1
+                db      1
+                db      DEATHVEL
+                db      OOFVEL
+
+; FightCtrl's down: the shadow resheathes, as the kid does (:sstand).
+
+pkalert:        dw      fcalert + 1
+                db      1
+                db      SQ_RESHEATHE
+                db      SQ_GOALERTSTAND
+
+; The kid standing: the shadow in the air or landing, he does not draw on
+; him (standing's OpID 1).  Put in for the kid's turn.
+
+pkland:         dw      kedo
+                db      3
+                db      0xC3            ; jp kesafe
+                dw      kesafe
+                db      0xCD            ; call do_engarde
+                dw      do_engarde
+
+; startfall: the phantom bridge (tphant).  Put in for the kid's turn.
+
+pkfall:         dw      cfsl + 1
+                db      2
+                dw      tphant + IB
+                dw      c1addsl
+PKN             equ     5
+
+pkall:          call    tpcopy
+                ld      hl, pktab
+                ld      b, PKN
+pka:            push    bc
+                call    pkclr
+                pop     bc
+                djnz    pka
+                ret
+
+; ---- the shadow
+
+; shadpos12, the second character's record: CharX $51, CharY $F0 -- above
+; the top of the screen -- facing right, posn 15, stepfall next, the top
+; row, action nought, no sword, the shadowman, alive; nothing of him drawn.
+
+shrec:          dw      2 * (0x51 - 58)
+                db      0xF0, 1, 15
+                dw      seqs + SO_STEPFALL
+                db      0, 0, 0, 0, 1, 0xff
+                ds      CHRECLEN - 14
+                db      192
+
+; HL = a record's first thirteen bytes, over shadpos12's whole one: the
+; shadow into the second character's place.
+
+putshad:        push    hl
+                ld      hl, shrec
+                ld      de, oprec
+                ld      bc, CHRECLEN
+                ldir
+                pop     hl
+                ld      de, oprec
+                ld      bc, charcu - chrec
+                ldir
+                ld      a, 1
+                ld      (gdhere), a
+                ret
+
+; Z when the shadow is here: the second character, and CharID 1.
+
+shhere:         ld      a, (gdhere)
+                dec     a
+                ret     nz
+                ld      a, (charid + OP)
+                dec     a
+                ret
+
+; HL = his strength: OppStrength here, or what he had where he is kept.
+
+shsp:           ld      hl, shstr
+                call    shhere
+                ret     nz
+                ld      hl, oppstr
+                ret
+
+; UNHOLY: the one left alive dies too -- white lightning and a splat.
+
+unholy:         ld      a, WHITE
+                ld      (lightcolor), a
+                ld      a, 5
+                ld      (lightning), a
+                ld      a, SND_SPLAT
+                jp      addsound
+
+; 0 no shadow, 1 the shadow alive -- here, or kept in shroom -- and 2 dead:
+; ShadID 1 and ShadLife.
+
+shst:           db      0
+shroom:         db      0
+shstr:          db      0               ; his strength, kept
+park:           ds      13              ; and the rest of him
+shadact:        db      0               ; shadowaction
+lastroom:       db      0
+came:           db      0               ; the kid came into this room
+prevk:          db      0               ; the strengths as the last frame
+prevs:          db      0               ; left them
+flipped:        db      0               ; the kid drawn as the shadow
+patched:        db      0               ; the control code patched
+ibdone:         db      0               ; imgbuf has its routines this frame
+
+; ---- ovshad: the shadow's keys, in his turn (Char the shadow, Op the kid)
+
+shad:           ld      a, (lvflag)     ; the next level, or this one again,
+                cp      2               ; comes in this frame's room change:
+                ret     nc              ; nothing patched that its post would
+                                        ; not put back
+                ld      hl, pkeng
+                call    pkset
+                ld      hl, pkoof
+                call    pkset
+                ld      hl, pkalert
+                call    pkset
+                call    finalshad
+                ld      a, (charact)    ; CUTGUARD: only a free fall takes
+                cp      4               ; the shadow off the foot of the
+                ret     z               ; screen -- dropping in he is past it
+                ld      a, 0xC9         ; ret
+                ld      (cgret), a
+                ret
+
+; FinalShad.  Screen 15: he is held above it, shadpos12 again, till the kid
+; is in past X 150; then he jumps on top of him.
+
+finalshad:      ld      a, (roomnum)
+                cp      SWORDSCRN
+                jr      nz, fscont
+                ld      a, (shadact)
+                or      a
+                jr      nz, fscont
+                ld      hl, (charx + OP)
+                ld      de, -HOLDX
+                add     hl, de
+                bit     7, h
+                jr      nz, fsgo
+                ld      hl, shrec       ; csps
+                ld      de, chrec
+                ld      bc, charcu - chrec
+                ldir
+                ret
+fsgo:           ld      a, 1
+                ld      (shadact), a
+
+fscont:         ld      a, (charsword)
+                cp      2
+                jr      nc, fsfight
+                ld      a, (charsword + OP)
+                cp      2
+                jr      nc, fshost
+                ld      a, (offguard)
+                or      a
+                jr      nz, fsface
+
+; Hostile: close enough, en garde -- DoEngarde, which his standing takes at
+; once: posn 15, alive -- else turn to face the kid.
+
+fshost:         ld      a, (enemyalert)
+                cp      2
+                jr      c, fs2
+                call    getopdist
+                cp      SWORDTHRES
+                jr      nc, fs2
+                ld      a, (frame)
+                cp      15
+                ret     nz
+                ld      a, (charlife)
+                or      a
+                ret     p
+                ld      a, 2
+                ld      (charsword), a
+                ld      hl, seqs + SO_ENGARDE
+                ld      (seqptr), hl
+                ret
+fs2:            call    getopdist
+                or      a
+                ret     p
+                jp      pr_back         ; DoBack
+
+; Fighting: the kid has put his sword up -- a moment, then lower yours.
+
+fsfight:        ld      a, (offguard)
+                or      a
+                jr      z, fseng
+                ld      a, (refract)
+                or      a
+                jp      z, pr_down      ; DoDown
+fseng:          call    ibc
+                ld      hl, ai_engarde  ; EnGarde
+                jp      tcall + IB
+
+; Face to face, swords down: the kid coming, come too; met, whammo.
+
+fsface:         call    getopdist
+                or      a
+                jp      m, fsmerge
+                ld      a, (enemyalert)
+                cp      2
+                ret     nz
+                ld      a, (frame + OP)
+                cp      3
+                ret     c
+                cp      15
+                jp      c, pr_fwd       ; startrun and stepfwd
+                cp      127
+                ret     c
+                cp      133
+                jp      c, pr_fwd
+                ret
+
+; Kid and shadow reunite: white lightning, BOOSTMETER, s_Rejoin -- which the
+; CPC has no tune for -- and the flashing; the shadow turns into the kid,
+; all but where each was drawn, and is gone (post: VANISHCHAR).
+
+fsmerge:        ld      a, WHITE
+                ld      (lightcolor), a
+                ld      a, 10
+                ld      (lightning), a
+                ld      a, (maxkidstr)
+                cp      MAXMAXSTR
+                adc     a, 0
+                ld      (maxkidstr), a
+                ld      (kidstr), a     ; RECHARGEMETER
+                ld      (meterdirty), a
+                ld      a, MERGETIME
+                ld      (mergetimer), a
+                ld      hl, chrec       ; SaveKid
+                ld      de, oprec
+                ld      bc, charcu - chrec
+                ldir
+                xor     a
+                ld      (charid + OP), a
+                ld      (shst), a       ; ShadID nought
+                ret
+
+; ---- the top of the frame, before anything moves
+
+start:          xor     a
+                ld      (ibdone), a
+                ld      (charid), a     ; the kid himself again (flipped)
+                ld      (oppjr + 1), a  ; DRAWOPPMETER: the shadow's shows
+                ld      a, (exitopen)   ; the level begun again: nobody's
+                or      a               ; shadow yet
+                jr      nz, st1
+                ld      (shst), a
+
+st1:            ld      hl, mergetimer  ; misctimers: down to 1, and then -1
+                ld      a, (hl)         ; for good
+                dec     a
+                cp      0x7F
+                jr      nc, st2
+                ld      (hl), a
+                or      a
+                jr      nz, st2
+                dec     (hl)
+
+st2:            ld      a, (shst)       ; UNHOLY, the kid's turn: the shadow
+                cp      2               ; dead, he dies too
+                jr      nz, st3
+                ld      a, (charlife)
+                or      a
+                jp      p, st3
+                xor     a               ; decstr 100
+                ld      (kidstr), a
+                call    unholy
+
+st3:            call    shhere          ; SHADCTRL: the shadow out of strength
+                jr      nz, st4         ; or dead goes -- no victory tune
+                ld      a, (charlife + OP)
+                or      a
+                jp      p, st3a
+                ld      a, (oppstr)
+                or      a
+                jr      nz, st4
+st3a:           xor     a
+                ld      (charlife + OP), a
+                call    gd_gone         ; VANISHCHAR
+                ld      a, 2
+                ld      (shst), a
+
+st4:            ld      a, (lvflag)     ; (see shad)
+                cp      2
+                ret     nc
+                ld      a, (charid + OP) ; CHECKALERT: c1anim leaves the
+                dec     a               ; shadowman out
+                jr      nz, st5
+                call    ibc
+                ld      hl, checkalert
+                call    tcall + IB
+
+                call    shhere          ; the shadow in the air or landing
+                jr      nz, st5
+                ld      a, (charact + OP)
+                cp      3
+                jr      z, st4a
+                ld      a, (frame + OP)
+                sub     107
+                cp      11
+                jr      nc, st5
+st4a:           ld      hl, pkland
+                call    pkset
+
+st5:            ld      a, (mergetimer) ; the phantom bridge
+                or      a
+                ld      hl, pkfall
+                call    m, pkset
+
+                ld      a, (roomnum)    ; and the way out
+                cp      EXITSCRN
+                ret     nz
+                call    ibc
+                ld      a, 0xC3         ; jp texit
+                ld      (nrleft), a
+                ld      hl, texit + IB
+                ld      (nrleft + 1), hl
+                ret
+
+; ---- after the moves: the room change is made, the frame not yet drawn
+
+pmain:          ld      hl, patched     ; the control code as it was
+                ld      a, (hl)
+                ld      (hl), 0
+                or      a
+                call    nz, pkall
+                ld      a, 0xD8         ; ret c
+                ld      (cgret), a
+                ld      a, 0x3A         ; ld a, (links)
+                ld      (nrleft), a
+                ld      hl, links
+                ld      (nrleft + 1), hl
+
+                ld      a, (shst)       ; merged: VANISHCHAR
+                or      a
+                jr      nz, pm1
+                call    shhere
+                call    z, gd_gone
+
+pm1:            ld      hl, lastroom    ; into a room this frame?
+                ld      a, (roomnum)
+                ld      b, (hl)
+                ld      (hl), a
+                sub     b
+                ld      (came), a
+                jr      z, pm2
+                ld      a, b            ; stealsword: right out of screen 18
+                cp      STEALFROM
+                jr      nz, pm2
+                ld      a, (roomnum)
+                cp      STEALTO
+                jr      nz, pm2
+                ld      a, BG_FLOOR
+                ld      (level + (SWORDSCRN - 1) * 30 + SWORDAT), a
+
+pm2:            ld      a, (shst)       ; the shadow alive, not here
+                dec     a
+                jr      nz, pm3
+                call    shhere
+                jr      z, pm3
+                ld      a, (roomnum)    ; nor where he was kept
+                ld      hl, shroom
+                cp      (hl)
+                jr      nz, pm3
+                ld      a, (came)       ; come back to him: there he is
+                or      a
+                jr      nz, pmback
+                ld      a, 2            ; gone where he was with nobody
+                ld      (shst), a       ; leaving: off the foot of the
+                jr      pm3             ; screen -- CUTGUARD -- and dead
+pmback:         ld      hl, park
+                call    putshad
+                ld      a, (shstr)
+                ld      (oppstr), a
+
+; ADDGUARD's level twelve: into screen 15, the shadow not dropped yet nor
+; reabsorbed, and the sword gone -- csps shadpos12, with the shadow's
+; strength and guard program 3.
+
+pm3:            ld      a, (came)
+                or      a
+                jr      z, pm4
+                ld      a, (roomnum)
+                cp      SWORDSCRN
+                jr      nz, pm4
+                ld      a, (exitopen)   ; set when he drops
+                ld      hl, mergetimer
+                or      (hl)
+                jr      nz, pm4
+                ld      a, (level + (SWORDSCRN - 1) * 30 + SWORDAT)
+                and     0x1f
+                cp      BG_SWORD
+                jr      z, pm4
+                ld      a, 1
+                ld      (exitopen), a
+                ld      (shst), a
+                ld      a, SWORDSCRN
+                ld      (shroom), a
+                xor     a
+                ld      (shadact), a
+                ld      a, SHADSTR
+                ld      (oppstr), a
+                ld      (prevs), a
+                ld      a, 3
+                ld      (guardprog), a
+                ld      hl, c1gprob
+                call    c1call
+                ld      hl, shrec
+                call    putshad
+
+; chgmeters: kid against shadow, what the one loses the other loses -- the
+; kid's first -- unless it would take him under nought.
+
+pm4:            ld      a, (shst)
+                dec     a
+                jr      nz, pm6
+                call    shsp
+                ld      a, (prevs)
+                ld      d, a
+                ld      a, (prevk)
+                ld      e, a
+                ld      a, (kidstr)
+                ld      c, a
+                ld      a, e
+                sub     c               ; what the kid lost
+                jr      c, pmopp
+                jr      z, pmopp
+                ld      c, a
+                ld      a, d
+                sub     c
+                jr      nc, pms
+                ld      a, d
+pms:            ld      (hl), a
+                jr      pm5
+pmopp:          ld      c, (hl)         ; what the shadow lost
+                ld      a, d
+                sub     c
+                jr      c, pm5
+                jr      z, pm5
+                ld      c, a
+                ld      a, e
+                sub     c
+                jr      nc, pmk
+                ld      a, e
+pmk:            ld      (kidstr), a
+
+; UNHOLY, the shadow's turn: the kid dead, the shadow dies too.
+
+pm5:            ld      a, (charlife)
+                or      a
+                jp      m, pm5a
+                ld      a, (hl)
+                or      a
+                jr      z, pm5a
+                ld      (hl), 0
+                call    unholy
+pm5a:           ld      a, (hl)         ; out of strength where he is kept:
+                or      a               ; dead there (SHADCTRL)
+                jr      nz, pm6
+                call    shhere
+                jr      z, pm6
+                ld      a, 2
+                ld      (shst), a
+
+pm6:            ld      a, (shst)       ; kept as he is, for when the kid
+                dec     a               ; leaves him
+                jr      nz, pm7
+                call    shhere
+                jr      nz, pm7
+                ld      hl, oprec
+                ld      de, park
+                ld      bc, charcu - chrec
+                ldir
+                ld      a, (roomnum)
+                ld      (shroom), a
+                ld      a, (oppstr)
+                ld      (shstr), a
+
+pm7:            ld      a, (kidstr)
+                ld      (prevk), a
+                call    shsp
+                ld      a, (hl)
+                ld      (prevs), a
+
+; DRAWKID: while mergetimer counts, on its odd counts the kid is drawn as
+; the shadow is -- CharID 1 until the top of the next frame -- and kid_still
+; is not let leave him as he was, either way.
+
+                ld      a, (mergetimer)
+                cp      0x80
+                sbc     a, a
+                ld      b, a
+                ld      a, (mergetimer)
+                and     b
+                and     1
+                ld      (charid), a
+                ld      hl, flipped
+                ld      b, (hl)
+                ld      (hl), a
+                or      b
+                ret     z
+                call    tpcopy
+                ld      a, 0xff
+                ld      (IBDATA), a
+                ld      hl, IBDATA
+                ld      de, kidlast + 3
+                ld      bc, 1
+                ld      a, BANK_CVS
+                jp      tpoke + IB
+lvlowend:
+
+; The entries, in the level's own room: the top of the frame, after the
+; moves, and six bytes in the shadow's turn (the dungeon's ovshad).
+
+                org     lvcode
+post:           jp      c, start
+                jp      pmain
+                jp      shad
+
+                endif
+
+                if      LVNUM < 4 or LVNUM = 7 or LVNUM = 9 or LVNUM = 10 or LVNUM = 11
 post:           ret
                 endif
 

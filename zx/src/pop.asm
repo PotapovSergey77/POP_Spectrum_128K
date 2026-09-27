@@ -3704,7 +3704,9 @@ cfspace:        call    cmp_space       ; solid: he stays where he is
                 ret     nz
                 ld      hl, blocky
                 inc     (hl)
-                ld      hl, c1addsl     ; startfall: the slicers of the row
+cfsl:           ld      hl, c1addsl     ; startfall: the slicers of the row
+                                        ; (level twelve's phantom bridge
+                                        ; goes in here: lvcode.asm)
                 call    c1call          ; he is falling to
                 ld      a, 3
                 ld      (charact), a
@@ -3771,7 +3773,7 @@ hit_floor:      call    floor_plane
                 ld      (charact), a
                 ld      a, b
                 ld      b, SQ_SOFTLAND
-                cp      OOFVEL
+hfoof:          cp      OOFVEL          ; level twelve's shadow: DEATHVEL
                 jr      c, hfsoft
                 push    af              ; anything harder is a splat
                 ld      a, SND_SPLAT

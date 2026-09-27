@@ -427,12 +427,15 @@ cutguard:       ld      a, (gdhere)
                 ret     z
                 ld      a, (chary + OP) ; CUTGUARD asks this and nothing
                 cp      BOTCUT          ; else: ShadY at BotCutEdge or past
-                ret     c               ; it.  There was an upper bound here
+cgret:          ret     c               ; it.  There was an upper bound here
                                         ; as well, which a fall steps clean
                                         ; over -- it gathers up to TERM_VEL a
                                         ; frame, and the row under the screen
                                         ; has its floor plane at 244, inside
-                                        ; the window that was thrown out
+                                        ; the window that was thrown out.
+                                        ; (Level twelve makes it ret while
+                                        ; the shadow is not in a free fall:
+                                        ; he drops in from above the screen)
                 ld      a, (charid + OP)        ; a skeleton that falls into
                 cp      4                       ; the room it belongs in gets
                 jr      nz, gd_off              ; up again there
@@ -889,8 +892,8 @@ fcready:        ld      a, 1
                 ld      a, (charid)
                 or      a
                 jr      z, fcdrop
-                ld      a, SQ_GOALERTSTAND
-                jp      jumpseq
+fcalert:        ld      a, SQ_GOALERTSTAND      ; level twelve's shadow
+                jp      jumpseq                 ; resheathes: lvcode.asm
 fcdrop:         ld      a, 1
                 ld      (offguard), a
                 ld      a, GRACEPERIOD
@@ -1056,7 +1059,7 @@ do_engarde:     call    clrall
 ; comes out again with the button.  Out: NZ when he has done something and
 ; standing is over, Z to go on with it.
 
-kid_engarde:    ld      a, (gotsword)
+kid_engarde:    ld      a, (gotsword)     ; (xor a for level twelve's shadow)
                 or      a
                 ret     z
                 ld      a, (offguard)
@@ -1079,8 +1082,8 @@ kedanger:       ld      b, a
                 ld      a, b
                 cp      -6
                 jr      nc, kebehind
-                call    do_engarde
-                or      1
+kedo:           call    do_engarde      ; level twelve: not while the
+                or      1               ; shadow lands -- lvcode.asm
                 ret
 kebehind:       call    do_turn
                 or      1
@@ -2763,7 +2766,7 @@ oppshown:       ld      a, (gdhere)
                 cp      4               ; the skeleton's is not shown, nor
                 jr      z, oppnone      ; the shadow's but on level twelve
                 dec     a
-                jr      z, oppnone
+oppjr:          jr      z, oppnone      ; lvcode.asm makes it jr +0
                 ld      a, (oppstr)
                 ret
 oppnone:        xor     a

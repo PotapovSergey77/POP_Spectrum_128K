@@ -516,6 +516,9 @@ def layout():
     at['bgpics'] = at['bgtab2'] + 1 + 2 * top2
     at['level'] = at['bgpics'] + max(len(parts[s][1][2]) + len(parts[s][2][2])
                                      for s in BGSETS)
+    # where the dungeon's pictures end: the palace's are longer, and up to
+    # the blueprint a dungeon level has room there for code of its own
+    at['dunfree'] = at['bgpics'] + len(parts['DUN'][1][2]) + len(parts['DUN'][2][2])
     return at, parts
 
 

@@ -169,16 +169,19 @@ START_FACE = 1 if POP_START and _KID[2] == 0xff else 0    # ~KidStartFace
 # The levels the tape carries: the first in the background bank, the rest
 # after the banks, each loaded over it when the one before is left by its
 # stairs -- LoadNextLevel, with the tape for the disk.
-LEVELS = 11
+LEVELS = 12
 START_LEVEL = int(os.environ.get('POP_LEVEL', '1'))
 
 # chset in MISC.S: the level's own opponent, the fourth character table --
 # LOADLEVEL reads it off the disk with the blueprint when it is not the one
 # in memory already.  Level three's is the skeleton's; one and two have the
 # guard the tape starts with, four has him back, and six the fat one.
+# Twelve's is the shadowman's, which nothing on the tape draws: the level
+# has no guard, and the shadow is drawn in the kid's own pictures -- so
+# none comes off the tape for it.
 CHSET_OF_LEVEL = [0, 0, 0, 1, 2, 2, 3, 2, 2, 2, 2, 2, 4, 5, 5]
 CHSET_TABLE = {0: 'IMG.CHTAB4.GD', 1: 'IMG.CHTAB4.SKEL', 2: 'IMG.CHTAB4.GD',
-               3: 'IMG.CHTAB4.FAT'}
+               3: 'IMG.CHTAB4.FAT', 4: None}
 
 
 def level_path(n):
@@ -230,7 +233,9 @@ LH_NEXT, LH_NEXTLEN, LH_INK, LH_SET, LH_CUT = 8, 10, 12, 13, 14
 # Level six's is PlayCut3, which SUBS.S plays as
 # PlayCut1: the same block again; level eight's is PlayCut8, the princess
 # sending the mouse out, and nine's PlayCut4, the mouse coming back.
-CUT_BEFORE = {2: 1, 4: 2, 6: 1, 8: 3, 9: 4}
+# Twelve's is PlayCut5, which is PlayCut1 unless the hourglass is nearly
+# run out (GETGLASS 7 on) -- and the Spectrum keeps no clock: see CUT1_GLASS.
+CUT_BEFORE = {2: 1, 4: 2, 6: 1, 8: 3, 9: 4, 12: 1}
 
 # basicstrength in AUTO.S, by level: a guard's strength is this and his
 # program's extrastrength (getgdstrength).  Each level's is the last byte
@@ -1017,7 +1022,7 @@ def main(argv):
             tape.append('build/bin/chset%d.bin' % n)
             print('chset%d.bin  %d байт: %s%s'
                   % (n, len(chset),
-                     CHSET_TABLE[CHSET_OF_LEVEL[n]] if new_ch else '',
+                     CHSET_TABLE[CHSET_OF_LEVEL[n]] or '' if new_ch else '',
                      ', падающий пол' if extra else ''))
     open(os.path.join(binout, 'tape.lst'), 'w', newline='').write(''.join(t + '\n' for t in tape))
     open(os.path.join(binout, 'ovl.lst'), 'w', newline='').write('\n'.join(ovl) + '\n')
@@ -1302,6 +1307,8 @@ def main(argv):
         # and where stand begins among them, for code that has no jumpseq to
         # hand (bgovl.asm's thief): seqptr is seqs plus this
         f.write('SO_STAND    equ %d' % seq.at[seq.entries[2]] + chr(10))
+        f.write('SO_STEPFALL equ %d' % seq.at[seq.entries[7]] + chr(10))
+        f.write('SO_ENGARDE  equ %d' % seq.at[seq.entries[55]] + chr(10))
         f.write('SO_MSCURRY  equ %d' % seq.at[seq.entries[MSCURRY]] + chr(10))
         f.write('SO_MLEAVE   equ %d' % seq.at[seq.entries[MLEAVE]] + chr(10))
         f.write('START_X     equ %d\n'
