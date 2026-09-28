@@ -1,4 +1,83 @@
-# Prince of Persia Apple II
+# Prince of Persia — ZX Spectrum 128K
+
+A port of Jordan Mechner's **Prince of Persia** (Apple II, 1989) to the **ZX Spectrum 128K**,
+written in Z80 assembly on top of the original 6502 source code published in this repository.
+
+The game logic is ported from the Apple II sources (`01 POP Source`) routine by routine rather than
+re-imagined: the prince's and the guards' movement, the sword fighting, traps, loose floors,
+potions, the shadow, the cut scenes and the level blueprints all follow the original.
+Graphics, level data and animations are converted from the Apple II disk by the tools in
+[zx/tools](zx/tools).
+
+Ported by **Sergey Potapov** — YouTube: [@16BitMaster](https://www.youtube.com/@16BitMaster)
+
+## Screenshots
+
+| | |
+|:---:|:---:|
+| ![Title screen](screenshots/title.png) | ![The princess and the vizier](screenshots/princess.png) |
+| Title screen | The princess and Jaffar, who turns the hourglass |
+| ![Level 1, the dungeon](screenshots/level1.png) | ![Sword fight in the palace](screenshots/palace-fight.png) |
+| Level 1: the dungeon | Level 4: a sword fight with a guard in the palace |
+| ![A running jump over a chasm](screenshots/palace-jump.png) | ![The duel with Jaffar](screenshots/jaffar.png) |
+| Level 4: a running jump over a chasm | Level 13: the duel with Jaffar |
+
+## What is in
+
+- All 14 levels and the ending, the dungeon and palace graphics sets
+- The title sequence, the story screens and the princess scenes between levels
+- Guards, the skeleton, the fat guard, the shadowman and Jaffar, with the original fighting AI
+- Gates, pressure plates, spikes, slicers, loose and falling floors, potions, the mirror
+- Music and sound effects on the AY chip
+- Runs at the original game speed; on turbo machines (7/14 MHz) the pace stays the same and only gets smoother
+
+## Playing
+
+The game needs a **ZX Spectrum 128K** (or +2 / +3, or an emulator in 128K mode, e.g. Fuse).
+Load the tape with the 128K loader. After level one the game reads each next level from the tape
+itself, so leave the tape in and let it play on when a level is finished.
+
+| Key | Action |
+|---|---|
+| `5` / `8` | left / right |
+| `7` | up: jump, climb up; parry in a fight |
+| `6` | down: crouch, climb down; sheathe the sword |
+| `Space` | the button: careful step, hang on to a ledge, pick up the sword, drink a potion; strike in a fight |
+
+Emulators map the PC cursor keys to Caps Shift + 5/6/7/8, which works as well.
+
+## Building
+
+The build runs on Windows (Git Bash or any `sh`) with Python 3:
+
+```sh
+cd zx
+sh build.sh
+```
+
+`build.sh` exports the graphics and levels from the Apple II data, assembles `zx/src/pop.asm` and
+writes the tape to `zx/build/pop.tap`. The assembler [pasmo](https://pasmo.speccy.org/) is expected
+as `zx/tools/pasmo.exe` and is not included in the repository.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `01 POP Source` … `04 Support` | The original Apple II source code and data by Jordan Mechner |
+| `zx/src` | The Spectrum port, Z80 assembly |
+| `zx/tools` | Asset converters, the tape builder and a Z80 emulator used for testing |
+| `zx/sound` | Reference recordings of the sound effects |
+| `screenshots` | The pictures above |
+
+## Rights
+
+Prince of Persia is © Jordan Mechner, and the franchise belongs to Ubisoft. This is a
+non-commercial fan port made for fun and for the history of the 8-bit machines; it carries no
+rights to Prince of Persia of any kind. See Jordan Mechner's notes on the source code below.
+
+---
+
+## The original: Prince of Persia Apple II
 
 Some background: This archive contains the source code for the original Prince of Persia game that I wrote on the Apple II, in 6502 assembly language, between 1985-89. The game was first released by Broderbund Software in 1989, and is part of the ongoing Ubisoft game franchise.
 
