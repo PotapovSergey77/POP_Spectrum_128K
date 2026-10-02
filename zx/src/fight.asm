@@ -2663,6 +2663,7 @@ MAXKIDMETER     equ     10              ; maxmaxstr: the most he can have
 MAXOPPMETER     equ     4               ; the most a guard of this level has
 
 show_meters:    call    page_canvas
+                call    timer           ; the clock's message, between them
                 call    hurt_flash
                 ld      hl, lightning   ; a flash is the border, a frame at a
                 ld      a, (hl)         ; time, for as many as it says

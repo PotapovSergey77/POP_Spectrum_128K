@@ -79,6 +79,7 @@ MODORG          equ     sprites + SPARE_LEN     ; the control code: see modend
 ; The background set's own code, in its bank with its pictures: bgovl.asm.
 ; Its entries, three bytes apart.
 
+ovkey           equ     bgovl           ; a key, new: the clock's YouLose
 ovstart         equ     bgovl + 3       ; the top of a frame, from c1anim
 ovpost          equ     bgovl + 6       ; after the frame's moves, c1post:
                                         ; the level's own code (lvcode.asm)
@@ -103,7 +104,8 @@ LOWVARS         equ     23734
 ; start makes the lot nought, the ROM's with them, from SYSLOW to LOWVARS'
 ; end.
 
-SYSLOW          equ     0x5C0B
+SYSLOW          equ     0x5C00          ; KSTATE and LAST_K too, now isr
+                                        ; no longer calls the ROM's
 SYSVARS         equ     23675
 SYSVARLEN       equ     59
 
@@ -4611,6 +4613,8 @@ dfsome:         ld      (dfl0n + 1), a
                 ld      (dfm0n + 1), a
                 ld      (dfln + 1), a
                 ld      (dfmn + 1), a
+                ld      (dfl6n + 1), a
+                ld      (dfm6n + 1), a
                 ld      (drsubn + 1), a
                 ld      h, a            ; and the pairs a row reads: as many,
                 ld      a, (spskip)     ; and one more with a byte cut off,
@@ -4661,9 +4665,13 @@ dfcut0:         ld      a, (curshift)   ; no shift: the loops that need no
                 jr      nz, dfshift
                 ld      h, b
                 ld      l, c
-dfshift:        ld      (dfcall + 1), hl
+dfshift:        cp      6               ; six: the routines with no tables,
+                jr      nz, dfsh1       ; as far on from the ones with
+                ld      de, dfl6cut - dflcut
+                add     hl, de
+dfsh1:          ld      (dfcall + 1), hl
                 rrca                    ; and the tables' pages, for good:
-                dec     a               ; two, four and six only
+                dec     a               ; two and four only
                 ld      c, a
                 exx
                 add     a, shifthi / 256
@@ -4737,6 +4745,8 @@ dflpair:        ld      a, (de)         ; the byte, and only it: the mask is
                 inc     l               ; a screen row never crosses a page
                 djnz    dflpair
                 jr      dfend
+                ds      7               ; the shift of six's twins lie as far
+                                        ; apart: see dfl6cut
 
 ; Facing right: the pairs from the end of the row back, and every byte with
 ; its bits turned about on the way to the shift.
@@ -4751,6 +4761,7 @@ dfmcut:         ld      a, (de)
                 ld      b, (hl)
                 exx
                 jr      dfmn
+                ds      1               ; likewise
 dfmirror:       exx
                 ld      b, 0
                 exx
@@ -5726,39 +5737,6 @@ copy32:         ldi
                 ldi
                 ret
 
-; DRAWOPPMETER: what his opponent's meter shows -- nothing at all for the
-; skeleton, which has no strength to lose.
-
-oppshown:       ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      a, (charid + OP)
-                cp      4               ; the skeleton's is not shown, nor
-                jr      z, oppnone      ; the shadow's but on level twelve
-                dec     a
-oppjr:          jr      z, oppnone      ; lvcode.asm makes it jr +0
-                ld      a, (oppstr)
-                ret
-oppnone:        xor     a
-                ret
-
-; show_meters' places for a meter: A = all of them, C = how many are lit.
-; Out: B = how many to draw -- all, or with only the flash to show just the
-; first and only if it is the one that flashes -- and NZ if any.
-
-smcount:        ld      b, a
-smone:          ld      a, 0            ; patched: 1 for the flash alone
-                dec     a
-                ret     nz
-                ld      b, 1
-                ld      a, c
-                cp      1
-                jr      z, smc1
-                xor     a
-                ret
-smc1:           or      a
-                ret
-
 ; ---------------------------------------------------------------- data
 
 
@@ -5924,6 +5902,27 @@ GP_IMPBLOCK     equ     3
 GP_ADV          equ     4
 GP_REFRACT      equ     5
 
+; DE = the message's first cell in the screen shown.
+
+tmat:           ld      a, (scrsel + 1)
+                or      0x50
+                ld      d, a
+                ld      e, 0xe0 + TIMECOL
+                ret
+
+treq1:          ld      a, 1
+                ld      (treq), a
+                ret
+
+; The letters at HL, a nought after them, on from DE.
+
+tstr:           ld      a, (hl)
+                or      a
+                ret     z
+                call    tchar
+                inc     hl
+                jr      tstr
+
 cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
@@ -5934,6 +5933,367 @@ flamemask:      incbin  "flamemask.bin"
                 ds      (($ + 255) / 256 * 256) - $
 shifthi:        incbin  "shifthi.bin"
 shiftlo:        incbin  "shiftlo.bin"
+
+; ---------------------------------------------------------------- after
+;
+; The tables are on page boundaries; what the fixed half has past them, up
+; to the working copy, which must start on 2K.
+
+; A shift of six has no tables: the byte turned two places left is the two
+; pixels that stay in this byte, at the bottom, and the six that go over to
+; the next, at the top -- two ANDs.  Sixteen cycles a byte dearer than the
+; tables, for a third of the pictures, and the two tables' 512 bytes went
+; to other things.  Each routine lies exactly as far on from its twin with
+; tables as the others do, so dfsetup moves to them with one sum.
+
+dfl6cut:        ld      a, (de)
+                inc     de
+                exx
+                add     a, a            ; only its spill: the top six
+                add     a, a
+                ld      b, a
+                exx
+                jr      dfl6n
+dfleft6:        exx
+                ld      b, 0
+                exx
+dfl6n:          ld      b, 0            ; patched: the bytes laid
+dfl6pair:       ld      a, (de)
+                inc     de
+                exx
+                rlca
+                rlca
+                ld      d, a
+                and     3               ; what stays in this byte
+                or      b
+                ld      e, a
+                ld      a, d
+                and     0xfc            ; what goes over to the right
+                ld      b, a
+                ld      a, e
+                exx
+                or      (hl)
+                ld      (hl), a
+                inc     l
+                djnz    dfl6pair
+                jp      dfend
+
+dfm6cut:        ld      a, (de)
+                dec     de
+                exx
+                ld      l, a
+                ld      h, c            ; REVTAB
+                ld      a, (hl)
+                add     a, a
+                add     a, a
+                ld      b, a
+                exx
+                jr      dfm6n
+dfmirror6:      exx
+                ld      b, 0
+                exx
+dfm6n:          ld      b, 0            ; patched
+dfm6pair:       ld      a, (de)
+                dec     de
+                exx
+                ld      l, a
+                ld      h, c            ; REVTAB
+                ld      a, (hl)
+                rlca
+                rlca
+                ld      d, a
+                and     3
+                or      b
+                ld      e, a
+                ld      a, d
+                and     0xfc
+                ld      b, a
+                ld      a, e
+                exx
+                or      (hl)
+                ld      (hl), a
+                inc     l
+                djnz    dfm6pair
+                jp      dfend
+
+
+; DRAWOPPMETER: what his opponent's meter shows -- nothing at all for the
+; skeleton, which has no strength to lose.
+
+oppshown:       ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (charid + OP)
+                cp      4               ; the skeleton's is not shown, nor
+                jr      z, oppnone      ; the shadow's but on level twelve
+                dec     a
+oppjr:          jr      z, oppnone      ; lvcode.asm makes it jr +0
+                ld      a, (oppstr)
+                ret
+oppnone:        xor     a
+                ret
+
+; show_meters' places for a meter: A = all of them, C = how many are lit.
+; Out: B = how many to draw -- all, or with only the flash to show just the
+; first and only if it is the one that flashes -- and NZ if any.
+
+smcount:        ld      b, a
+smone:          ld      a, 0            ; patched: 1 for the flash alone
+                dec     a
+                ret     nz
+                ld      b, 1
+                ld      a, c
+                cp      1
+                jr      z, smc1
+                xor     a
+                ret
+smc1:           or      a
+                ret
+
+; ---------------------------------------------------------------- the clock
+;
+; KEEPTIME and SHOWTIME in SPECIALK.S and SUBS.S: an hour for the whole
+; game, counted in game frames.  The Apple's "minute" is 725 of its frames,
+; at some eleven a second; ours is TMIN at sixteen and two thirds, a minute
+; of the clock on the wall.  The message POP puts up in the middle of the
+; screen -- "55 MINUTES LEFT", in the last minute the seconds -- goes here
+; in the meters' row, between the two meters, in the ROM's letters.  It
+; comes up as each level begins (not fourteen) and when he is up again
+; after a death, at every fifth minute and each of the last five, and in
+; the last minute the seconds count down.  The clock stops while he is
+; dead, on level fourteen, and on thirteen once the vizier is dead (its exit
+; open).  Run out before thirteen it is the end of the game -- YouLose,
+; whose princess the tape does not carry -- and so is dying on thirteen with
+; no time left.  From show_meters, with the canvas bank in.
+
+TMIN            equ     1020            ; game frames to a minute
+TSEC            equ     17              ; and to a second
+TMSGT           equ     28              ; a message's stay: the Apple's 20
+TIMECOL         equ     11              ; its first column, of fifteen
+
+timer:          ld      a, (curlev)     ; a level begun: its time shown
+                ld      hl, tlast
+                cp      (hl)
+                ld      (hl), a
+                jr      z, ti1
+                cp      13              ; (but not fourteen's)
+                call    nz, treq1
+ti1:            ld      a, (charlife)   ; and up again after a death
+                ld      hl, tdead
+                ld      b, (hl)
+                ld      (hl), a
+                rla
+                jr      nc, tmup        ; dead: the clock stops, and nothing
+                                        ; is put up
+                bit     7, b
+                call    z, treq1
+                ld      a, (curlev)     ; not on fourteen, nor on thirteen
+                cp      13              ; with the vizier dead
+                jr      nc, tmshow
+                cp      12
+                jr      nz, ti2
+                ld      a, (exitopen)
+                or      a
+                jr      nz, tmshow
+ti2:            ld      a, (temin)      ; and not past the hour
+                cp      60
+                jr      nc, tmshow
+                ld      hl, (tefr)
+                inc     hl
+                ld      (tefr), hl
+                ld      de, -TMIN
+                add     hl, de
+                jr      nc, tmshow
+                ld      (tefr), hl      ; a minute gone
+                ld      hl, temin
+                inc     (hl)
+                ld      a, (hl)
+                cp      55              ; each of the last five, and every
+                jr      nc, ti4         ; fifth before them
+ti3:            sub     5
+                jr      z, ti4
+                jr      nc, ti3
+                jr      tmshow
+ti4:            ld      a, 2
+                ld      (treq), a
+
+; SHOWTIME: a message put up when one is asked for, and through the last
+; minute kept up, until the last second.
+
+tmshow:         ld      a, (treq)
+                or      a
+                jr      z, tmup
+                ld      a, (temin)      ; run out: nothing more to say
+                cp      60
+                jr      nc, tmup
+                call    tleft
+                bit     7, b
+                jr      z, tmnorm
+                cp      2
+                ld      a, 1
+                jr      nc, tmsec
+                xor     a               ; down to the last: no more of it
+                ld      (treq), a
+tmsec:          ld      (msgtimer), a   ; up this frame, treq kept for the
+                jr      tmup            ; next
+tmnorm:         ld      a, (msgtimer)   ; one up already: it waits
+                or      a
+                jr      nz, tmup
+                ld      a, TMSGT
+                ld      (msgtimer), a
+                xor     a
+                ld      (treq), a
+
+; Run out: before thirteen at once, on thirteen if he dies.
+
+tmup:           ld      a, (temin)
+                cp      60
+                jr      c, tmmsg
+                ld      a, (curlev)
+                cp      12
+                jp      c, tlose
+                ld      a, (charlife)
+                rla
+                jp      nc, tlose
+
+; The message on the screen while msgtimer runs -- drawn again when what
+; it says has changed or something has gone over the row -- and when it is
+; done, the room put back over it.
+
+tmmsg:          ld      hl, msgtimer
+                ld      a, (hl)
+                or      a
+                jr      z, tmoff
+                dec     (hl)
+                call    tleft
+                ld      c, a
+                or      b
+                ld      hl, tlastn
+                cp      (hl)
+                ld      (hl), a
+                jr      nz, tmdraw
+                ld      a, (meterdirty)
+                or      a
+                ret     z
+tmdraw:         call    tmat
+                ld      a, c            ; the tens, none a space
+                ld      h, '0' - 1
+ti5:            inc     h
+                sub     10
+                jr      nc, ti5
+                add     a, 10 + '0'
+                push    af
+                ld      a, h
+                cp      '0'
+                jr      nz, ti6
+                ld      a, ' '
+ti6:            call    tchar
+                pop     af
+                call    tchar
+                ld      hl, tmwmin
+                bit     7, b
+                jr      z, tm7
+                ld      hl, tmwsec
+tm7:            call    tstr
+                ld      hl, tmwleft
+                jp      tstr
+
+tmoff:          ld      hl, tlastn      ; done: off, if it was up -- the
+                ld      a, (hl)         ; room back over it, in the working
+                or      a               ; copy and on the screen shown
+                ret     z
+                ld      (hl), 0
+                call    page_art
+                ld      hl, tmrect
+                push    hl
+                call    eraseset
+                call    page_canvas
+                pop     hl
+                jp      show_one
+
+tmrect:         db      TIMECOL, 184, 15, 8
+
+; A letter of the ROM's at DE, in the room's own colour -- which the room
+; put back over it leaves right -- and DE on a cell.
+; HL and C kept.
+
+tchar:          push    hl
+                push    bc
+                add     a, 0x80         ; 0x3C00 + 8A
+                ld      l, a
+                ld      h, 0x07
+                add     hl, hl
+                add     hl, hl
+                add     hl, hl
+                ld      b, 8
+tc1:            ld      a, (hl)
+                ld      (de), a
+                inc     hl
+                inc     d
+                djnz    tc1
+                ld      a, d            ; back the eight lines
+                sub     8
+                ld      d, a
+                pop     bc
+                pop     hl
+                inc     e
+                ret
+
+; A = what the message says, B = 0: the minutes left; in the last minute,
+; unless the clock has stopped, B = 0x80 and the seconds, 60 to 1.
+
+tleft:          ld      b, 0
+                ld      a, (temin)
+                cp      59
+                jr      c, tlmin
+                ld      a, (curlev)
+                cp      13
+                jr      nc, tlmin
+                ld      b, 0x80
+tsecs:          ld      hl, (tefr)
+                ld      de, -TSEC
+                ld      a, 61
+ts1:            dec     a
+                add     hl, de
+                jr      c, ts1
+                ret
+tlmin:          ld      a, (temin)
+                neg
+                add     a, 60
+                ret
+
+; Time's up (YouLose): the Apple goes to the princess, the hourglass empty,
+; and back to the titles -- neither of which the tape can go back for.  The
+; message stays, and a key starts the 128 over, as the end of the game does.
+
+tlose:          call    tmat
+                ld      hl, tmlost
+                call    tstr
+                ld      de, ovkey       ; every key up, and then one down
+                call    bgcall
+                di                      ; the 128's own ROM, and its start
+                ld      bc, 0x7ffd
+                xor     a
+                out     (c), a
+                rst     0
+
+tmwmin:         db      " MINUTES", 0
+tmwsec:         db      " SECONDS", 0
+tmwleft:        db      " LEFT", 0
+tmlost:         db      "  TIME IS UP", 0
+
+tefr            equ     0x5C79          ; frames into the minute: FRAMES's
+                                        ; top two, which isr leaves alone
+temin           equ     0x5C3B          ; minutes gone (FLAGS, MODE and
+treq            equ     0x5C41          ; FLAGS2 were the ROM's keyboard's)
+msgtimer        equ     0x5C6A
+tlast           equ     0x5C00          ; the level last frame
+tdead           equ     0x5C01          ; and his life: nought, dead, to
+                                        ; begin with, so the game opens on
+                                        ; the hour
+tlastn          equ     0x5C02          ; what the message said: 0 none
+
+                ds      (($ + 0x7FF) / 0x800 * 0x800) - $
 codeend:
 
 ; ---------------------------------------------------------------- the fight

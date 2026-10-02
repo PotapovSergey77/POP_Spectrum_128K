@@ -24,8 +24,7 @@
 ; top of the frame.  Its shadowman is level eight's mouse, who presses
 ; nothing, and level twelve's, whose keys are that level's code's too.
 
-                ret                     ; (drawb's stripe was here: bg.asm)
-                ds      2
+                jp      key             ; ovkey: the clock's YouLose
                 if      OVLSET
                 jp      start
                 jp      lvcode
@@ -114,6 +113,22 @@ sunext:         ld      a, (hl)
 sucount:        djnz    sunext
                 ld      (palist), hl
                 endif
+                ret
+
+; Every key up, and then one down: the clock run out (tlose in pop.asm).
+
+key:            halt
+                xor     a
+                in      a, (254)
+                cpl
+                and     0x1f
+                jr      nz, key
+ky1:            halt
+                xor     a
+                in      a, (254)
+                cpl
+                and     0x1f
+                jr      z, ky1
                 ret
 
 ; hide_behind's start: the front list, and the Apple bytes he can meet a

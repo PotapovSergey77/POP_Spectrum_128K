@@ -4303,10 +4303,10 @@ rqgoon:         ld      sp, (rqsp)
                 call    page_art        ; as the loop has it there
                 jp      main
 
-rqhung:         db      0               ; steps given up in a row
-rqabt:          db      0               ; the slot, while a step may be given up
-rqsp:           dw      0               ; the stack as rq_run found it
-rqran:          db      0               ; a step that could be given up, done
+rqhung          equ     0x5C03          ; steps given up in a row
+rqabt           equ     0x5C04          ; the slot, while a step may be given up
+rqsp            equ     0x5C05          ; the stack as rq_run found it
+rqran           equ     0x5C07          ; a step that could be given up, done
 
 ; A block that has gone back into the room still has to reach the working
 ; copy, and at the end of a frame he has just been drawn into it: the room
@@ -4400,9 +4400,9 @@ rqprio          equ     0x5C15          ; the next request goes first
 rqstart         equ     0x5C16          ; and the band it starts at
 rbfrz           equ     0x5C17          ; rb_setup: 1 take, 2 keep the state
 rqfrzv          equ     0x5C18          ; the state taken
-rqfrzr:         db      0               ; for this block
-rqfrzc:         db      0
-rqsn:           db      0               ; blocks waiting to be shown
+rqfrzr          equ     0x5C08          ; for this block
+rqfrzc          equ     0x5C09
+rqsn            equ     0x5C0A          ; blocks waiting to be shown
 
 ; The exit's stairs and door are all in the block to its right.
 

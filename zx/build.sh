@@ -263,6 +263,8 @@ assert sym['BAND_BYTES'] + sym['CUT_BUFOFF'] <= rb, 'полоса принцес
 print('буферы под загрузчиком %04X..%04X, %d байт'
       % (sym['LOWBUF'], sym['LOWTOP'], sym['LOWTOP'] - sym['LOWBUF']))
 assert sym['LOWTOP'] <= sym['stubs'], 'буферы под загрузчиком налезли на код'
+d6 = sym['dfl6cut'] - sym['dflcut']
+assert all(sym[a + '6'] - sym[a] == d6 for a in ('dfleft', 'dfmirror')) and sym['dfm6cut'] - sym['dfmcut'] == d6, 'двойники сдвига на шесть не на месте'
 assert sym['SLEND'] <= sym['CODE1'], 'картинки ножниц налезли на код банка холста'
 assert sym["SLCOMMON"] + 4 * sym["SLBAND"] <= 0x10000 - 12, 'ножницы не влезли за код банка холста'
 assert sym['LOWSTACK'] >= 23755, 'буферы под загрузчиком залезли в переменные ПЗУ'

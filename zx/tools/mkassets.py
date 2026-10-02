@@ -1262,9 +1262,10 @@ def main(argv):
     # pixels to POP's unit and the swords are stored to match -- so only the
     # shifts of two, four and six need tables, and the shift of none needs
     # none at all: its loops simply lay the bytes down.
-    hi = bytearray(3 * 256)
-    lo = bytearray(3 * 256)
-    for i, sh in enumerate((2, 4, 6)):
+    # The shift of six does without (dfleft6 in pop.asm).
+    hi = bytearray(2 * 256)
+    lo = bytearray(2 * 256)
+    for i, sh in enumerate((2, 4)):
         for b in range(256):
             hi[i * 256 + b] = b >> sh
             lo[i * 256 + b] = (b << (8 - sh)) & 0xff
