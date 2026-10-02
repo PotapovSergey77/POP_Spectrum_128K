@@ -83,7 +83,7 @@ ovstart         equ     bgovl + 3       ; the top of a frame, from c1anim
 ovpost          equ     bgovl + 6       ; after the frame's moves, c1post:
                                         ; the level's own code (lvcode.asm)
 ovset           equ     bgovl + 9       ; the set into the program: newroom
-ovflame         equ     bgovl + 12      ; (a ret: flame_one has the frames)
+ovhb            equ     bgovl + 12      ; hbfirst, for hide_behind
 ovattr          equ     bgovl + 15      ; the palace's colours, into imgbuf
 ovshad          equ     bgovl + 18      ; the shadow's keys, from autoctrl
 
@@ -6381,43 +6381,6 @@ gsjoin:         ld      hl, boxcol + OP
                 call    union4
                 jr      gsempty
 
-; hide_behind's start: the front list, and the Apple bytes he can meet a
-; piece in.  His room bytes are rb to rb + w, eight pixels each and an
-; Apple byte seven, so his first Apple byte is at least rb + rb/8 and his
-; last at most x + x/8 + 1, x = rb + w; and a piece's body ends at most
-; five Apple bytes past its column (bgexport asserts it).  So a piece meets
-; him only if its column less (first - 5) is no more than (last + 1) less
-; that -- one unsigned comparison, which a column of 255, a byte left of
-; the room, also comes out of right.  In CODE1, by c1call: B kept.  Out:
-; HL = frontlist.
-
-hbfirst:        ld      a, (cam)
-                ld      hl, newcol
-                add     a, (hl)
-                ld      c, a            ; rb
-                rrca
-                rrca
-                rrca
-                and     0x1f
-                add     a, c
-                sub     5
-                ld      (hbxlo + 1), a
-                ld      e, a
-                ld      a, (neww)
-                add     a, c
-                ld      c, a            ; x
-                rrca
-                rrca
-                rrca
-                and     0x1f
-                add     a, c
-                inc     a
-                sub     e
-                inc     a
-                ld      (hbxn + 1), a
-                ld      hl, frontlist
-                ret
-
 ; The prince standing still is the same picture in the same place frame
 ; after frame, and rubbing him out, drawing him, putting the floor and the
 ; front back over him and showing him was a quarter of a frame -- which the
@@ -7378,8 +7341,7 @@ trig_slicer:    push    af
 ; the collision buffer -- 0xff is a barrier he is inside -- and a slicer
 ; among them with its jaws shut cuts him in half.
 ;
-; CHECKSLICE2, the same for a guard, is not here: no guard of this level
-; ever stands on a slicer's row.
+; CHECKSLICE2, the same for a guard, is below.
 
 checkslice:     ld      a, (blocky)     ; tempblocky
                 ld      (csrow), a
@@ -7467,6 +7429,57 @@ c1slice:        ld      a, (tempbx)     ; its block, in its own room
 csrow:          db      0
 slstate:        db      0
 sltrloc:        db      0
+
+; CHECKSLICE2 in COLL.S, for the guard, who has no collision buffers: the
+; block under his feet and the one after it -- a slicer with its jaws shut,
+; whose barrier his edges reach into, cuts him in half as it does the kid
+; (c1slice, on Char).  A slicer's barrier is code 3: BarL 0, BarR 11, so it
+; runs from the block's edge to two units on.  From do_shad by c1call, the
+; guard in Char, after checkimpale as DoShad has it.
+
+checkslice2:    ld      hl, cd_edges    ; GETEDGES
+                call    c1mod
+                call    base_x          ; GETUNDERFT
+                call    blockcol_of
+                ld      (cs2col), a
+                call    cs2try
+                ret     c
+                ld      hl, cs2col      ; and the block after it
+                inc     (hl)
+cs2try:         ld      a, (blocky)
+                ld      (csrow), a
+                ld      c, a
+                ld      a, (cs2col)
+                call    tile_at
+                cp      BG_SLICER
+                jr      nz, cs2safe
+                ld      a, (tilestate)
+                and     0x7f
+                cp      SLICEREXT
+                jr      nz, cs2safe     ; open
+                ld      a, (cs2col)     ; its edge, 140 wide, angle in
+                ld      b, a
+                add     a, a
+                add     a, b
+                add     a, a
+                add     a, b
+                add     a, a
+                add     a, SCRNLEFT + ANGLE140
+                ld      hl, cdright     ; its left bar at or past his right
+                cp      (hl)
+                jr      nc, cs2safe
+                add     a, 2            ; its right bar at or short of his
+                ld      hl, cdleft      ; left
+                cp      (hl)
+                jr      c, cs2safe
+                jr      z, cs2safe
+                call    c1slice
+                scf
+                ret
+cs2safe:        or      a
+                ret
+
+cs2col:         db      0
 
 
 ; ------------------------------------------------------------ careful step

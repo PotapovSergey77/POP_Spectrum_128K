@@ -18,7 +18,7 @@
                 org     bgovl
 
 ; The entries, three bytes apart, where pop.asm has them: ovstripe, ovstart,
-; ovpost, ovset, ovflame, ovattr and ovshad.  ovpost is the level's own code,
+; ovpost, ovset, ovhb, ovattr and ovshad.  ovpost is the level's own code,
 ; which rides with its blueprint (lvcode.asm); the dungeon's ovstart goes
 ; there too, carry set to tell them apart -- level eight's mouse wants the
 ; top of the frame.  Its shadowman is level eight's mouse, who presses
@@ -34,8 +34,7 @@
                 jp      dpost
                 endif
                 jp      setup
-                ret                     ; (ovflame: flame_one has it now)
-                ds      2
+                jp      hbfirst         ; ovhb: hide_behind's, both sets
                 if      OVLSET
                 jp      attrs
                 jp      shad
@@ -115,6 +114,43 @@ sunext:         ld      a, (hl)
 sucount:        djnz    sunext
                 ld      (palist), hl
                 endif
+                ret
+
+; hide_behind's start: the front list, and the Apple bytes he can meet a
+; piece in.  His room bytes are rb to rb + w, eight pixels each and an
+; Apple byte seven, so his first Apple byte is at least rb + rb/8 and his
+; last at most x + x/8 + 1, x = rb + w; and a piece's body ends at most
+; five Apple bytes past its column (bgexport asserts it).  So a piece meets
+; him only if its column less (first - 5) is no more than (last + 1) less
+; that -- one unsigned comparison, which a column of 255, a byte left of
+; the room, also comes out of right.  By bgcall (ovhb), which keeps B and
+; HL.  Out: HL = frontlist.
+
+hbfirst:        ld      a, (cam)
+                ld      hl, newcol
+                add     a, (hl)
+                ld      c, a            ; rb
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                add     a, c
+                sub     5
+                ld      (hbxlo + 1), a
+                ld      e, a
+                ld      a, (neww)
+                add     a, c
+                ld      c, a            ; x
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                add     a, c
+                inc     a
+                sub     e
+                inc     a
+                ld      (hbxn + 1), a
+                ld      hl, frontlist
                 ret
 
                 if      OVLSET

@@ -195,8 +195,8 @@ hide_behind:    ld      hl, foremask
                 ld      bc, 4
                 ldir
                 ld      b, a
-                ld      hl, hbfirst     ; and the columns he can meet one in
-                call    c1call
+                ld      de, ovhb        ; and the columns he can meet one in
+                call    bgcall
 hbloop:         call    hbseek          ; the next piece whose rows meet his
                 ret     z
                 push    bc
@@ -372,6 +372,8 @@ do_shad:        call    gd_swap
                 call    page_canvas     ; too; and it pages the blueprint in
                 call    checkspikes
                 call    checkimpale
+                ld      hl, checkslice2 ; and a slicer shut on him
+                call    c1call
 
 ; And only now are the kid's keys put back -- after everything that reads
 ; them, not straight after shadctrl.  fall_on takes the button from btn, and
