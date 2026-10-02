@@ -165,9 +165,6 @@ mtflask:        ld      de, roomids
                 call    addtrob
                 jr      mtnext
 
-mtrow:          db      0
-mtcol:          db      0
-mtal:           db      0
 
 ; And on to the screen, wherever the view has put them.
 
@@ -958,17 +955,8 @@ frx1:           ld      (fx0), de
                 ret
 
 
-fleft:          db      0
-fptr:           dw      0
-fmrow:          dw      0
-frow:           db      0
-frows:          db      0
-fx0:            dw      0
-fpx:            db      0
-fcol:           db      0
-fmask0:         db      0
-fmask1:         db      0
-fspan:          db      0
+; build_fore's and maketorches' scratch are in the packing's row buffer:
+; see cvbuf in pop.asm.
 
 floormasks:     ld      a, 1
                 call    onemask
@@ -1465,6 +1453,13 @@ chslen:         dw      0
 ; the princess's room into the art bank.  Until it loads -- a tape not
 ; playing is waited for, and one that went wrong is tried again.  The border
 ; it leaves is BASIC's, and the game's is black.
+;
+; Not by CALL 0x0556, though: that returns through SA/LD-RET, which with
+; SPACE down -- the key that hurries the "stop the tape" on, or the button
+; held as he goes up the stairs -- is RST 8, D BREAK, into BASIC, which is
+; long gone, and the machine starts again.  LD-BYTES's first eight
+; instructions are done here instead, with our own way back pushed where
+; SA/LD-RET would be, and the ROM gone into after them.
 
 tapeload:       call    page_bg
                 ld      hl, (level + LV_HEAD + LH_NEXT)
@@ -1480,7 +1475,16 @@ tbagain:        push    hl
                 pop     ix
                 ld      a, 0xff
                 scf
-                call    0x0556
+                inc     d               ; 0x0556 on
+                ex      af, af'
+                dec     d
+                di
+                ld      a, 0x0f
+                out     (254), a
+                ld      hl, tbret
+                push    hl
+                jp      0x0562
+tbret:          ei                      ; what SA/LD-RET did that we want
                 pop     de
                 pop     hl
                 jr      nc, tbagain

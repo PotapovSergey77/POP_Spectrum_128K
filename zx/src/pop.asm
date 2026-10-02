@@ -8190,6 +8190,23 @@ roomids         equ     frontlist + MAXFRONT * 5    ; frontrec writes them
 rqq             equ     roomids + 60                ; thirty ids, then states
 rqs             equ     rqq + 4 * RQMAX             ; row, column, band, wide
 cvbuf           equ     rqs + 4 * RQSMAX
+; build_fore's scratch and maketorches' (roomblk.asm), in cvbuf: the room is
+; converted before them and the masks are packed between, so the row is
+; free.  Here, after cvbuf: pasmo makes an equ on a later equ nought.
+mtrow           equ     cvbuf + 14      ; scratch, in the packing's row
+mtcol           equ     cvbuf + 15      ; buffer: the masks are packed
+mtal            equ     cvbuf + 16      ; before the torches are made
+fleft           equ     cvbuf
+fptr            equ     cvbuf + 1
+fmrow           equ     cvbuf + 3
+frow            equ     cvbuf + 5
+frows           equ     cvbuf + 6
+fx0             equ     cvbuf + 7
+fpx             equ     cvbuf + 9
+fcol            equ     cvbuf + 10
+fmask0          equ     cvbuf + 11
+fmask1          equ     cvbuf + 12
+fspan           equ     cvbuf + 13
 dirtyq          equ     cvbuf + CANVAS_W            ; col, top, width, height
 belowrow        equ     dirtyq + 4 * DIRTYMAX
 aboverow        equ     belowrow + 20               ; the ceiling: the bottom
