@@ -1514,11 +1514,11 @@ pw1:            ld      (nrleft), a
 ;
 ; Level three's, out of the program's fixed half, which had no room left:
 ; the skeleton getting up, and falling into the screen below.  The entries:
-; the top of the frame -- the dungeon's ovstart, carry set -- and cutguard's
-; at lvcode + 3.
+; the top of the frame -- the dungeon's ovstart, carry set -- after the
+; frame's moves, and cutguard's at lvcode + 5.
 
 post:           jr      c, bones
-                ret
+                jp      skel
                 jp      skeldown
 
 ; BONESRISE in MISC.S: with the exit open and nobody else in the room, the
@@ -1569,8 +1569,7 @@ brtrig:         ld      a, SKELY * 10 + SKELX
                 call    swapchar        ; he is made in Char, as POP makes
                 ld      a, SKELY        ; him
                 ld      (blocky), a
-                ld      hl, floor_plane
-                call    imgbuf
+                ld      a, (floory + SKELY + 1) ; on its floor
                 ld      (chary), a
                 ld      hl, SKELX * BLOCK_PX + BLOCK_PX ; getblockej + angle
                 ld      (charx), hl                     ; + 7
@@ -1627,28 +1626,99 @@ skeldown:       ld      a, (links + 3)
                 jp      nz, gd_off
                 ld      a, SND_SPLAT
                 call    addsound
-                ld      a, SKELLAND
-                ld      de, 0
+                ld      de, 0           ; out of this room's list, which a
+                call    gd_field        ; visit before may have left him in:
+                ld      (hl), 0xff      ; he is not up here any more
+                ld      bc, SKELLANDBLK * 256 + SKELLANDX
+                ld      hl, (charx + OP) ; CUTGUARD puts him on the middle
+                ld      de, -140        ; row whichever side he went off; off
+                add     hl, de          ; the left he falls past it, on to
+                jr      c, skd1         ; the bottom row (the user's): there,
+                ld      hl, (charx + OP) ; where he is
+                sra     h
+                rr      l
+                ld      a, l
+                add     a, SCRNLEFT
+                ld      c, a
+                ld      b, 20
+skd1:           ld      a, SKELLAND     ; his fields, GdStart* for the room,
+                ld      de, 0           ; 24 apart
                 call    gd_field_in
-                ld      (hl), SKELLANDBLK
-                ld      a, SKELLAND
-                ld      de, GDX
-                call    gd_field_in
-                ld      (hl), SKELLANDX
-                ld      a, SKELLAND
-                ld      de, GDFACE
-                call    gd_field_in
+                ld      (hl), b         ; the block (its row)
+                ld      de, 24
+                add     hl, de
                 ld      (hl), 0         ; facing right
-                ld      a, SKELLAND
-                ld      de, GDPROG
-                call    gd_field_in
+                add     hl, de
+                ld      (hl), c         ; ShadX
+                ld      e, 48
+                add     hl, de
                 ld      a, (guardprog)
-                ld      (hl), a
-                ld      a, SKELLAND
-                ld      de, GDSEQH
-                call    gd_field_in
+                ld      (hl), a         ; the program
+                ld      e, 24
+                add     hl, de
                 ld      (hl), 0         ; alive: ADDGUARD starts him afresh
                 jp      gd_gone
+
+; Two things the user asked for, for screen three, where he lands and where
+; the loose floor is (the rest of his rooms have no floor to fall from under
+; him).  When the floor under his front foot has fallen and
+; his base still stands -- he had stepped back off it -- he goes on into the
+; hole and down it, rather than standing there over it; and once he falls,
+; drifting the way he was fighting does not take him over the block beside
+; the hole, to come down inside it.
+
+skel:           ld      a, (gdhere)
+                or      a
+                ret     z
+                call    swapchar        ; him in hand
+                call    skfix
+                jp      swapchar
+
+skfix:          ld      a, (charact)
+                cp      3
+                jr      c, skgnd
+                cp      5
+                ret     nc              ; neither on the ground nor falling
+                ld      hl, skfell      ; falling: where he went down, kept,
+                ld      a, (hl)         ; and back to it should what he
+                inc     (hl)            ; drifts over be a block of the row
+                or      a               ; he will land on -- he would come
+                jr      nz, skf1        ; down inside it
+                ld      hl, (charx)
+                ld      (skfx), hl
+                ret
+skf1:           call    base_x
+                call    sktile
+                cp      BG_BLOCK
+                ret     nz
+                ld      hl, (skfx)
+                ld      (charx), hl
+                ret
+skgnd:          xor     a               ; on the ground, his front foot
+                ld      (skfell), a     ; over none: a step towards it each
+                ld      hl, (charx)     ; frame, till his base -- the back
+                call    sktile          ; foot, en garde -- is over it too
+                ret     nz              ; and he falls
+                ld      de, 8
+                ld      a, (facing)
+                or      a
+                jr      nz, skg1
+                ld      de, -8
+skg1:           ld      hl, (charx)
+                add     hl, de
+                ld      (charx), hl
+                ret
+
+; HL = a room x on his row.  Out: Z when there is nothing there.
+
+sktile:         ld      a, (blocky)
+                ld      c, a
+                call    tile_in_row
+                or      a
+                ret
+
+skfell:         db      0
+skfx:           dw      0
 
                 endif
 

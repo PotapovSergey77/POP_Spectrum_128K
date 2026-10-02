@@ -440,7 +440,7 @@ cgret:          ret     c               ; it.  There was an upper bound here
                 ld      a, (charid + OP)        ; a skeleton that falls into
                 cp      4                       ; the room it belongs in gets
                 jr      nz, gd_off              ; up again there: level three's
-                ld      de, lvcode + 3          ; own code has it
+                ld      de, lvcode + 5          ; own code has it
                 jp      bgcall
 gd_off:         ld      a, (nowbank)
                 push    af
