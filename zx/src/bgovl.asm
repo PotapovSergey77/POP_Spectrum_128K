@@ -34,7 +34,8 @@
                 jp      dpost
                 endif
                 jp      setup
-                jp      flame
+                ret                     ; (ovflame: flame_one has it now)
+                ds      2
                 if      OVLSET
                 jp      attrs
                 jp      shad
@@ -114,42 +115,6 @@ sunext:         ld      a, (hl)
 sucount:        djnz    sunext
                 ld      (palist), hl
                 endif
-                ret
-
-; A frame of a torch's flame, from DE into flbuf, for flame_one.  The bank
-; has each frame once, as it stands over an even column, and two bytes of
-; each row, the third being empty; over an odd column it is four pixels
-; further right, and the copy moves it there -- the mask flame_one has
-; picked says which.
-
-flame:          ex      de, hl
-                ld      de, flbuf
-                ld      b, FLAME_BYTES / 3
-flrow:          ld      a, (hl)
-                ld      (de), a
-                inc     hl
-                inc     de
-                ld      a, (hl)
-                ld      (de), a
-                inc     hl
-                inc     de
-                xor     a
-                ld      (de), a
-                inc     de
-                djnz    flrow
-                ld      a, (flmbase)
-                cp      flamemask & 0xff
-                ret     z
-                ld      hl, flbuf
-                ld      b, FLAME_BYTES / 3
-flshift:        xor     a
-                rrd
-                inc     hl
-                rrd
-                inc     hl
-                rrd
-                inc     hl
-                djnz    flshift
                 ret
 
                 if      OVLSET

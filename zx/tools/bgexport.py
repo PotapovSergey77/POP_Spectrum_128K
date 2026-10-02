@@ -268,6 +268,9 @@ def piece_tables(bgset='DUN'):
     bg.slicerfrh = foot_rows(rest, t1, t2)
     bg.frontmx = [b[0] for b in body]
     bg.frontmw = [b[1] for b in body]
+    # hbseek turns a piece away by its byte column alone when its body
+    # ends no more than five Apple bytes past it: see hbfirst in pop.asm
+    assert all(x + w <= 6 * 7 for x, w in body), 'a front piece wider than hbseek allows'
     out = bytearray()
     for name in BY_PIECE:
         a = list(getattr(bg, name))

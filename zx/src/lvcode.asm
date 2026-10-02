@@ -1509,7 +1509,150 @@ pw1:            ld      (nrleft), a
 
                 endif
 
-                if      LVNUM < 4 or LVNUM = 7 or LVNUM = 9 or LVNUM = 10 or LVNUM = 11
+                if      LVNUM = 3
+; ---------------------------------------------------------------- the bones
+;
+; Level three's, out of the program's fixed half, which had no room left:
+; the skeleton getting up, and falling into the screen below.  The entries:
+; the top of the frame -- the dungeon's ovstart, carry set -- and cutguard's
+; at lvcode + 3.
+
+post:           jr      c, bones
+                ret
+                jp      skeldown
+
+; BONESRISE in MISC.S: with the exit open and nobody else in the room, the
+; skeleton lying in screen one gets up as the kid comes level with it.  The
+; bones are a piece of the background until then; they become floor, that
+; block and the one to its right are redrawn, and what stands up is a guard
+; of the kid's own making -- CharID 4, program two, three points of strength
+; he can never be made to lose.  NextFrame has it after animtrans, which
+; opens the exit; here it comes just before, from ovstart, so an exit that
+; is all the way open on the very frame he comes level with the bones has
+; them rise a frame later.
+
+bones:          ld      a, (gdhere)     ; nobody in the room yet
+                or      a
+                ret     nz
+                ld      a, (roomnum)
+                cp      SKELSCRN
+                ret     nz
+                ld      a, (exitopen)
+                or      a
+                ret     z
+                ld      hl, (charx)     ; KidBlockX: level with the bones,
+                call    blockcol_of     ; or one short of them
+                cp      SKELTRIG
+                jr      z, brtrig
+                cp      SKELTRIG + 1
+                ret     nz
+
+brtrig:         ld      a, SKELY * 10 + SKELX
+                ld      (trloc), a
+                ld      a, (roomnum)
+                ld      (trscrn), a
+                call    trobat          ; what lies there
+                push    af
+                ld      a, BG_FLOOR     ; floor from now on, and the block
+                call    trobtype        ; and the one right of it redrawn --
+                ld      a, 24           ; markred and markwipe, 24 rows deep
+                ld      (redh), a
+                call    redplate
+                pop     af
+                cp      BG_BONES
+                ret     nz
+
+                ld      hl, brtramp     ; the control code is in the canvas
+                ld      de, imgbuf      ; bank: it is called from down there
+                ld      bc, brtrend - brtramp
+                ldir
+                call    swapchar        ; he is made in Char, as POP makes
+                ld      a, SKELY        ; him
+                ld      (blocky), a
+                ld      hl, floor_plane
+                call    imgbuf
+                ld      (chary), a
+                ld      hl, SKELX * BLOCK_PX + BLOCK_PX ; getblockej + angle
+                ld      (charx), hl                     ; + 7
+                xor     a
+                ld      (facing), a     ; POP's -1, left
+                ld      a, SQ_ARISE
+                ld      hl, bumpseq     ; jumpseq, then animchar
+                call    imgbuf
+                ld      a, SKELPROG
+                ld      (guardprog), a
+                ld      hl, c1gprob     ; its tables are CODE1's
+                call    c1call
+                ld      a, 0xff
+                ld      (charlife), a
+                ld      a, 3
+                ld      (oppstr), a
+                xor     a
+                ld      (alertguard), a
+                ld      (refract), a
+                ld      (justblocked), a
+                ld      (yvel), a
+                ld      hl, newcol      ; nothing of him drawn yet, and his
+                ld      b, 13           ; rectangles, and CharXVel
+brclr:          ld      (hl), a
+                inc     hl
+                djnz    brclr
+                ld      a, 2
+                ld      (charsword), a
+                ld      a, 4            ; the skeleton
+                ld      (charid), a
+                ld      a, 1            ; and a guard in the room from here
+                ld      (gdhere), a
+                jp      swapchar
+
+; Run from imgbuf: a routine of the control code's at HL, A in and out.
+
+brtramp:        push    af
+                call    page_canvas
+                pop     af
+                call    jphl
+                push    af
+                call    page_bg
+                pop     af
+                ret
+brtrend:
+
+; CUTGUARD in AUTO.S for the skeleton: one that falls into the room it
+; belongs in gets up again there -- UPDATEGUARD for the room below, which
+; ADDGUARD will raise him in again: a fresh start, and he is gone from this
+; one.  Anywhere else he is gone for good, as any guard is.
+
+skeldown:       ld      a, (links + 3)
+                cp      SKELLAND
+                jp      nz, gd_off
+                ld      a, SND_SPLAT
+                call    addsound
+                ld      a, SKELLAND
+                ld      de, 0
+                call    gd_field_in
+                ld      (hl), SKELLANDBLK
+                ld      a, SKELLAND
+                ld      de, GDX
+                call    gd_field_in
+                ld      (hl), SKELLANDX
+                ld      a, SKELLAND
+                ld      de, GDFACE
+                call    gd_field_in
+                ld      (hl), 0         ; facing right
+                ld      a, SKELLAND
+                ld      de, GDPROG
+                call    gd_field_in
+                ld      a, (guardprog)
+                ld      (hl), a
+                ld      a, SKELLAND
+                ld      de, GDSEQH
+                call    gd_field_in
+                ld      (hl), 0         ; alive: ADDGUARD starts him afresh
+                jp      gd_gone
+
+                endif
+
+                if      LVNUM < 3 or LVNUM = 7 or LVNUM = 9 or LVNUM = 10 or LVNUM = 11
 post:           ret
                 endif
 

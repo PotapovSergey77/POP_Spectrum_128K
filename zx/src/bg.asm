@@ -385,6 +385,7 @@ bglay:          ld      (imgnum), a
                 ld      (bgshift), a
                 ld      a, c
                 ld      (bgop), a
+                call    rqchk
                 jp      bgdraw
 
 ; ---------------------------------------------------------------- sections
@@ -2024,7 +2025,7 @@ ce2:            ld      hl, (charx)
 
 edgel           equ     SYSVARS + 47
 edger           equ     SYSVARS + 49
-links:          ds      4
+                                        ; links: under the loader, see LOWTOP
 
 ; ---------------------------------------------------------------- one block
 ;
@@ -2075,6 +2076,7 @@ rb_step:        push    af
                 pop     af
                 call    rbband
                 push    af
+                call    rqchk
                 call    rbwipe
                 call    setblock
                 call    draw_c
@@ -2085,6 +2087,7 @@ rb_step:        push    af
                 call    draw_md
                 call    draw_a
                 call    draw_front
+                call    rqchk
                 call    rbband0
                 call    rb_pack
                 ld      a, (rbdoor)     ; the door's top: those rows are the
@@ -4057,8 +4060,9 @@ rqf1:           or      a               ; nothing ahead of it but those that
 ; frame leaves over, and a frame or two later it is taken and the queue goes
 ; on where it was; what the gate is doing moves on meanwhile regardless.
 
-rq_run:         xor     a
-                ld      (rqdid), a
+rq_run:         ld      (rqsp), sp      ; for giving a step up: see rqchk
+                xor     a
+                ld      (rqran), a
 rqloop:         ld      a, (rqn)
                 or      a
                 ret     z
@@ -4089,6 +4093,12 @@ rqgo:           call    rqtime
                 rrca
                 and     3
                 ld      c, a
+                ld      a, (rqhung)     ; given up on often enough, it runs
+                cp      RQHUNG          ; to its end whatever the clock says;
+                ld      a, (rqcp + 1)   ; otherwise it may be given up at the
+                jr      c, rqab1        ; end of the slot -- even one that
+                xor     a               ; goes first, which then goes again
+rqab1:          ld      (rqabt), a      ; at the head of the line
                 ld      a, (rqflags)
                 bit     1, a
                 ld      a, c
@@ -4125,6 +4135,7 @@ rqfrz1:         ld      a, b
                 ld      (rqfrzc), a
                 ld      a, c
                 call    rb_step         ; carry: another band to come
+                call    rqdone1
                 jr      c, rqmore
 
 ; And only the whole pass goes to the screen, when its last band is in: one
@@ -4159,6 +4170,7 @@ rqmore:         ld      hl, rqq + 3     ; on to its next step
                 ld      (hl), a
                 jp      rqloop
 rqmaskgo:       call    mb_step
+                call    rqdone1
                 jr      c, rqmore
 rqlast:         ld      hl, rqq + 3
                 bit     6, (hl)         ; moved again meanwhile: from the top
@@ -4216,32 +4228,85 @@ rqdone:         ld      a, (rqn)        ; off the head
                 ldir
                 jp      rqloop
 
-; Carry: a step may begin.  The first of a frame goes whatever the clock
-; says: on the machine a frame's own work often ends in its third period, and
-; holding the queue back then drew nothing at all -- floors did not wiggle, a
-; flask taken stayed, gates did not rise.  After that the clock counts whole
-; periods and a step can be most of one -- the exit door's bands run to
-; seventy thousand cycles -- so: any more while the frame is in its first
-; period, one more begun in its second, and none in its third.
+; Carry: a step may begin -- any while the frame is still in its slot.  The
+; clock counts only whole periods, and a step can be more than one -- a band
+; of a block is seventy thousand cycles and more -- so one begun late used to
+; run past the slot's end and make the frame a period late, which with a
+; gate going up was every frame.  Now a step that is still under way when the
+; slot runs out is given up (rqchk) and the next frame begins at once, the
+; beam still in the border; the band is drawn again, from its start, in a
+; later frame.  Given up RQHUNG times running, the next one goes to its end
+; whatever the clock says, so that a frame that never has the time left does
+; not starve the queue -- floors that do not wiggle, gates that do not rise;
+; and when frames run past the slot on their own, one every RQSTARVE.
 
-rqtime:         ld      hl, rqdid
-                ld      a, (hl)
-                or      a
-                jr      z, rqtyes       ; the first
-                ld      a, (FRAMES)
-                ld      de, frstart
-                ex      de, hl
+RQHUNG          equ     2
+RQSTARVE        equ     5
+
+rqtime:         ld      a, (FRAMES)
+                ld      hl, frstart
                 sub     (hl)
-                ex      de, hl
-                jr      z, rqtyes       ; still the first period
-rqcp:           cp      FRAME_WAIT - 1
-                ret     nc              ; the last: nothing more
-                bit     1, (hl)         ; the middle one: a single step
-                ret     nz
-                set     1, (hl)
-rqtyes:         set     0, (hl)
-                scf
+rqcp:           cp      FRAME_WAIT      ; patched: the slot
+                ret     c
+                ld      a, (rqran)      ; past it by the tail of a step that
+                or      a               ; could have been given up, a repack
+                jr      nz, rqgoon      ; at most: on at once, as if it was
+                ld      hl, rqhung      ; past it already: only one that has
+                inc     (hl)            ; waited RQSTARVE frames, to its end
+                ld      a, RQSTARVE
+                cp      (hl)
                 ret
+
+; A step done: none given up since.  Flags kept.
+
+rqdone1:        push    af
+                ld      a, (rqabt)
+                ld      (rqran), a
+                xor     a
+                ld      (rqabt), a
+                ld      (rqhung), a
+                pop     af
+                ret
+
+; A queue step past the end of its slot is given up: between pieces, and
+; before and after the canvas's round trip, which is all a step is.  The
+; room is not touched until the band is repacked, nor a mask before its
+; rows go back, so nothing is lost but the time -- which was the frame's
+; spare and is spent.  The next frame goes straight in, at most a piece
+; after the interrupt.  Whatever a pass leaves set while it lays a piece is
+; put back: the mask mode, the front list's noting, the door's top slat, the
+; band.  A, B and HL are not kept.
+
+rqchk:          ld      a, (rqabt)      ; the slot, or nought: not a step, or
+                or      a               ; one that may not be given up
+                ret     z
+                ld      b, a
+                ld      a, (FRAMES)
+                ld      hl, frstart
+                sub     (hl)
+                cp      b
+                ret     c
+                ld      sp, (rqsp)
+                pop     hl              ; not back to the main loop's
+                xor     a               ; vw_fill: the frame is due now
+                ld      (rqabt), a
+                ld      (bgmask), a
+                ld      (recfront), a
+                ld      (dxonly), a
+                call    rbband0
+                ld      hl, rqhung
+                inc     (hl)
+rqgoon:         ld      sp, (rqsp)
+                pop     hl
+                ld      a, 1            ; the next frame at once, past the
+                ld      (nohalt), a     ; halt -- and with the art bank in,
+                call    page_art        ; as the loop has it there
+                jp      main
+
+rqhung:         db      0               ; steps given up in a row
+rqabt:          db      0               ; the slot, while a step may be given up
+rqsp:           dw      0               ; the stack as rq_run found it
+rqran:          db      0               ; a step that could be given up, done
 
 ; A block that has gone back into the room still has to reach the working
 ; copy, and at the end of a frame he has just been drawn into it: the room
@@ -4337,8 +4402,6 @@ rbfrz           equ     0x5C17          ; rb_setup: 1 take, 2 keep the state
 rqfrzv          equ     0x5C18          ; the state taken
 rqfrzr:         db      0               ; for this block
 rqfrzc:         db      0
-rqtmp:          ds      4               ; an entry, on its way up the line
-rqdid:          db      0               ; a step done this frame
 rqsn:           db      0               ; blocks waiting to be shown
 
 ; The exit's stairs and door are all in the block to its right.
@@ -4412,7 +4475,10 @@ rgdraw:         call    rq_block
                 ret     z
                 dec     a
                 ld      (blockrow), a
-                jp      rq_block
+                ld      a, RQBAND       ; and only its bottom band: all the
+                ld      (redh), a       ; bars put there is drawmc's top, ten
+                jp      rq_block        ; rows up from its floor line -- the
+                                        ; whole block was four bands a step
 
 trrowcol:       ld      a, (trloc)      ; thirty blocks, ten to the row
                 ld      c, 0

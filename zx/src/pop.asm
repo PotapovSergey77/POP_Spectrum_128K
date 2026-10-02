@@ -83,7 +83,7 @@ ovstart         equ     bgovl + 3       ; the top of a frame, from c1anim
 ovpost          equ     bgovl + 6       ; after the frame's moves, c1post:
                                         ; the level's own code (lvcode.asm)
 ovset           equ     bgovl + 9       ; the set into the program: newroom
-ovflame         equ     bgovl + 12      ; a torch's frame into flbuf
+ovflame         equ     bgovl + 12      ; (a ret: flame_one has the frames)
 ovattr          equ     bgovl + 15      ; the palace's colours, into imgbuf
 ovshad          equ     bgovl + 18      ; the shadow's keys, from autoctrl
 
@@ -109,7 +109,7 @@ SYSVARLEN       equ     59
 
 SCREEN          equ     16384
 FRAMES          equ     23672           ; the ROM's own count of interrupts,
-                                        ; kept by the handler at 0x38
+                                        ; kept by isr (fight.asm) now
 ; 50Hz interrupt periods per game frame.  The Apple ran the kid at about ten
 ; a second; three periods is sixteen and two thirds, which is as near as whole
 ; periods come to the thirty per cent more that plays comfortably.
@@ -229,7 +229,7 @@ mainrun:        ld      a, (FRAMES)
 ; Two things are too big to keep in the fixed half of the map: the room with
 ; its foreground mask, and the prince's pixels.  Each lives in its own bank at
 ; 0xC000 and is paged in for the part of the frame that wants it.  Bit 4 keeps
-; the 48K ROM, which is what the interrupt handler at 0x38 is.
+; the 48K ROM, whose run of 0xFF the interrupt's vector is read from.
 
 ; The room is 280 pixels wide and the screen is 256, so the room is carried
 ; whole -- 35 bytes to a scanline, laid out plainly, one byte the camera can
@@ -731,8 +731,8 @@ page_frame:     ld      a, (curbank)
                 ld      a, (hl)
 pageset:        ld      (nowbank), a    ; so a lookup that has to borrow
 pgbits:         or      0x10            ; another bank can put this one back
-                                        ; bit 4 keeps the 48K ROM, which is
-                push    bc              ; what the handler at 0x38 is.  By now
+                                        ; bit 4 keeps the 48K ROM, where the
+                push    bc              ; interrupt's vector is.  By now
                 ld      bc, PAGEPORT    ; BASIC is gone and BANKM with it
                 out     (c), a
                 pop     bc
@@ -953,9 +953,9 @@ input_step:     ld      a, (charsword)
                 add     a, FRAME_WAIT
                 ld      (mwcp + 1), a
                 ld      (vwcp + 1), a
+                ld      (rqcp + 1), a
                 dec     a
                 ld      (vwld + 1), a
-                ld      (rqcp + 1), a
                 ld      a, (charlife)   ; PLAYERCTRL: no strength left, no
                 or      a               ; life -- once
                 jp      p, isalive
@@ -2695,14 +2695,13 @@ ffnext:         inc     a
                 xor     a
                 ret
 
-; A = the room byte a flame starts at.  Out: A = how many of its three bytes
-; the view shows.  A torch in column eight has its flame at room bytes 32 to
+; A = the screen column a flame starts at.  Out: A = how many of its three
+; bytes the view shows.  A torch in column eight has its flame at room bytes 32 to
 ; 34, which with the view at the left of the room is past the end of a
 ; screen row -- and the Spectrum's next byte along is the start of a row
 ; eight lines further down, so the flame came out again at the left edge.
 
-flvis:          call    subcam          ; the screen column
-                cp      32
+flvis:          cp      32
                 jr      nc, flvnone
                 neg
                 add     a, 32           ; what is left of the row
@@ -2745,13 +2744,14 @@ flame_one:      ld      hl, (flrec)
                 inc     hl
                 ld      (flrec), hl
                 ld      a, d            ; the offset says which shift it is,
-                or      e               ; and so which mask goes with it
-                ld      bc, flamemask
+                or      e               ; and so which mask goes with it, and
+                ld      bc, flamemask   ; how a row of it is fetched
+                ld      hl, fleven
                 jr      z, flmask1
                 ld      bc, flamemask + 3
+                ld      hl, flodd
 flmask1:        ld      (flmbase), bc
-                ld      hl, flames      ; the frames are the same for both:
-                ld      (flsrc), hl     ; ovflame moves them for the mask
+                ld      (flcall + 1), hl
 
                 ld      hl, (flst)
                 ld      a, (hl)
@@ -2767,7 +2767,7 @@ flmask1:        ld      (flmbase), bc
                 ld      d, 0
                 add     hl, de
                 ld      b, (hl)
-                ld      hl, (flsrc)
+                ld      hl, flames      ; the frames are the same for both
                 ld      a, b
                 or      a
                 jr      z, flgot
@@ -2776,38 +2776,62 @@ flmask1:        ld      (flmbase), bc
                 ld      e, a
 flmul:          add     hl, de
                 djnz    flmul
-flgot:          ld      de, ovflame     ; the flames are in the background
-                call    bgcall          ; bank and the room they go over is
-                                        ; in the art bank, so the one frame
-                                        ; wanted is brought across first
-                ld      a, (flrect)     ; how much of it is in view
+flgot:          ld      a, (flrect)     ; its rectangle on the screen from
+                call    subcam          ; here on, as much of it as is in
+                ld      (flrect), a     ; view -- gs_flame has it too
                 call    flvis
                 or      a
                 ret     z
-
-; The flame's three bytes of mask are the same on every one of its rows, so
-; they go into the three ANDs below; its pixels are walked in the alternate
-; HL, what the view cut off each row skipped with the alternate BC, and the
-; room and the working copy are worked out at its top row and walked from
-; there in HL and DE.  With all four kept in memory and every row's
-; addresses worked out afresh, two torches were a fifth of a frame; with the
-; two walked in memory and nextline called, still a tenth.
-
-                ld      (flwid + 1), a  ; the bytes the view shows
+                ld      (flrect + 2), a
                 ld      b, a
-                cp      3               ; the room goes a byte on after each
-                jr      c, flst1        ; but the third: 35 less that, a row
-                dec     a
-flst1:          neg
-                add     a, ROOM_BYTES
-                ld      (flstep + 1), a
-                ld      a, (flrect + 2)
-                sub     b               ; and those it cut off, past each row
-                exx
-                ld      c, a
-                ld      b, 0
-                ld      hl, flbuf
-                exx
+                ld      a, (fullshow)   ; the view turned round this frame,
+                ld      c, a            ; or the screen to be laid whole: the
+                ld      a, (flipnow)    ; working copy is not the room under
+                or      c               ; the flame, and it is put back first
+                jr      z, flfresh
+                push    hl
+                push    bc
+                ld      hl, flrect
+                call    eraseset
+                pop     bc
+                pop     hl
+flfresh:
+; The flame goes down straight out of the background bank, which has each
+; frame once, as it stands over an even column, two bytes a row; over an odd
+; one the row is moved four pixels on as it is fetched.  And it goes over
+; the working copy, not the room: the mask is the same on every row of a
+; flame and covers all a flame of either shift can reach, and outside it
+; the working copy is the room by now -- both characters are rubbed out
+; before the torches burn, and drawn after -- but for the frame the view
+; turns round, when it is still the last view's, and is put back from the
+; room first (above).  So nothing is copied across and the art bank is not
+; wanted: the two copies, the frame into a buffer and its odd rows turned in
+; the buffer, were half of a torch.
+;
+; A torch near the right hand edge has bytes past the end of the screen's
+; row; their stores and the step over them are patched out.
+
+                ld      a, b            ; the bytes shown, 1 to 3
+                cp      2
+                sbc     a, a
+                cpl
+                ld      c, a            ; 0xff with two or more
+                and     0x77            ; ld (hl), a
+                ld      (fls1), a
+                ld      a, c
+                and     0x2c            ; inc l
+                ld      (fli1), a
+                ld      a, c
+                and     1
+                inc     a
+                ld      (flk + 1), a    ; the steps along a row taken
+                ld      a, b
+                cp      3
+                sbc     a, a
+                cpl
+                and     0x77
+                ld      (fls2), a
+                push    hl              ; the frame
                 ld      hl, (flmbase)
                 ld      a, (hl)         ; what the room keeps: not the mask
                 cpl
@@ -2820,77 +2844,102 @@ flst1:          neg
                 ld      a, (hl)
                 cpl
                 ld      (flm2 + 1), a
-                ld      a, (flrect)     ; the working copy, the camera saying
-                call    subcam          ; where that lands
+                ld      a, (flrect)     ; the working copy
                 ld      e, a
                 ld      a, (flrect + 1)
                 call    scraddr
                 ld      de, work - SCREEN
                 add     hl, de
-                push    hl
-                ld      a, (flrect + 1) ; and the room at its top row
-                call    roomrow
-                ld      a, (flrect)
-                ld      e, a
-                ld      d, 0
-                add     hl, de
-                pop     de
                 ld      a, (flrect + 3)
-                ld      b, a
-flrow:          push    de
-flwid:          ld      c, 0            ; patched: the bytes shown
-flm0:           ld      a, 0xff         ; patched: what the room keeps
-                and     (hl)
                 exx
-                or      (hl)            ; and the flame's own pixels
-                inc     hl
+                ld      b, a            ; the rows, in the alternate B
                 exx
-                ld      (de), a
-                inc     hl
-                inc     e               ; a screen row never crosses a page
-                dec     c
-                jr      z, flrend
-flm1:           ld      a, 0xff
-                and     (hl)
-                exx
-                or      (hl)
-                inc     hl
-                exx
-                ld      (de), a
-                inc     hl
-                inc     e
-                dec     c
-                jr      z, flrend
-flm2:           ld      a, 0xff
-                and     (hl)
-                exx
-                or      (hl)
-                inc     hl
-                exx
-                ld      (de), a
-flrend:         exx                     ; past what the view cut off
-                add     hl, bc
-                exx
-                ld      a, l            ; the room a row down
-flstep:         add     a, 0            ; patched
+                call    page_bg
+                pop     de
+
+; A row: its three bytes from flfetch -- C, B and the alternate A -- each
+; laid on the working copy through the mask.
+
+flrow:
+flcall:         call    fleven          ; patched: or flodd
+                ld      a, (hl)
+flm0:           and     0               ; patched: what the room keeps
+                or      c
+                ld      (hl), a
+                inc     l               ; a screen row never crosses a page
+                ld      a, (hl)
+flm1:           and     0
+                or      b
+fls1:           ld      (hl), a         ; patched: nop when not on screen
+fli1:           inc     l               ; and so is this
+                ex      af, af'
+                ld      c, a
+                ld      a, (hl)
+flm2:           and     0
+                or      c
+fls2:           ld      (hl), a         ; patched
+                ld      a, l            ; back to the row's start
+flk:            sub     0               ; patched: the steps taken
                 ld      l, a
-                jr      nc, fl1
-                inc     h
-fl1:            pop     de              ; and the working copy a line down,
-                inc     d               ; as nextline does it
-                ld      a, d
+                inc     h               ; and a line down, as nextline does
+                ld      a, h
                 and     7
                 jr      z, flnl
-fldn:           djnz    flrow
-                ret
-flnl:           ld      a, e
+fldn:           exx
+                dec     b
+                exx
+                jr      nz, flrow
+                jp      page_art
+flnl:           ld      a, l
                 add     a, 32
-                ld      e, a
+                ld      l, a
                 jr      c, fldn
-                ld      a, d
+                ld      a, h
                 sub     8
-                ld      d, a
+                ld      h, a
                 jr      fldn
+
+; A row of the frame at DE, on to the next.  Out: C, B and the alternate A,
+; the three bytes it lays.
+
+fleven:         ld      a, (de)
+                inc     de
+                ld      c, a
+                ld      a, (de)
+                inc     de
+                ld      b, a
+                xor     a
+                ex      af, af'
+                ret
+
+; Four pixels on: the first byte's high half and the second's swap ends,
+; and each lands half in one byte and half in the next.
+
+flodd:          ld      a, (de)
+                inc     de
+                rrca
+                rrca
+                rrca
+                rrca
+                ld      c, a            ; the first, its halves swapped
+                ld      a, (de)
+                inc     de
+                rrca
+                rrca
+                rrca
+                rrca
+                ld      b, a            ; and the second
+                and     0xf0
+                ex      af, af'         ; the third byte: its low half's
+                ld      a, b
+                xor     c
+                and     0x0f
+                xor     c
+                ld      b, a            ; the second: the first's low half
+                ld      a, c            ; and its own high half
+                and     0x0f
+                ld      c, a            ; the first: its own high half
+                ret
 
 
 ; Colour, which the Spectrum keeps in cells of eight pixels by eight.  The
@@ -3355,12 +3404,11 @@ sfnext:         ld      hl, (flrec)
                 ld      de, 3
                 add     hl, de
                 ld      (flrec), hl
-                ld      a, (shcol)      ; only what is in view: showgo does
-                call    flvis           ; nothing with a width of none
-                ld      (shw), a
                 ld      a, (shcol)
                 call    subcam
                 ld      (shcol), a
+                call    flvis           ; only what is in view: showgo does
+                ld      (shw), a        ; nothing with a width of none
                 call    showgo
                 ld      hl, flleft
                 dec     (hl)
@@ -4431,7 +4479,7 @@ dpsolid:        ld      (dfodd + 1), a
                 ld      a, (newtop)
                 ld      c, a            ; C = the row in hand
                 ld      hl, (curdat)    ; HL = its pairs
-                ld      a, (dfstep + 1)
+                ld      a, (curw)
                 ld      e, a
                 ld      d, 0
 
@@ -4492,14 +4540,16 @@ dpfit:          push    hl
 drawrow:        ld      a, h            ; the line's parity
 dfodd:          and     0               ; patched: 1 for the shadow
                 jr      nz, drskip
-                push    de
-                push    hl
 dfcall:         call    0               ; patched: the row's routine
-                pop     hl
-                pop     de
-drskip:         ld      a, e
-dfstep:         add     a, 0            ; patched: a row of pairs
-                ld      e, a
+                ld      a, l            ; which leaves the working copy
+drsubn:         sub     0               ; that many bytes on -- patched --
+                ld      l, a            ; and the pairs some way along the
+                ld      a, e            ; row, which the rest of it makes up:
+dfstep:         add     a, 0            ; patched too.  Saving the two and
+                jr      dr0             ; getting them back was a sixth of
+drskip:         ld      a, e            ; what a row cost
+drstride:       add     a, 0            ; patched: a row of pairs
+dr0:            ld      e, a
                 jr      nc, dr1
                 inc     d
 dr1:            inc     h               ; a line down, as nextline does it
@@ -4542,7 +4592,7 @@ dfsetup:        ld      a, (neww)
                 ld      c, a
                 ld      a, (curw)
                 ld      b, a
-                ld      (dfstep + 1), a
+                ld      (drstride + 1), a
                 ld      d, 0
                 ld      a, (spskip)
                 ld      e, a
@@ -4561,6 +4611,20 @@ dfsome:         ld      (dfl0n + 1), a
                 ld      (dfm0n + 1), a
                 ld      (dfln + 1), a
                 ld      (dfmn + 1), a
+                ld      (drsubn + 1), a
+                ld      h, a            ; and the pairs a row reads: as many,
+                ld      a, (spskip)     ; and one more with a byte cut off,
+                or      a               ; forward or, facing right, back --
+                jr      z, dfk1         ; so the next row is a row of pairs
+                inc     h               ; less that, or more, along
+dfk1:           ld      a, (facing)
+                or      a
+                ld      a, b
+                jr      nz, dfk2
+                sub     h
+                jr      dfk3
+dfk2:           add     a, h
+dfk3:           ld      (dfstep + 1), a
                 ld      a, d            ; the spill: nop to lay it, ret not to
                 dec     a
                 and     0xc9
@@ -4786,6 +4850,11 @@ hide_floor:     call    quickfloor
 cover_rows:     ld      a, (neww)       ; likewise: djnz would go round
                 or      a               ; 256 times for none of him
                 ret     z
+                ld      (crwid + 1), a  ; the bytes of a row, into the loop,
+                ld      (crsub + 1), a  ; and what is left of the room's row
+                neg                     ; once they are done
+                add     a, ROOM_BYTES
+                ld      (crstep + 1), a
                 ld      a, (newcol)     ; first: mastercol has B, which is
                 call    mastercol       ; about to be the rows
                 ld      (masterc), a
@@ -4796,74 +4865,92 @@ cover_rows:     ld      a, (neww)       ; likewise: djnz would go round
                 ld      a, (newtop)
                 call    cliprows        ; C = his first row on the screen
                 ret     c
-                ld      a, c
-                ld      (rowy), a
 
-; The room and the working copy are worked out at his first row and walked
-; from there, a row at a time, and so is the mask, from one row of it to the
-; next: a front piece is tall, and its rows follow on.  Worked out afresh for
-; every row they cost more than laying the mask down did.
+; Everything a row wants is in the registers and walked from row to row: the
+; band in the alternate DE, the working copy in the alternate HL, the rows
+; in the alternate B and in C the row of the mask the next line would have
+; if it follows on; the room in DE and the mask in HL.  A front piece is
+; tall and its rows of the mask follow on, and so do a floor band's, across
+; the lines between bands too, since the mask carries only the rows marked:
+; the mask is worked out only at the first row of a run.  Kept in memory and
+; walked there, the rows cost more than laying the mask down did.
 
-                ld      a, c
-                call    mul35
-                ld      de, room
-                call    covercol
-                ld      (covr), hl
                 ld      a, (newcol)
                 ld      e, a
                 ld      a, c
                 call    scraddr
                 ld      de, work - SCREEN
                 add     hl, de
-                ld      (covw), hl
-                ld      a, 0xfe         ; no row of the mask in hand yet
-                ld      (covi), a
-
-coverrow:       push    bc
-                ld      a, (rowy)
-                ld      l, a
+                push    hl              ; the working copy
+                push    bc
+                ld      a, c
+                call    mul35
+                ld      de, room
+                call    covercol
+                pop     bc
+                push    hl              ; the room
+                ld      l, c
                 ld      h, 0
                 ld      de, (coverb)
-                add     hl, de
-                ld      a, (hl)         ; the mask's row for this line, or -1
-                cp      0xff
-                jr      z, covernxt     ; the mask has nothing on this one
-                ld      c, a
-                ld      a, (covi)       ; the one after the last: a step on
-                inc     a
-                cp      c
-                ld      a, c
-                ld      (covi), a
-                ld      hl, (covm)
-                ld      de, ROOM_BYTES
-                add     hl, de
-                jr      z, covmask
-                call    mul35           ; or worked out, the first of a run
-                ld      de, (coverm)
-                call    covercol
-covmask:        ld      (covm), hl
-                ld      hl, (covw)      ; the working copy, into the
-                push    hl              ; alternate DE
+                add     hl, de          ; and the band, at his first row
+                pop     de
+                ld      a, b
+                push    hl
                 exx
                 pop     de
-                exx
-                ld      hl, (covm)      ; the mask
-                ld      de, (covr)      ; the room
-                ld      a, (neww)
+                pop     hl
                 ld      b, a
+                ld      c, 0xff         ; no row of the mask in hand yet
+coverrow:       ld      a, (de)         ; the mask's row for this line, or -1
+                inc     de
+                cp      0xff
+                jr      z, covskip      ; the mask has nothing on this one
+                cp      c
+                jr      nz, covfind     ; not the one after the last
+                inc     c
+                exx
+crwid:          ld      b, 0            ; patched: the bytes of a row
                 call    cover_apply
-covernxt:       ld      hl, (covr)      ; a row down, in the room and in the
-                ld      de, ROOM_BYTES  ; working copy
-                add     hl, de
-                ld      (covr), hl
-                ld      hl, (covw)
-                call    nextline
-                ld      (covw), hl
-                ld      hl, rowy
-                inc     (hl)
-                pop     bc
-                djnz    coverrow
+crstep:         ld      bc, 0           ; patched: 35 less those
+                add     hl, bc
+                ex      de, hl
+                add     hl, bc
+                ex      de, hl
+                exx
+                ld      a, l            ; the working copy back to the row's
+crsub:          sub     0               ; start -- patched: the bytes
+                ld      l, a
+covdown:        inc     h               ; and a line down, as nextline does
+                ld      a, h
+                and     7
+                jr      z, covnl
+covdj:          djnz    coverrow
+                exx
                 ret
+covnl:          ld      a, l
+                add     a, 32
+                ld      l, a
+                jr      c, covdj
+                ld      a, h
+                sub     8
+                ld      h, a
+                jr      covdj
+covskip:        exx                     ; the room a row on, and the mask
+                ex      de, hl          ; left where it is: the next row of
+                ld      bc, ROOM_BYTES  ; it is the next line marked
+                add     hl, bc
+                ex      de, hl
+                exx
+                jr      covdown
+covfind:        ld      c, a            ; the first of a run: worked out
+                inc     c
+                exx
+                push    de
+                call    mul35
+                ld      de, (coverm)
+                call    covercol
+                pop     de
+                jr      crwid
 
 covercol:       add     hl, de          ; HL = a row, DE its base: the byte
                 ld      a, (masterc)    ; under his left edge
@@ -4872,31 +4959,30 @@ covercol:       add     hl, de          ; HL = a row, DE its base: the byte
                 add     hl, de
                 ret
 
-; In: HL = mask, DE = room, the alternate DE = working copy, B = bytes.
+; In: HL = mask, DE = room, the alternate HL = working copy, B = bytes.
 ; Where the mask has a bit the room's goes in, and elsewhere his stays:
 ; work ^ ((work ^ room) & mask).
 
 cover_apply:    ld      a, (hl)
                 or      a
-                jr      z, covernext
+                jr      z, covzero
+                ld      c, a
                 ld      a, (de)
                 exx
-                ex      de, hl
                 xor     (hl)
                 exx
-                and     (hl)
+                and     c
                 exx
                 xor     (hl)
                 ld      (hl), a
-                ex      de, hl
+covon:          inc     l               ; a screen row never crosses a page
                 exx
-covernext:      inc     hl
+                inc     hl
                 inc     de
-                exx
-                inc     e               ; a screen row never crosses a page
-                exx
                 djnz    cover_apply
                 ret
+covzero:        exx
+                jr      covon
 
 ; ---------------------------------------------------------------- erase
 ;
@@ -5004,49 +5090,6 @@ gdpics1:        or      a
                 call    hide_floor
                 jp      hide_behind
 
-gd_still:       ld      hl, gdskip
-                ld      (hl), 0
-                ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      hl, charx + OP  ; as when last drawn -- and this frame's
-                ld      de, gdlast      ; kept, whatever the answer
-                ld      bc, 5 * 256
-                call    gs_cmp
-                ld      hl, charcu + OP ; and his rectangle
-                ld      b, 5
-                call    gs_cmp
-                ld      a, c
-                ld      hl, gddirty
-                or      (hl)
-                ld      (hl), b
-                ld      hl, mbold + 2   ; nothing falling, nor anything that
-                or      (hl)            ; fell last frame to rub out
-                ld      hl, mbold + 6
-                or      (hl)
-                ld      hl, nummob
-                or      (hl)
-                ld      de, boxcol      ; and not the prince's box: a torch
-                jr      nz, gsmove      ; over him gs_flame sees to
-                call    gs_meet
-                jr      c, gsjoin
-gsstill:        ld      hl, gdskip
-                inc     (hl)
-gsempty:        xor     a
-                ld      (boxw + OP), a
-                ret
-
-; Drawn again, and the prince's box meets him: the two boxes are one, rubbed
-; out and shown once -- in a fight they are much the same place, and the
-; rows the two have in common went to the screen twice.
-
-gsmove:         call    gs_meet
-                ret     nc
-gsjoin:         ld      hl, boxcol + OP
-                ld      de, boxcol
-                call    union4
-                jr      gsempty
-
 ; A torch just drawn over a guard left as he is: he goes down again on top
 ; of it, as he would have -- only the torch's rectangle has changed, and that
 ; is shown with the torch.
@@ -5054,12 +5097,7 @@ gsjoin:         ld      hl, boxcol + OP
 gs_flame:       ld      a, (gdskip)
                 or      a
                 ret     z
-                ld      a, (cam)        ; its rectangle on the screen
-                ld      c, a
-                ld      a, (flrect)
-                sub     c
-                ld      (flrect), a
-                ld      de, flrect
+                ld      de, flrect      ; on the screen: flame_one put it
                 call    gs_meet
                 ret     nc
                 xor     a
@@ -5130,6 +5168,10 @@ hbseek:         ld      a, (newtop)
 hbs1:           ld      a, b
                 or      a
                 ret     z
+                ld      a, (hl)         ; its byte column first: a piece
+hbxlo:          sub     0               ; wholly to one side -- patched:
+hbxn:           cp      0               ; see hbfirst
+                jr      nc, hbs2
                 inc     hl
                 ld      a, (hl)         ; its bottom row
                 sub     d               ; less his top, round
@@ -5153,6 +5195,7 @@ hbs2:           ld      a, 5
                 inc     h
 hbs3:           dec     b
                 jr      hbs1
+
 
 ; A = a width of 1 to 32.  Out: HL = the place in copy32 that copies that
 ; many, A still the width.
@@ -5683,6 +5726,39 @@ copy32:         ldi
                 ldi
                 ret
 
+; DRAWOPPMETER: what his opponent's meter shows -- nothing at all for the
+; skeleton, which has no strength to lose.
+
+oppshown:       ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      a, (charid + OP)
+                cp      4               ; the skeleton's is not shown, nor
+                jr      z, oppnone      ; the shadow's but on level twelve
+                dec     a
+oppjr:          jr      z, oppnone      ; lvcode.asm makes it jr +0
+                ld      a, (oppstr)
+                ret
+oppnone:        xor     a
+                ret
+
+; show_meters' places for a meter: A = all of them, C = how many are lit.
+; Out: B = how many to draw -- all, or with only the flash to show just the
+; first and only if it is the one that flashes -- and NZ if any.
+
+smcount:        ld      b, a
+smone:          ld      a, 0            ; patched: 1 for the flash alone
+                dec     a
+                ret     nz
+                ld      b, 1
+                ld      a, c
+                cp      1
+                jr      z, smc1
+                xor     a
+                ret
+smc1:           or      a
+                ret
+
 ; ---------------------------------------------------------------- data
 
 
@@ -5808,16 +5884,12 @@ vwn             equ     0x5C52          ; and how many
 flipnow:        db      0               ; show it at the top of the next frame
 nohalt:         db      0               ; the fill ran up to the interrupt
 vwwait          equ     0x5C53          ; a step is due: the queue waits
-vwstop:         db      0               ; the one it runs up to
-vwmin:          db      0               ; rows still owed it this frame
+vwstop          equ     0x5C5E          ; the one it runs up to
+vwmin           equ     0x5C5F          ; rows still owed it this frame
 vwhung:         db      0               ; frames since it last had a run
 atbase          equ     0x5C54          ; the colours set_attrs writes
 masterc         equ     0x5C56
 coverm          equ     0x5C57
-covm            equ     0x5C59          ; cover_rows' three: the mask's row,
-covr            equ     0x5C5B          ; the room's and the working copy's,
-covw            equ     0x5C5D          ; and which row of the mask that is
-covi            equ     0x5C5F
 coverb          equ     SYSVARS + 20
 roomp           equ     SYSVARS + 22
 rowptr          equ     SYSVARS + 24
@@ -5826,15 +5898,13 @@ fstate          equ     SYSVARS + 26
 flleft          equ     0x5C60
 flrec           equ     0x5C61
 flst            equ     0x5C63
-flsrc           equ     0x5C65
 flstride        equ     0x5C67
 flmbase         equ     0x5C68
-flrect:         ds      4
-linecol:        db      0
-ercol:          db      0
-ertop:          db      0
-erw:            db      0
-erh:            db      0
+linecol         equ     0x5C5D
+ercol           equ     0x5C59          ; eraseset's rectangle, in order
+ertop           equ     0x5C5A
+erw             equ     0x5C5B
+erh             equ     0x5C5C
 shcol:          db      0
 shtop:          db      0
 shw:            db      0
@@ -5842,39 +5912,6 @@ shh:            db      0
 
 dfsrc:          dw      0               ; bookkeeping: see dfsetup
 
-
-; UPDATEGUARD for the room below, which ADDGUARD will raise him in again:
-; a fresh start, and he is gone from this one.
-
-skel_down:      ld      a, SND_SPLAT
-                call    addsound
-                ld      a, (nowbank)
-                push    af
-                call    page_bg
-                ld      a, SKELLAND
-                ld      de, 0
-                call    gd_field_in
-                ld      (hl), SKELLANDBLK
-                ld      a, SKELLAND
-                ld      de, GDX
-                call    gd_field_in
-                ld      (hl), SKELLANDX
-                ld      a, SKELLAND
-                ld      de, GDFACE
-                call    gd_field_in
-                ld      (hl), 0         ; facing right
-                ld      a, SKELLAND
-                ld      de, GDPROG
-                call    gd_field_in
-                ld      a, (guardprog)
-                ld      (hl), a
-                ld      a, SKELLAND
-                ld      de, GDSEQH
-                call    gd_field_in
-                ld      (hl), 0         ; alive: ADDGUARD starts him afresh
-                pop     af
-                call    pageset
-                jp      gd_gone
 
 ; The guard's program, AUTO.S: his column of its tables, which c1gprob copies
 ; out of CODE1 whenever he is given one -- the tables are only ever read for
@@ -5886,15 +5923,12 @@ GP_BLOCK        equ     2
 GP_IMPBLOCK     equ     3
 GP_ADV          equ     4
 GP_REFRACT      equ     5
-gprob:          ds      6
 
 cmpspace:       incbin  "cmpspace.bin"
 cmpbarr:        incbin  "cmpbarr.bin"
 floory:         incbin  "floory.bin"
 blocktop:       incbin  "blocktop.bin"
 floorband:      incbin  "floorband.bin"
-torches:        ds      1 + 4 * 7       ; seven bytes a torch, and no room
-                                        ; of the fifteen has more than four
 flametab:       incbin  "flametab.bin"
 flamemask:      incbin  "flamemask.bin"
                 ds      (($ + 255) / 256 * 256) - $
@@ -6293,14 +6327,96 @@ qdown           equ     SYSVARS + 33    ; the key as it was last frame
 c1anim:         ld      de, ovstart     ; the set's own first: a reflection
                 ld      hl, bgjp        ; out of the way of the frame's moves
                 call    c1far
-                ld      hl, animtrans
-                call    c1far
-                call    bonesrise
+                ld      hl, animtrans   ; (level three's bones rise in its
+                call    c1far           ; own code, from ovstart)
                 ld      a, (charid + OP)        ; CHECKALERT leaves out the
                 dec     a                       ; shadowman but on level 12:
                 ld      hl, checkalert  ; the sequences are in the canvas bank
                 call    nz, c1mod
                 jp      page_canvas
+
+; gd_still, which the comment at gdlast tells of: here in CODE1, where its
+; one caller, kid_still, is.
+
+gd_still:       ld      hl, gdskip
+                ld      (hl), 0
+                ld      a, (gdhere)
+                or      a
+                ret     z
+                ld      hl, charx + OP  ; as when last drawn -- and this frame's
+                ld      de, gdlast      ; kept, whatever the answer
+                ld      bc, 5 * 256
+                call    gs_cmp
+                ld      hl, charcu + OP ; and his rectangle
+                ld      b, 5
+                call    gs_cmp
+                ld      a, c
+                ld      hl, gddirty
+                or      (hl)
+                ld      (hl), b
+                ld      hl, mbold + 2   ; nothing falling, nor anything that
+                or      (hl)            ; fell last frame to rub out
+                ld      hl, mbold + 6
+                or      (hl)
+                ld      hl, nummob
+                or      (hl)
+                ld      de, boxcol      ; and not the prince's box: a torch
+                jr      nz, gsmove      ; over him gs_flame sees to
+                call    gs_meet
+                jr      c, gsjoin
+gsstill:        ld      hl, gdskip
+                inc     (hl)
+gsempty:        xor     a
+                ld      (boxw + OP), a
+                ret
+
+; Drawn again, and the prince's box meets him: the two boxes are one, rubbed
+; out and shown once -- in a fight they are much the same place, and the
+; rows the two have in common went to the screen twice.
+
+gsmove:         call    gs_meet
+                ret     nc
+gsjoin:         ld      hl, boxcol + OP
+                ld      de, boxcol
+                call    union4
+                jr      gsempty
+
+; hide_behind's start: the front list, and the Apple bytes he can meet a
+; piece in.  His room bytes are rb to rb + w, eight pixels each and an
+; Apple byte seven, so his first Apple byte is at least rb + rb/8 and his
+; last at most x + x/8 + 1, x = rb + w; and a piece's body ends at most
+; five Apple bytes past its column (bgexport asserts it).  So a piece meets
+; him only if its column less (first - 5) is no more than (last + 1) less
+; that -- one unsigned comparison, which a column of 255, a byte left of
+; the room, also comes out of right.  In CODE1, by c1call: B kept.  Out:
+; HL = frontlist.
+
+hbfirst:        ld      a, (cam)
+                ld      hl, newcol
+                add     a, (hl)
+                ld      c, a            ; rb
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                add     a, c
+                sub     5
+                ld      (hbxlo + 1), a
+                ld      e, a
+                ld      a, (neww)
+                add     a, c
+                ld      c, a            ; x
+                rrca
+                rrca
+                rrca
+                and     0x1f
+                add     a, c
+                inc     a
+                sub     e
+                inc     a
+                ld      (hbxn + 1), a
+                ld      hl, frontlist
+                ret
 
 ; The prince standing still is the same picture in the same place frame
 ; after frame, and rubbing him out, drawing him, putting the floor and the
@@ -7353,90 +7469,6 @@ slstate:        db      0
 sltrloc:        db      0
 
 
-; ---------------------------------------------------------------- the bones
-;
-; BONESRISE in MISC.S: on level three, with the exit open and nobody else in
-; the room, the skeleton lying in screen one gets up as the kid comes level
-; with it.  The bones are a piece of the background until then; they become
-; floor, that block and the one to its right are redrawn, and what stands up
-; is a guard of the kid's own making -- CharID 4, program two, three points
-; of strength he can never be made to lose.
-
-bonesrise:      ld      a, (curlev)     ; level three
-                cp      2
-                ret     nz
-                ld      a, (gdhere)     ; and nobody in the room yet
-                or      a
-                ret     nz
-                ld      a, (roomnum)
-                cp      SKELSCRN
-                ret     nz
-                ld      a, (exitopen)
-                or      a
-                ret     z
-                ld      hl, (charx)     ; KidBlockX: level with the bones,
-                call    blockcol_of     ; or one short of them
-                cp      SKELTRIG
-                jr      z, brtrig
-                cp      SKELTRIG + 1
-                ret     nz
-
-brtrig:         ld      a, SKELY * 10 + SKELX
-                ld      (trloc), a
-                ld      a, (roomnum)
-                ld      (trscrn), a
-                ld      hl, trobat      ; what lies there
-                call    c1far
-                push    af
-                ld      a, BG_FLOOR     ; floor from now on, and the block
-                ld      hl, trobtype    ; and the one right of it redrawn --
-                call    c1far           ; markred and markwipe, 24 rows deep
-                ld      a, 24
-                ld      (redh), a
-                ld      hl, redplate
-                call    c1far
-                pop     af
-                cp      BG_BONES
-                ret     nz
-
-                call    swapchar        ; he is made in Char, as POP makes
-                ld      a, SKELY        ; him
-                ld      (blocky), a
-                ld      hl, floor_plane
-                call    c1mod
-                ld      (chary), a
-                ld      hl, SKELX * BLOCK_PX + BLOCK_PX ; getblockej + angle
-                ld      (charx), hl                     ; + 7
-                xor     a
-                ld      (facing), a     ; POP's -1, left
-                ld      a, SQ_ARISE
-                ld      hl, bumpseq     ; jumpseq, then animchar
-                call    c1mod
-                ld      a, SKELPROG
-                ld      (guardprog), a
-                call    c1gprob
-                ld      a, 0xff
-                ld      (charlife), a
-                ld      a, 3
-                ld      (oppstr), a
-                xor     a
-                ld      (alertguard), a
-                ld      (refract), a
-                ld      (justblocked), a
-                ld      (yvel), a
-                ld      hl, newcol      ; nothing of him drawn yet, and his
-                ld      b, 13           ; rectangles, and CharXVel
-brclr:          ld      (hl), a
-                inc     hl
-                djnz    brclr
-                ld      a, 2
-                ld      (charsword), a
-                ld      a, 4            ; the skeleton
-                ld      (charid), a
-                ld      a, 1            ; and a guard in the room from here
-                ld      (gdhere), a
-                jp      swapchar
-
 ; ------------------------------------------------------------ careful step
 ;
 ; The rest of DoStepfwd in CTRL.S, which the control code has no room for.
@@ -7782,8 +7814,7 @@ REVTAB          equ     0x5B00
 
 frontlist       equ     LOWBUF                      ; five bytes an entry, as
 roomids         equ     frontlist + MAXFRONT * 5    ; frontrec writes them
-flbuf           equ     roomids + 60                ; thirty ids, then states
-rqq             equ     flbuf + FLAME_BYTES         ; one frame of a flame
+rqq             equ     roomids + 60                ; thirty ids, then states
 rqs             equ     rqq + 4 * RQMAX             ; row, column, band, wide
 cvbuf           equ     rqs + 4 * RQSMAX
 dirtyq          equ     cvbuf + CANVAS_W            ; col, top, width, height
@@ -7794,7 +7825,15 @@ cdlast          equ     flstate + 8                 ; each ten on from the
 cdthis          equ     cdlast + 10                 ; one before
 cdabove         equ     cdthis + 10
 cdbelow         equ     cdabove + 10
-LOWTOP          equ     cdbelow + 10
+torches         equ     cdbelow + 10                ; seven bytes a torch, and
+                                                    ; no room of the fifteen
+                                                    ; has more than four
+gprob           equ     torches + 1 + 4 * 7         ; the guard's program
+flrect          equ     gprob + 6                   ; the torch in hand
+links           equ     flrect + 4                  ; the rooms round this one
+rqtmp           equ     links + 4                   ; a queue entry on its way
+hbsave          equ     rqtmp + 4                   ; his rectangle, aside
+LOWTOP          equ     hbsave + 4
 
 ; The tape carries one block, so both bank images ride along inside it.
 ;

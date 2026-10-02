@@ -9,19 +9,17 @@
 ; LOADSHADWOP and SAVESHADWOP in CTRLSUBS.S are one exchange here: Char and Op
 ; trade places.  Done twice, everything is back where it was.
 ;
-; Out: flags as they came in -- gd_swap below counts on it.
+; Out: Z and carry as they came in -- gd_swap below counts on it.
 
 swapchar:       ld      hl, chrec
                 ld      de, oprec
-                ld      b, CHRECLEN
-swloop:         ld      a, (de)
-                ld      c, (hl)
+                ld      bc, CHRECLEN
+swloop:         ld      a, (de)         ; LDI moves his byte across and steps
+                ldi                     ; both on, and leaves Z and carry be
+                dec     hl
                 ld      (hl), a
-                ld      a, c
-                ld      (de), a
                 inc     hl
-                inc     de
-                djnz    swloop
+                jp      pe, swloop
                 ret
 
 ; The guard in hand, if there is one.  Out: NZ with him swapped in, Z when
@@ -197,7 +195,8 @@ hide_behind:    ld      hl, foremask
                 ld      bc, 4
                 ldir
                 ld      b, a
-                ld      hl, frontlist
+                ld      hl, hbfirst     ; and the columns he can meet one in
+                call    c1call
 hbloop:         call    hbseek          ; the next piece whose rows meet his
                 ret     z
                 push    bc
@@ -312,7 +311,6 @@ hbcol:          srl     h
                 add     a, 64
                 ret
 
-hbsave:         ds      4
 hbrows:         db      0
 hbtop:          db      0
 
@@ -439,10 +437,9 @@ cgret:          ret     c               ; it.  There was an upper bound here
                                         ; he drops in from above the screen)
                 ld      a, (charid + OP)        ; a skeleton that falls into
                 cp      4                       ; the room it belongs in gets
-                jr      nz, gd_off              ; up again there
-                ld      a, (links + 3)
-                cp      SKELLAND
-                jp      z, skel_down
+                jr      nz, gd_off              ; up again there: level three's
+                ld      de, lvcode + 3          ; own code has it
+                jp      bgcall
 gd_off:         ld      a, (nowbank)
                 push    af
                 call    page_bg
@@ -1798,9 +1795,12 @@ pgout:          push    bc
 ; I points into the 48K ROM's long run of 0xFF, so whatever the bus holds the
 ; vector is 0xFFFF: the top byte of whichever bank is paged, where start puts
 ; a JR -- whose displacement is the DI at 0x0000, back to 0xFFF4 -- and a jump
-; here.  The ROM's own handler still counts the frames and reads the keys;
-; then a tick of the sound, with the effects' bank paged in and the one that
-; was put back, without touching nowbank, which the interrupted code owns.
+; here.  It counts the frames itself: the ROM's handler did that and read
+; the keyboard into KSTATE and LAST_K as well, which nothing here looks at --
+; the keys are read off the port -- and that scan was a thousand and more T
+; an interrupt, four per cent of every frame.  Then a tick of the sound,
+; with the effects' bank paged in and the one that was put back, without
+; touching nowbank, which the interrupted code owns.
 
 ISRPAGE         equ     0x3A            ; 0x39FF to 0x3B00 is all 0xFF
 
@@ -1808,8 +1808,8 @@ isr:            push    af
                 push    bc
                 push    de
                 push    hl
-                call    0x0038          ; FRAMES and the keyboard; it enables
-                di                      ; interrupts, which wait for the end
+                ld      hl, FRAMES      ; the frame count, and only its low
+                inc     (hl)            ; byte: that is all anything reads
                 ld      a, 1
                 ld      (inisr), a
                 ld      a, (songwait)   ; a tune waiting its time
@@ -2694,29 +2694,41 @@ smgreen:
 
                 call    oppshown        ; C = his opponent's, as shown
                 ld      c, a
-                cp      1
-                jr      z, smdraw       ; flashing
-                ld      a, (kidstr)
-                cp      1
-                jr      z, smdraw
                 ld      hl, meterdirty
                 ld      a, (hl)
                 ld      (hl), 0
-                or      a
-                jr      nz, smdraw
+                ld      b, a
                 ld      hl, smlast
                 ld      a, (kidstr)
                 cp      (hl)
-                jr      nz, smdraw
+                jr      nz, smfull
                 inc     hl
                 ld      a, (maxkidstr)
                 cp      (hl)
-                jr      nz, smdraw
+                jr      nz, smfull
                 inc     hl
                 ld      a, c
                 cp      (hl)
-                ret     z               ; nothing to do
-smdraw:         ld      hl, smlast
+                jr      nz, smfull
+                ld      a, b
+                or      a
+                jr      nz, smfull
+
+; Nothing has changed but the flash, which is one place: the first of a
+; meter down to its last point.  Only that one goes down again -- all ten
+; of his, every frame he had a point left, was a dozen thousand cycles.
+
+                ld      a, (kidstr)
+                dec     a
+                jr      z, smpart
+                ld      a, c
+                dec     a
+                ret     nz              ; nothing to do
+smpart:         inc     a               ; A = 1: the flashing place alone
+                jr      smdraw
+smfull:         xor     a               ; or every place
+smdraw:         ld      (smone + 1), a
+                ld      hl, smlast
                 ld      a, (kidstr)
                 ld      (hl), a
                 inc     hl
@@ -2739,9 +2751,9 @@ smkid:          ld      (kiddrawn), a
                 ld      a, (kidstr)
                 ld      c, a
                 ld      a, (maxkidstr)
-                ld      b, a
+                call    smcount
                 ld      de, 0x0100      ; from the left, a byte on each time
-                call    meter
+                call    nz, meter
                 ld      a, INK_OPPMETER
                 ld      (mmink), a
                 xor     a               ; his opponent's: a place spent is
@@ -2751,27 +2763,13 @@ smkid:          ld      (kiddrawn), a
                 call    oppshown
                 ld      c, a
                 ld      hl, bullet + BULLETH
-                ld      b, MAXOPPMETER
+                ld      a, MAXOPPMETER
+                call    smcount
+                ret     z
                 ld      de, 0xff1f      ; from the right, a byte back each time
                 call    meter
                 ld      a, (mmlast)
                 ld      (oppdrawn), a
-                ret
-
-; DRAWOPPMETER: what his opponent's meter shows -- nothing at all for the
-; skeleton, which has no strength to lose.
-
-oppshown:       ld      a, (gdhere)
-                or      a
-                ret     z
-                ld      a, (charid + OP)
-                cp      4               ; the skeleton's is not shown, nor
-                jr      z, oppnone      ; the shadow's but on level twelve
-                dec     a
-oppjr:          jr      z, oppnone      ; lvcode.asm makes it jr +0
-                ld      a, (oppstr)
-                ret
-oppnone:        xor     a
                 ret
 
 ; The screen shown with green in place of its black ground, ink kept.  A is
