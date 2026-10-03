@@ -41,6 +41,9 @@
                 ret                     ; (ovattr: the palace's)
                 ds      2
                 jp      dshad
+                endif
+                jp      clock           ; ovtime: timer's first steps
+                if      OVLSET = 0
 
 dstart:         scf
                 jp      lvcode
@@ -114,6 +117,58 @@ sucount:        djnz    sunext
                 ld      (palist), hl
                 endif
                 ret
+
+; The clock's first steps, timer's in pop.asm, which has the rest; here for
+; the room.  A level begun puts up "LEVEL n" and asks for the time after it
+; (RESTART, and LoadNextLevel's timerequest, in TOPCTRL.S) -- but not
+; fourteen, and not thirteen come to from twelve, which skipmessage leaves
+; unannounced and we give its time alone, as we always have.  So does his
+; getting up after a death -- which RESTART is too -- and the game's first
+; frame, when he is up for the first time.  Out: HL = where timer goes on --
+; tmup when he is dead (the clock stops, nothing new is put up), tmshow when
+; the clock has stopped (fourteen, or thirteen with the vizier dead), else
+; ti2 to count the frame.
+
+clock:          ld      a, (curlev)
+                ld      hl, tlast
+                cp      (hl)
+                ld      (hl), a
+                jr      z, clk1
+                cp      12
+                call    z, treq1        ; (which leaves the flags)
+                call    nz, tlevel
+clk1:           ld      a, (charlife)
+                ld      hl, tdead
+                ld      b, (hl)
+                ld      (hl), a
+                ld      hl, tmup
+                rla
+                ret     nc
+                bit     7, b
+                call    z, tlevel
+                ld      hl, tmshow
+                ld      a, (curlev)
+                cp      13
+                ret     nc
+                cp      12
+                jr      nz, clk2
+                ld      a, (exitopen)
+                or      a
+                ret     nz
+clk2:           ld      hl, ti2
+                ret
+
+; "LEVEL n" up for a message's stay -- the Apple's leveltimer is its
+; timemsgtimer, twenty -- and the time after it; on fourteen neither.
+
+tlevel:         ld      a, (curlev)
+                cp      13
+                ret     z
+                inc     a
+                ld      (tlevm), a
+                ld      a, TMSGT
+                ld      (msgtimer), a
+                jp      treq1
 
 ; Every key up, and then one down: the clock run out (tlose in pop.asm).
 

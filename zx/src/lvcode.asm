@@ -1629,19 +1629,12 @@ skeldown:       ld      a, (links + 3)
                 ld      de, 0           ; out of this room's list, which a
                 call    gd_field        ; visit before may have left him in:
                 ld      (hl), 0xff      ; he is not up here any more
-                ld      bc, SKELLANDBLK * 256 + SKELLANDX
-                ld      hl, (charx + OP) ; CUTGUARD puts him on the middle
-                ld      de, -140        ; row whichever side he went off; off
-                add     hl, de          ; the left he falls past it, on to
-                jr      c, skd1         ; the bottom row (the user's): there,
-                ld      hl, (charx + OP) ; where he is
-                sra     h
-                rr      l
-                ld      a, l
-                add     a, SCRNLEFT
-                ld      c, a
-                ld      b, 20
-skd1:           ld      a, SKELLAND     ; his fields, GdStart* for the room,
+                ld      bc, SKELLANDBLK * 256 + SKELLANDX ; CUTGUARD: the
+                                        ; middle row, whichever side he went
+                                        ; off -- off the left the bottom row
+                                        ; is a pocket one block wide, walled
+                                        ; in, where he only stood
+                ld      a, SKELLAND     ; his fields, GdStart* for the room,
                 ld      de, 0           ; 24 apart
                 call    gd_field_in
                 ld      (hl), b         ; the block (its row)

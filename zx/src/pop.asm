@@ -87,6 +87,7 @@ ovset           equ     bgovl + 9       ; the set into the program: newroom
 ovhb            equ     bgovl + 12      ; hbfirst, for hide_behind
 ovattr          equ     bgovl + 15      ; the palace's colours, into imgbuf
 ovshad          equ     bgovl + 18      ; the shadow's keys, from autoctrl
+ovtime          equ     bgovl + 21      ; the clock's first steps: timer
 
 ; And between the last system variable the 48K ROM's interrupt touches and
 ; the bottom of the stack, what 48K BASIC kept its channels in: nothing uses
@@ -6073,30 +6074,9 @@ TSEC            equ     17              ; and to a second
 TMSGT           equ     28              ; a message's stay: the Apple's 20
 TIMECOL         equ     11              ; its first column, of fifteen
 
-timer:          ld      a, (curlev)     ; a level begun: its time shown
-                ld      hl, tlast
-                cp      (hl)
-                ld      (hl), a
-                jr      z, ti1
-                cp      13              ; (but not fourteen's)
-                call    nz, treq1
-ti1:            ld      a, (charlife)   ; and up again after a death
-                ld      hl, tdead
-                ld      b, (hl)
-                ld      (hl), a
-                rla
-                jr      nc, tmup        ; dead: the clock stops, and nothing
-                                        ; is put up
-                bit     7, b
-                call    z, treq1
-                ld      a, (curlev)     ; not on fourteen, nor on thirteen
-                cp      13              ; with the vizier dead
-                jr      nc, tmshow
-                cp      12
-                jr      nz, ti2
-                ld      a, (exitopen)
-                or      a
-                jr      nz, tmshow
+timer:          ld      de, ovtime      ; a level begun, his death, and
+                call    bgcall          ; whether the clock runs: clock, in
+                jp      (hl)            ; bgovl.asm, says where to go on
 ti2:            ld      a, (temin)      ; and not past the hour
                 cp      60
                 jr      nc, tmshow
@@ -6125,6 +6105,10 @@ ti4:            ld      a, 2
 tmshow:         ld      a, (treq)
                 or      a
                 jr      z, tmup
+                ld      a, (msgtimer)   ; one up already -- the level's, say
+                or      a               ; -- it waits
+                jr      nz, tmup
+                ld      (tlevm), a      ; (and the level's is over)
                 ld      a, (temin)      ; run out: nothing more to say
                 cp      60
                 jr      nc, tmup
@@ -6138,10 +6122,7 @@ tmshow:         ld      a, (treq)
                 ld      (treq), a
 tmsec:          ld      (msgtimer), a   ; up this frame, treq kept for the
                 jr      tmup            ; next
-tmnorm:         ld      a, (msgtimer)   ; one up already: it waits
-                or      a
-                jr      nz, tmup
-                ld      a, TMSGT
+tmnorm:         ld      a, TMSGT
                 ld      (msgtimer), a
                 xor     a
                 ld      (treq), a
@@ -6178,8 +6159,14 @@ tmmsg:          ld      hl, msgtimer
                 or      a
                 ret     z
 tmdraw:         call    tmat
-                ld      a, c            ; the tens, none a space
-                ld      h, '0' - 1
+                bit     6, b            ; the level's: "LEVEL" first, the
+                jr      z, tmd1         ; two words in the middle of the
+                ld      e, 0xe0 + TIMECOL + 4   ; fifteen
+                ld      hl, tmwlev
+                call    tstr
+tmd1:
+                ld      a, c            ; the tens, none a space -- and for
+                ld      h, '0' - 1      ; the level's no tens at all
 ti5:            inc     h
                 sub     10
                 jr      nc, ti5
@@ -6188,10 +6175,14 @@ ti5:            inc     h
                 ld      a, h
                 cp      '0'
                 jr      nz, ti6
+                bit     6, b
+                jr      nz, ti7
                 ld      a, ' '
 ti6:            call    tchar
-                pop     af
+ti7:            pop     af
                 call    tchar
+                bit     6, b            ; and nothing after it
+                ret     nz
                 ld      hl, tmwmin
                 bit     7, b
                 jr      z, tm7
@@ -6242,9 +6233,14 @@ tc1:            ld      a, (hl)
                 ret
 
 ; A = what the message says, B = 0: the minutes left; in the last minute,
-; unless the clock has stopped, B = 0x80 and the seconds, 60 to 1.
+; unless the clock has stopped, B = 0x80 and the seconds, 60 to 1; and
+; while the level's own is up, B = 0x40 and the level.
 
-tleft:          ld      b, 0
+tleft:          ld      b, 0x40
+                ld      a, (tlevm)
+                or      a
+                ret     nz
+                ld      b, 0
                 ld      a, (temin)
                 cp      59
                 jr      c, tlmin
@@ -6283,6 +6279,7 @@ tmwmin:         db      " MINUTES", 0
 tmwsec:         db      " SECONDS", 0
 tmwleft:        db      " LEFT", 0
 tmlost:         db      "  TIME IS UP", 0
+tmwlev:         db      "LEVEL ", 0
 
 tefr            equ     0x5C79          ; frames into the minute: FRAMES's
                                         ; top two, which isr leaves alone
@@ -6294,6 +6291,7 @@ tdead           equ     0x5C01          ; and his life: nought, dead, to
                                         ; begin with, so the game opens on
                                         ; the hour
 tlastn          equ     0x5C02          ; what the message said: 0 none
+tlevm           equ     0x5C3C          ; the level's message up: its number
 
                 ds      (($ + 0x7FF) / 0x800 * 0x800) - $
 codeend:
