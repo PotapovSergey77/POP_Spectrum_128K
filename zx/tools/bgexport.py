@@ -445,10 +445,12 @@ GMAXVAL = 47 * 4
 # exit's plate (11) has its torch -- in its first column, the flame in the
 # second over the slicer -- in the last column of the room to its left (4),
 # whose flame burns in this one's first (maketorches).  And on level eleven,
-# room 15, the torch left of the slicer goes a block further left, its
-# flame over the floor before the blade (2026-10-03).  (level, room, block,
-# room, block): the two swapped, type and spec.
-MOVES = [(4, 23, 6, 23, 4), (4, 11, 10, 4, 19), (11, 15, 2, 15, 1)]
+# room 15, the torch left of the slicer goes two blocks left, to the first
+# column: one block left it took the rail's diamond's place, and right of
+# it is the slicer itself; there the diamonds stay where they were, and
+# each torch has one just right of it (the user, 2026-10-03).  (level,
+# room, block, room, block): the two swapped, type and spec.
+MOVES = [(4, 23, 6, 23, 4), (4, 11, 10, 4, 19), (11, 15, 2, 15, 0)]
 
 
 def level_moved(n, level):
