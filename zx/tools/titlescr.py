@@ -1145,10 +1145,15 @@ def small_text(pix, text, centre, top):
         x += len(glyph[0]) + 1
 
 
+# At the foot of the band, in its last cell row (the user): the knotwork
+# whole above it, and the red behind the letters only that row's.
+COPY_TOP = 184
+
+
 def copyright(pix):
     width = sum(len(FONT[ch][0]) + 1 for ch in COPYRIGHT) - 1
     x = (256 - width) // 2
-    for yy in range(176, 184):
+    for yy in range(COPY_TOP, 192):
         for xx in range(x - 4, x + width + 4):
             pix[yy][xx] = zx(RED)
     for ch in COPYRIGHT:
@@ -1156,7 +1161,7 @@ def copyright(pix):
         for j, row in enumerate(glyph):
             for i, c in enumerate(row):
                 if c == '#':
-                    pix[176 + j][x + i] = LETTER
+                    pix[COPY_TOP + j][x + i] = LETTER
         x += len(glyph[0]) + 1
 
 

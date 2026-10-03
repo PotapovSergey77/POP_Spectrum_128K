@@ -7,7 +7,7 @@
 ; end of the art bank's tape block.  Nothing writes there before the game
 ; begins, when the art bank is cleared for the room.
 
-CMDATA          equ     0xFE20
+CMDATA          equ     0xFE48
 
 CM_INK          equ     0x0F            ; the story's white on blue
 CM_HI           equ     0x0E            ; and its border's yellow line
