@@ -1882,10 +1882,12 @@ nextroom:       ld      a, (lvflag)     ; up the stairs to a level the tape
                 ld      a, 0xbf         ; once the tune up the stairs is heard
                 in      a, (254)        ; out, the torches burning on as it
                 rra                     ; plays, or ENTER has cut it short, as
-                call    nc, ststop      ; a key does POP's PlaySong.  ENTER and
+nrenter:        call    nc, ststop      ; a key does POP's PlaySong.  ENTER and
                                         ; nothing else: the button is SPACE,
                                         ; and a hand resting on it took every
                                         ; tune away the moment it began
+                                        ; (level six's plunge makes it a call
+                                        ; whatever the key: lvcode.asm)
                 ld      a, (sfxtimer)
                 or      a
                 ret     nz
@@ -1912,7 +1914,7 @@ cutchar:        ld      hl, cuttimer
                 jr      nc, nrup
 ccnotup:        ld      a, (chary)
                 cp      BOTCUT
-ccdown:         jr      nc, nrdown      ; level six's screen 1 makes it jr +0
+ccdown:         jr      nc, nrdown      ; level six's screen 1: to ccnone
 
                 ld      a, (charact)    ; not while he turns
                 cp      7
@@ -1957,7 +1959,7 @@ ccnotr:         ld      hl, (edger)
                 ld      de, 0
                 call    cmp16
                 jp      c, nrleft
-                ret
+ccnone:         ret                     ; (level six's screen 1 jumps here)
 
 ; Carry set if the last block of his row is a panel.
 

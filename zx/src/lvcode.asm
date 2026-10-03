@@ -380,12 +380,17 @@ thptr:          dw      0               ; and PreRecPtr, where it points
 ; shadow steps forward onto the plate -- DoPress, DoFwd.  And falling off
 ; screen 1 is no cut to the room below: CharY runs on round, and under 20
 ; the next level has him -- level seven, which STARTKID begins with him
-; falling in (mkassets' level_head).
+; falling in (mkassets' level_head).  Nor is there a cut left or right
+; while he is past the foot: :CUTDOWN returns nocut.
 
 PLSCRN          equ     1
 PLX             equ     2 * (0x51 - 58) ; shadpos6a's CharX, our pixels
 PLMID           equ     2 * (0x80 - 58) ; ShadLevel6's KidX $80
 PLCUT           equ     nrdown - ccdown - 2     ; cutchar's jr, as it is
+PLNONE          equ     ccnone - ccdown - 2     ; and to its ret: :CUTDOWN's
+                                        ; nocut, which no cut left or right
+                                        ; follows -- falling past the foot
+                                        ; near an edge he was cut sideways
 
 post:           ld      a, (roomnum)
                 cp      PLSCRN
@@ -394,7 +399,7 @@ post:           ld      a, (roomnum)
                 ld      a, (lvflag)     ; while the level goes on, no cut
                 cp      2               ; down: the jr jumps nowhere
                 jr      nc, plcut
-                ld      b, 0
+                ld      b, PLNONE
                 ld      a, (chary)      ; KidY under 20: NextLevel -- or,
                 cp      20              ; with none on the tape, RESTART
                 jr      nc, plcut
@@ -405,11 +410,18 @@ post:           ld      a, (roomnum)
                 jr      z, plnext
                 dec     a
 plnext:         ld      (hl), a
-                call    ststop          ; and at once, no tune to wait for
+                call    ststop          ; and at once, no tune to wait for --
+                ld      a, 0xcd         ; nor any sound: a gate the plate by
+                ld      (nrenter), a    ; the edge set going goes on sounding
+                                        ; as it shuts, and nextroom waited
+                                        ; for it while he fell round and
+                                        ; round the screen.  Its call nc,
+                                        ; ststop is a call; level seven's
+                                        ; code puts it back.
                 ld      b, PLCUT
 plcut:          ld      a, b
                 ld      (ccdown + 1), a
-                or      a
+                cp      PLNONE
                 ret     nz              ; not screen 1, or not any more
 
                 xor     a               ; nothing pressed, unless below
@@ -1939,7 +1951,16 @@ inverted:       db      0               ; as the patches stand
 
                 endif
 
-                if      LVNUM < 3 or LVNUM = 7 or LVNUM = 10 or LVNUM = 11
+                if      LVNUM = 7
+; Level six's plunge left nextroom stopping every sound: its call nc, ststop
+; back as it was.
+
+post:           ld      a, 0xd4         ; call nc
+                ld      (nrenter), a
+                ret
+                endif
+
+                if      LVNUM < 3 or LVNUM = 10 or LVNUM = 11
 post:           ret
                 endif
 
