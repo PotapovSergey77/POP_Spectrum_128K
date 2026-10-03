@@ -6,6 +6,20 @@
 #   build/png/      whatever the diagnostic tools draw
 set -e
 cd "$(dirname "$0")"
+# The version on the controls screen: 0.1 and the first four of the sources'
+# hash, in capitals -- git's tree of zx/ as the files stand, tracked ones
+# only, which is `git rev-parse <commit>:zx` for a build from that commit
+# unchanged.
+VERINDEX="$(pwd)/build/.verindex"
+mkdir -p build
+rm -f "$VERINDEX"
+SRCHASH=$( (GIT_INDEX_FILE=$VERINDEX git read-tree HEAD &&
+            GIT_INDEX_FILE=$VERINDEX git add -u . &&
+            GIT_INDEX_FILE=$VERINDEX git write-tree --prefix="$(git rev-parse --show-prefix)") 2>/dev/null || echo '????')
+rm -f "$VERINDEX"
+VERSION="Ver.: 0.1 $(echo "$SRCHASH" | cut -c1-4 | tr a-f A-F)"
+echo "                db      \"$VERSION\", 0" > src/ctlver.inc
+echo "версия: $VERSION ($SRCHASH)"
 python tools/mkassets.py build
 cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/cut5.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc

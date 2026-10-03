@@ -7,11 +7,13 @@
 ; end of the art bank's tape block.  Nothing writes there before the game
 ; begins, when the art bank is cleared for the room.
 
-CMDATA          equ     0xFE48
+CMDATA          equ     0xFE20
 
 CM_INK          equ     0x0F            ; the story's white on blue
 CM_HI           equ     0x0E            ; and its border's yellow line
 CM_ITEM         equ     7               ; the first of the four's rows
+CM_VERROW       equ     3               ; the version's row, inside the border
+CM_VERLEN       equ     14              ; "Ver.: 0.1 " and four of the hash
 
                 org     CMDATA
 
@@ -192,7 +194,9 @@ cmtext:         db      4, 12, CM_HI, "CONTROLS", 0
                 db      13, 9, CM_INK, "Define Keys", 0
                 db      15, 6, CM_HI, "0", 0
                 db      15, 9, CM_INK, "Start Game", 0
-                db      0xff
+                db      CM_VERROW, 30 - CM_VERLEN, CM_INK ; top right: the
+                include "ctlver.inc"    ; version, and the first four of the
+                db      0xff            ; sources' hash (build.sh)
 
 ; The keys by row and bit, as IN A,(254) has them; 1 to 4 are names.
 
