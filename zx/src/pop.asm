@@ -2121,13 +2121,7 @@ airbump:        ld      a, SND_SMACKWALL ; BumpSound
 abfall:         ld      a, SQ_BUMPFALL
                 jr      bumpseq
 
-groundbump:     ld      a, (blocky)
-                inc     a
-                ld      l, a
-                ld      h, 0
-                ld      de, floory
-                add     hl, de
-                ld      a, (hl)
+groundbump:     call    floor_plane
                 ld      b, a
                 ld      hl, chary
                 sub     (hl)
@@ -2142,6 +2136,10 @@ groundbump:     ld      a, (blocky)
                 jp      addcharx
 gbok:           xor     a
                 ld      (yvel), a
+                ld      a, (charlife)   ; :deadbump -- dead when he hits the
+                or      a               ; wall, he is left lying: bumped, he
+                ret     z               ; got up and dropped dead again, and
+                                        ; again, and the level never restarted
                 ld      a, (frame)      ; out of a standing jump, a running
                 cp      24              ; jump or a fall the bump is hard
                 jr      z, gbhard
