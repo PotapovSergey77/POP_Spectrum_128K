@@ -1500,9 +1500,13 @@ tapeload:       call    page_bg
 
 tapeblk:        call    pageset
                 if      DISK            ; off the disk instead, where they
-                di                      ; follow each other the same way
-                call    dload           ; (dload.asm, drvin's)
-                ei
+                push    hl              ; follow each other the same way
+                push    de              ; (dload.asm, drvin's) -- and HL and
+                di                      ; DE kept, as LD-BYTES leaves them:
+                call    dload           ; chset_put takes HL from here, and
+                ei                      ; a moved one had every guard drawn
+                pop     de              ; as level one's
+                pop     hl
                 ret
                 else
 tbagain:        push    hl
