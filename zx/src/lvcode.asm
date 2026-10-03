@@ -418,6 +418,9 @@ plnext:         ld      (hl), a
                                         ; round the screen.  Its call nc,
                                         ; ststop is a call; level seven's
                                         ; code puts it back.
+                xor     a               ; and gone: round at the top of the
+                ld      (frame), a      ; screen again, he was drawn there
+                                        ; for a frame before the level went
                 ld      b, PLCUT
 plcut:          ld      a, b
                 ld      (ccdown + 1), a
