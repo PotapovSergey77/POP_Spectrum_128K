@@ -16,8 +16,9 @@
 ; and the CUT_ equates of princessscr.py -- among them CUT_NOGLASS, a scene
 ; with no hourglass (PlayCut7), none of whose code is kept, and whose flag
 ; for the second of two says instead that the frame is held until the tune
-; has played out; CUT_QA, the frame's time at a SPEED other than 12; and
-; CUT_WMAX, the widest picture, in bytes.
+; has played out -- as it does in PlayCut6 (CUT_SONGHOLD), whose one
+; hourglass never needs it; CUT_QA, the frame's time at a SPEED other than
+; 12; and CUT_WMAX, the widest picture, in bytes.
 
 ; Page 1 to page 2.
 
@@ -339,7 +340,7 @@ cnounflash:
                 ld      (cfirst), a
                 call    copy57
 cnotfirst:
-                if      CUT_NOGLASS
+                if      CUT_NOGLASS + CUT_SONGHOLD
                 ld      a, (cflags)     ; PlaySong mid scene: the frame again
                 and     8               ; until the tune has played out, and
                 jr      z, cnohold      ; not counted

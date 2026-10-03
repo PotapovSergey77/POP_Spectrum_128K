@@ -41,6 +41,7 @@ import popseq
 import princess
 import princessscr
 import poplevel
+import popmusic
 import palcolour
 import renderroom
 import zxscreen
@@ -246,6 +247,13 @@ CUT_BEFORE = {2: 1, 4: 2, 6: 1, 8: 3, 9: 4, 12: 1}
 # Epilog's screens and tune as the level itself, into the background bank
 # where the head says (see ending_block).  The scene never comes back.
 ENDING_CUT = 5
+
+# And the disk's: YouLose, the hour run out -- cutprincess and PlayCut6,
+# the room empty and the hourglass with it, and the game again from its
+# titles.  The tape cannot go back for it; the disk keeps it past the rest
+# and loads it when it is wanted (see loader.asm).
+TIMEUP_CUT = 6
+S_TRAGIC = 14                   # SOUNDNAMES.S
 
 # basicstrength in AUTO.S, by level: a guard's strength is this and his
 # program's extrastrength (getgdstrength).  Each level's is the last byte
@@ -1138,12 +1146,18 @@ def main(argv):
     # song, and no tune on the tape.  Last, the ending's: PlayCut7, the
     # CPC's tune 7 its s_Embrace, and the room's code not put by -- the
     # game does not come back to it -- and the Epilog after it.
+    # And the disk's PlayCut6: s_Tragic, which the CPC has none of, is the
+    # Apple's own, its player run as popmusic.py runs the game's songs.
     scenes = {1: (princess.cut1(), 'A'), 2: (princess.cut2(), 'B'),
               3: (princess.cut8(), 'B'), 4: (princess.cut4(), 'B'),
-              ENDING_CUT: (princess.cut7(), 'B')}
+              ENDING_CUT: (princess.cut7(), 'B'),
+              TIMEUP_CUT: (princess.cut6(), 'B')}
     for k, (frames, side) in scenes.items():
-        ending = k == ENDING_CUT
-        tune = cpcmusic.tunes((7 if ending else 6,))[0] if k != 4 else b''
+        ending = {ENDING_CUT: 1, TIMEUP_CUT: 2}.get(k, 0)
+        if k == TIMEUP_CUT:
+            tune = popmusic.effect_cached(S_TRAGIC, binout)
+        else:
+            tune = cpcmusic.tunes((7 if ending else 6,))[0] if k != 4 else b''
         sced, scefix, sceneinc, scelow = princessscr.build1(
             tune, 0 if ending else RBROOM, frames, side, k == 2)
         open(os.path.join(binout, 'cut%ddata.bin' % k), 'wb').write(sced)
@@ -1153,7 +1167,7 @@ def main(argv):
             f.write('\n'.join(sceneinc) + '\n')
             f.write('CUT1_LOW    equ %d\n' % scelow)
             f.write('CUT_ENDING  equ %d\n' % ending)
-            if ending:
+            if ending == 1:
                 f.write('\n'.join(epiinc) + '\n')
         print('принцесса %d комната, картинки и мелодия %d байт на плёнке, '
               'код отдельно' % (k, len(sced)))

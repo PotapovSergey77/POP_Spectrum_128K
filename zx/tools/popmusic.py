@@ -139,6 +139,72 @@ def render():
     return b''.join(h.to_bytes(2, 'little') for h in heads) + bytes(body)
 
 
+def effect(n):
+    """Song n as one of the CPC's effects (cpcsound.py), for the sound
+    driver the princess's scenes play their tunes on: the mixer, and then a
+    fiftieth at a time each voice's tone and volume where they change --
+    voice 1 on AY channel B, voice 2 on C -- a wait between, and the stop.
+    The driver's shortest wait is two ticks, so a change a tick after the
+    last waits one more.  Loudness against the song's own loudest."""
+    music, msys = load_player()
+    c = calls(music, msys, n)
+    t0, end = c[0][0], c[-1][1]
+    loudest = max(d for _, _, _, _, d in c) or 1.0
+
+    def frame(t):
+        return int(round((t - t0) / APPLE_HZ * FPS))
+
+    total = frame(end)
+    state = [[(0, 0)] * (total + 1) for _ in range(2)]
+    for start, stop, voice, period, duty in c:
+        tone = (ay_period(period), ay_volume(duty, loudest)) if period else (0, 0)
+        for f in range(frame(start), total + 1):
+            state[voice][f] = tone
+    out = bytearray([7, 0x39, 8, 0])            # tone on B and C, A silent
+
+    def wait(k):                                # k ticks, k > 1
+        while k:
+            n = min(k, 256)
+            if k - n == 1:
+                n -= 1
+            out.extend((0x82, n - 1))
+            k -= n
+
+    regs = ((2, 3, 9), (4, 5, 10))
+    last, at = [None, None], 0
+    for f in range(total + 1):
+        now = [state[0][f], state[1][f]]
+        if now == last or (f and f - at < 2):
+            continue
+        if f:
+            wait(f - at)
+        for v in range(2):
+            if now[v] != last[v]:
+                (period, vol), (lo, hi, vr) = now[v], regs[v]
+                out += bytes([lo, period & 0xff, hi, period >> 8, vr, vol])
+        last, at = now, f
+    if total - at > 1:
+        wait(total - at)
+    return bytes(out) + bytes([0x82, 0])
+
+
+def effect_cached(n, cache_dir):
+    """effect(n), kept in cache_dir against this file and the disk."""
+    h = hashlib.sha1()
+    h.update(open(DISK, 'rb').read())
+    h.update(open(__file__, 'rb').read())
+    h.update(open(mos6502.__file__, 'rb').read())
+    path = os.path.join(cache_dir, 'song%d.%s.bin' % (n, h.hexdigest()[:16]))
+    if os.path.exists(path):
+        return open(path, 'rb').read()
+    data = effect(n)
+    for old in os.listdir(cache_dir):
+        if old.startswith('song%d.' % n) and old.endswith('.bin'):
+            os.remove(os.path.join(cache_dir, old))
+    open(path, 'wb').write(data)
+    return data
+
+
 def songs(cache_dir):
     """songs.bin, rendered once for this disk and this file."""
     if not os.path.exists(DISK):

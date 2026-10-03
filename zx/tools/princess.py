@@ -402,6 +402,30 @@ def cut7():
     return frames
 
 
+# PlayCut6, the hour run out (YouLose in TOPCTRL.S): the room empty, the
+# hourglass empty -- ADDGLASS with 8 -- and SPEED 22; two frames of PLAY,
+# PlaySong's s_Tragic, the frame held while it plays, and a hundred frames
+# more.  Then the Apple goes to its titles.
+
+EMPTY_GLASS = 8
+
+
+def cut6():
+    frames = []
+
+    def play(n):
+        for _ in range(n):
+            frames.append({
+                'speed': 22, 'vizier': None, 'princess': None,
+                'glass': EMPTY_GLASS, 'sand': False, 'flash': False})
+
+    play(2)
+    frames[-1]['tune'] = True                    # s_Tragic, and PlaySong
+    frames.append(dict(frames[-1], tune=False, songhold=True))  # holds it
+    play(100)
+    return frames
+
+
 ALT = None
 T6 = T7 = None
 MAIN = None

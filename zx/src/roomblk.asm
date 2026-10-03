@@ -1209,10 +1209,16 @@ levelgo:        xor     a
                 call    setvis
                 ld      a, (lvflag)     ; a death: RESTART, the level as it
                 cp      3               ; began, and the strength he began it
-                jr      z, lgagain      ; with
+                if      DISK            ; with
+                jr      z, lgdead
+                call    drvin           ; the next level off the disk
+                call    page_bg
+                else
+                jr      z, lgagain
                 call    page_pixels     ; the next level off the tape: the
                 call    c1start         ; player told to start it, and to
                 call    page_bg         ; stop it again once it has loaded
+                endif
                 ld      de, (level + LV_HEAD + LH_CUT)  ; (c1stop) -- and
                 push    de              ; before some levels a scene in the
                 ld      a, d            ; princess's room, which comes first
@@ -1235,8 +1241,11 @@ lgnocut:        call    tapeload
                 ld      a, BANK_ART
                 call    tapeblk
                 call    chset_put
-lgnochs:        call    page_pixels
+lgnochs:
+                if      DISK = 0
+                call    page_pixels
                 call    c1stop
+                endif
                 pop     hl              ; the scene: see cut1.asm
                 ld      a, h
                 or      l
@@ -1247,6 +1256,27 @@ lgwent:         ld      hl, curlev      ; kept as it begins
                 inc     (hl)
                 call    lvkeep
                 jr      lghead
+
+                if      DISK
+
+; YouLose: the hour gone, before thirteen (tlose) or with him dead.  The
+; loader over the buffers, whose game is over, and its way to the princess's
+; room, the room empty and the hourglass with it (PlayCut6), and from there
+; the game again from the start.
+
+lgdead:         ld      a, (temin)
+                cp      60
+                jr      c, lgagain
+                call    drvin
+                ld      hl, LDRPOS
+                ld      (DPOS), hl
+                ld      hl, LDRORG
+                ld      de, LDRLOAD
+                di
+                call    dload
+                jp      LDRORG + 3
+                endif
+
 lgagain:        call    lvback
                 ld      a, (origstr)
                 ld      (maxkidstr), a
@@ -1469,6 +1499,12 @@ tapeload:       call    page_bg
 ; A block, whichever: HL where, DE how long, A the bank.
 
 tapeblk:        call    pageset
+                if      DISK            ; off the disk instead, where they
+                di                      ; follow each other the same way
+                call    dload           ; (dload.asm, drvin's)
+                ei
+                ret
+                else
 tbagain:        push    hl
                 push    de
                 push    hl
@@ -1491,6 +1527,7 @@ tbret:          ei                      ; what SA/LD-RET did that we want
 tbdone:         xor     a
                 out     (254), a
                 ret
+                endif
 
 ; On the way into a room, straight to where the rule puts it.
 

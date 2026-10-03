@@ -1,12 +1,29 @@
 #!/bin/sh
-# Build the Spectrum demo: export the assets, assemble, produce a .tap.
+# Build the Spectrum demo: export the assets, assemble, produce a .tap and
+# a .trd -- the tape and the disk, each assembled for itself (DISK in
+# media.inc), the disk first and the tape last, so that what build/ holds
+# besides the two -- the symbols, the binaries -- is the tape's, as the
+# tools that test it expect.  The disk's are kept in build/disk/.
 #
-#   build/          the tape, its symbols, and the two include files
+#   build/          the tape, the disk, the symbols, the include files
 #   build/bin/      the binaries the assembler pulls in
+#   build/disk/     the disk's symbols and binaries
 #   build/png/      whatever the diagnostic tools draw
 set -e
 cd "$(dirname "$0")"
 python tools/mkassets.py build
+# what mkassets made, as it made it: each build changes some of it
+rm -rf build/bin.mk
+cp -r build/bin build/bin.mk
+
+media() {
+MEDIA=$1
+export MEDIA
+rm -rf build/bin
+cp -r build/bin.mk build/bin
+if [ "$MEDIA" = disk ]; then DISK=1; CUTS="1 2 3 4 5 6"; else DISK=0; CUTS="1 2 3 4 5"; fi
+echo "DISK            equ     $DISK" > src/media.inc
+cp build/cut6.inc src/
 cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/cut5.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc
 cd src
@@ -41,13 +58,15 @@ def defined(path):
             for m in [re.match(r'([A-Za-z_][A-Za-z0-9_]*)(:|\s+equ\s)', l, re.I)] if m}
 used = words('src/cut1.asm') | words('src/cutplay.asm')
 own = defined('src/cut1.asm') | defined('src/cutplay.asm') | defined('src/cut1.inc')
+own |= (defined('src/dload.asm') | defined('src/dgate.asm') | defined('src/dout.asm')
+        | defined('src/media.inc'))
 with open('src/popsyms.inc', 'w') as f:
     f.write('; what PlayCut1 uses of the game: build.sh -- do not edit\n')
     for name in sorted((used & set(sym)) - own):
         f.write('%-15s equ     0x%04X\n' % (name, sym[name]))
 PY
 cd src
-for k in 1 2 3 4 5; do
+for k in $CUTS; do
     cp cut$k.inc cutsel.inc
     cp cutfixed$k.bin cutsel.bin
     ../tools/pasmo.exe --bin cut1.asm ../build/cut${k}code.bin ../build/cut$k.sym
@@ -118,7 +137,8 @@ base = sym['stubs']
 # and the code.  The fifth is the ending's, which composes its band past
 # its code (CUT_BUFOFF) and never gives the room's code back.
 lens = {}
-for k in (1, 2, 3, 4, 5):
+disk = os.environ['MEDIA'] == 'disk'
+for k in (1, 2, 3, 4, 5, 6) if disk else (1, 2, 3, 4, 5):
     csym = {}
     for line in open('build/cut%d.sym' % k):
         m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
@@ -171,6 +191,16 @@ assert len(mod) == sym['MODLEN'], 'the control code did not come out whole'
 # The canvas bank's own code, assembled at CODE1, rides at the end of the
 # art bank's block, past the titles' music, for start to put in place.
 c1 = data[sym['CODE1'] - base:sym['c1end'] - base]
+# The disk's code (dload.asm), assembled where it runs, past the room's code,
+# rides in the canvas bank's: in DRVIMG, kept for it.
+if disk:
+    drv = data[sym['drvorg'] - base:sym['drvend'] - base]
+    assert sym['drvorg'] == sym['roomend'] and sym['drvend'] <= sym['HICODE']
+    assert len(drv) <= sym['DRVMAX'], 'код диска длиннее DRVMAX: %d' % len(drv)
+    off = sym['DRVIMG'] - sym['CODE1']
+    assert not any(c1[off:off + sym['DRVMAX']])
+    c1 = c1[:off] + drv + c1[off + len(drv):]
+    print('код диска %d байт из %d' % (len(drv), sym['DRVMAX']))
 assert len(c1) == sym['C1LEN'] <= sym['CODE1_MAX'], 'код банка холста не влез'
 art = open('build/bin/bank_art.bin', 'rb').read()
 assert 0xC000 + len(art) == sym['C1ART'], 'банк заставки не той длины'
@@ -252,7 +282,11 @@ print('управление %04X..%04X, %d байт в банке 7, свобо�
 assert sym['modend'] <= 0x10000, 'the control code does not fit the canvas bank'
 assert sym['modend'] <= 0x10000 - 12 and sym['modend'] > sym['MODORG'], 'the control code does not fit under the interrupt stub'
 PY
+if [ "$MEDIA" = tape ]; then
 python tools/maketap.py build/pop.tap build/pop.bin 24320       6:build/bin/bank_art.bin 0:build/bin/bank_spr1.bin        4:build/bin/bank_spr2.bin 1:build/bin/bank_spr3.bin 3:build/bin/bank_bg.bin 7:build/bin/bank_spare.bin $(tr -d '\r' < build/bin/tape.lst | sed 's/^/L:/')
+else
+python tools/mkdisk.py
+fi
 python - <<'PY'
 import re, json, os
 sym = {}
@@ -291,3 +325,15 @@ assert sym['gdlast'] + 10 <= sym['LOWSTACK'], 'гдласт залез в сте
 assert sym['LOWVARS'] + sym['LOWVARLEN'] <= 23755, 'переменные рисования налезли на стек'
 assert work <= sym['HICODE'], 'рабочий буфер налез на код боя'
 PY
+# the disk's own symbols and binaries, kept from the tape's that follow
+if [ "$MEDIA" = disk ]; then
+    rm -rf build/disk
+    mkdir -p build/disk
+    cp -r build/bin build/disk/bin
+    cp build/pop.bin build/pop.sym build/sym.json build/loader.bin build/loader.sym \
+       build/cut6.sym build/cut5.sym build/cut1.sym build/trd.json build/disk/
+fi
+}
+
+media disk
+media tape

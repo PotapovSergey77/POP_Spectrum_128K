@@ -26,9 +26,16 @@
 ; and then the Epilog, whose screens and tune levelgo has brought in with
 ; it, as the next level, into the background bank.  It never goes back:
 ; nothing of the room's code is kept, and its band goes past this code.
+;
+; The disk's (DISK) has one more, CUT_ENDING 2: PlayCut6, YouLose, the
+; room empty and the hourglass run out, which the loader reads into the art
+; bank when the hour is gone (loader.asm), and which never goes back either.
+; After it, and after the Epilog, the disk starts the game again from its
+; titles (reboot), as the Apple does.
 
                 include "popsyms.inc"
                 include "cutsel.inc"    ; the scene's: build.sh
+                include "media.inc"
 
                 org     work
 
@@ -53,9 +60,13 @@ c1up:           halt                    ; ENTER or SPACE may still be down
 
 c1key:          ld      sp, (c1sp)      ; the end, or a key
                 call    ststop
-                if      CUT_ENDING
+                if      CUT_ENDING = 2
+                jp      reboot
+                endif
+                if      CUT_ENDING = 1
                 jp      epilog
-                else
+                endif
+                if      CUT_ENDING = 0
                 ld      a, BANK_CVS     ; and the game's sounds its own
                 ld      (sfxbank), a
                 ld      a, BANK_ART
@@ -93,7 +104,7 @@ tunes:          dw      CUT1_TUNE, CUT1_TUNEND
 
                 include "cutplay.asm"
 
-                if      CUT_ENDING
+                if      CUT_ENDING = 1
 
 ; ---------------------------------------------------------------- the Epilog
 ;
@@ -157,11 +168,15 @@ epup:           halt                    ; and a key, new
 epdown:         halt
                 call    epkey
                 jr      z, epdown
+                if      DISK
+                jp      reboot          ; the disk's titles
+                else
                 di                      ; the 128's own ROM, and its start
                 ld      bc, 0x7FFD
                 xor     a
                 out     (c), a
                 rst     0
+                endif
 
 epkey:          xor     a               ; any key: NZ
                 in      a, (254)
@@ -207,6 +222,44 @@ wpnext:         inc     c
                 jr      nz, wpcol
                 ret
 
+                endif
+
+                if      DISK
+                if      CUT_ENDING
+
+; ---------------------------------------------------------------- the titles
+;
+; The disk's way back to the start, where the Apple goes to its titles --
+; after the Epilog, and after PlayCut6 -- and the tape could only start the
+; 128 again: the loader read again over the buffers, the screen black, and
+; it reads the game in as it did the first time.  REVTAB, which start makes
+; again, takes the sectors on their way.
+
+reboot:         di
+                call    ststop
+                xor     a
+                call    setvis
+                ld      hl, 0x5800
+                ld      de, 0x5801
+                ld      bc, 767
+                ld      (hl), 0
+                ldir
+                ld      hl, LDRPOS
+                ld      (cdpos), hl
+                ld      hl, LDRORG
+                ld      de, LDRLOAD
+                call    dload
+                jp      LDRORG
+
+cdpos:          dw      0
+DPOS            equ     cdpos
+DBUF            equ     REVTAB
+
+                include "dload.asm"
+                include "dgate.asm"
+                include "dout.asm"
+
+                endif
                 endif
 
 cutfixed:       incbin  "cutsel.bin"

@@ -341,7 +341,7 @@ def build_blobs(scene_frames=None):
     assert len(states) <= 2, states
     flowing = {st['glass'] for st, _ in frames if st['sand']}
     botcut = {min(FLOW_Y + 1, GLASS_Y - SANDHT[s]) for s in flowing}
-    assert len(botcut) == (1 if states else 0), botcut  # one flow picture
+    assert len(botcut) == (1 if flowing else 0), botcut  # one flow picture
     botcut = botcut.pop() if botcut else None
     # PlayCut7 has no hourglass: none of its code, and the flag that said
     # which of two it was says a frame is held while the tune plays out
@@ -350,7 +350,11 @@ def build_blobs(scene_frames=None):
     # of a fiftieth a frame (cutplay.asm), between seven's and twelve's
     slow = {st['speed'] for st, _ in frames} - {12}
     assert len(slow) <= 1, slow
-    eq['CUT_QA'] = {7: 59, 8: 60}[slow.pop() if slow else 7]
+    # -- or PlayCut6's twenty two, as far on from twelve's as seven is back
+    eq['CUT_QA'] = {7: 59, 8: 60, 22: 77}[slow.pop() if slow else 7]
+    # a frame held while the tune plays out (PlaySong mid scene): PlayCut7's,
+    # with no hourglass, and PlayCut6's, whose one hourglass leaves flag 8 free
+    eq['CUT_SONGHOLD'] = int(any(st.get('songhold') for st, _ in frames))
     # the widest picture blitted, in bytes: cutplay.asm's row work is made
     # for five, and one of PlayCut7's embraces is six across
     eq['CUT_WMAX'] = max([5] + [sprites[n & 0x7F][3] for _, rec in frames
@@ -400,9 +404,12 @@ def build_blobs(scene_frames=None):
     put('CUT_FLTAB', bytes(n - 1 for n in TORCH_FLAMES))
 
     if not states:                      # nothing of it is ever drawn
-        eq.update(CUT_GL_AT=0, CUT_GL_W=1, CUT_GL_H=1, CUT_FW_AT=0,
-                  CUT_FW_W=1, CUT_FW_H=1)
-        for name in ('CUT_GL_EXT', 'CUT_GL0', 'CUT_FW_EXT', 'CUT_FW'):
+        eq.update(CUT_GL_AT=0, CUT_GL_W=1, CUT_GL_H=1)
+        for name in ('CUT_GL_EXT', 'CUT_GL0'):
+            at[name] = 0
+    if not flowing:                     # nor of the sand, the glass empty
+        eq.update(CUT_FW_AT=0, CUT_FW_W=1, CUT_FW_H=1)
+        for name in ('CUT_FW_EXT', 'CUT_FW'):
             at[name] = 0
     for s, n in enumerate(GLASSIMG[g] for g in states):
         im = ch6(n)
@@ -413,7 +420,7 @@ def build_blobs(scene_frames=None):
         put('CUT_GL%d' % s, d)
 
     data = bytearray()
-    for n in FLOW_IMAGES if states else ():
+    for n in FLOW_IMAGES if flowing else ():
         im = ch6(n)
         rows = [list(l) for l in im.pixels()]
         top = FLOW_Y - im.height + 1        # BOTCUT: the lines from the
@@ -422,7 +429,7 @@ def build_blobs(scene_frames=None):
         eq['CUT_FW_AT'] = band_row(top) * 32 + col
         eq['CUT_FW_W'], eq['CUT_FW_H'] = w, len(rows)
         data += d
-    if states:
+    if flowing:
         put('CUT_FW_EXT', ext)
         put('CUT_FW', data)
 
@@ -498,7 +505,7 @@ def build_blobs(scene_frames=None):
             f |= 4 | (8 if states.index(st['glass']) else 0)
             last_glass = st['glass']
         if st.get('songhold'):
-            assert not states
+            assert len(states) <= 1 and not f & 4
             f |= 8
         if st['sand'] and not sand:
             f |= 16
@@ -524,7 +531,8 @@ def build_blobs(scene_frames=None):
     eq['CUT_FRAMES'] = len(frames)
     eq['CUT_COL0'] = col0
     for name in ('CUT_FL0_AT', 'CUT_FL1_AT', 'CUT_PO_AT') + (
-            ('CUT_GL_AT', 'CUT_FW_AT') if states else ()):
+            ('CUT_GL_AT',) if states else ()) + (
+            ('CUT_FW_AT',) if flowing else ()):
         assert eq[name] % 32 >= col0, name
     del eq['CUT_FLTAB']
     return table, pics, bytes(script), fixed, at, eq, len(sprites)

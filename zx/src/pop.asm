@@ -19,8 +19,11 @@
 ; in another, paged in for the part of the frame that reads them.
 
                 org     24320
+                include "media.inc"     ; DISK: the tape's or the disk's
 PAGEPORT        equ     0x7FFD
 BANKM           equ     0x5B5C  ; the 128 ROM's copy of it
+
+                if      DISK = 0
 
 ; The tape's BASIC loader cannot page banks itself -- OUT is the one statement
 ; this build cannot try out before it ships -- so it calls in here instead.
@@ -73,6 +76,27 @@ dopage:         and     7
                 ld      bc, PAGEPORT
                 out     (c), a
                 ret
+
+                else
+
+; The disk's loader (loader.asm) pages the banks itself and goes straight
+; to start, so nothing of the tape's stubs is here: the map and the keys
+; take their place, and the way into the TR-DOS ROM (dout.asm).  As long as
+; the stubs were, to the byte: the code after has things that must not
+; cross a page.
+
+stubs:
+vwmap:          ds      24
+keytab:         ds      10
+                include "dout.asm"
+                ds      stubs + 44 - $
+
+DRVMAX          equ     98              ; dload.asm's room in the canvas bank
+LDRPOS          equ     18              ; the loader's body on the disk:
+LDRLOAD         equ     512             ; DPOS's, and how much of it there is
+                                        ; (maketrd.py)
+
+                endif
 
 cutfixed        equ     roomblk         ; PlayCut0's pictures: see mkassets
                 include "assets.inc"
@@ -6143,9 +6167,12 @@ tmup:           ld      a, (temin)
                 ld      a, (curlev)
                 cp      12
                 jp      c, tlose
+                if      DISK = 0
                 ld      a, (charlife)
                 rla
                 jp      nc, tlose
+                endif                   ; (the disk's: when levelgo starts
+                                        ; the level again, lgdead)
 
 ; The message on the screen while msgtimer runs -- drawn again when what
 ; it says has changed or something has gone over the row -- and when it is
@@ -6271,7 +6298,33 @@ tlmin:          ld      a, (temin)
 ; Time's up (YouLose): the Apple goes to the princess, the hourglass empty,
 ; and back to the titles -- neither of which the tape can go back for.  The
 ; message stays, and a key starts the 128 over, as the end of the game does.
+;
+; The disk can.  The level is begun again, as if he had died, by way of the
+; room change, and levelgo, finding the hour gone, goes to the princess
+; instead (lgdead) -- as it does when he dies with no time left on thirteen
+; or fourteen, which is the Apple's YouLose from ctrlplayer.
 
+                if      DISK
+tlose:          ld      a, 3
+                ld      (lvflag), a
+                ret
+
+; The disk's code into the working copy, from the canvas bank's code where
+; it is kept (DRVIMG), for a level's blocks or the hour run out.  It runs
+; past the room's code (drvorg), whose working copy is nothing to anyone
+; while a level changes; its sector into the first page of the copy (DBUF).
+; Leaves the canvas bank in.  Here, and dgate.asm with it, past the shift
+; tables: their page has no room for them.
+
+drvin:          call    page_pixels
+                ld      hl, DRVIMG
+                ld      de, drvorg
+                ld      bc, DRVMAX
+                ldir
+                ret
+
+                include "dgate.asm"
+                else
 tlose:          call    tmat
                 ld      hl, tmlost
                 call    tstr
@@ -6282,11 +6335,14 @@ tlose:          call    tmat
                 xor     a
                 out     (c), a
                 rst     0
+                endif
 
 tmwmin:         db      " MINUTES", 0
 tmwsec:         db      " SECONDS", 0
 tmwleft:        db      " LEFT", 0
+                if      DISK = 0
 tmlost:         db      "  TIME IS UP", 0
+                endif
 tmwlev:         db      "LEVEL ", 0
 
 tefr            equ     0x5C79          ; frames into the minute: FRAMES's
@@ -6599,6 +6655,15 @@ cd1:            ld      a, 0xbf         ; ENTER, and not the button with it:
                 ld      (lvflag), a
                 jp      page_art
 
+                if      DISK
+
+; The disk's code, kept here, in the room the tape's messages had: drvin
+; copies it out to drvorg, where it runs (dload.asm).
+
+DRVIMG:         ds      DRVMAX
+
+                else
+
 ; The tape, while a level changes: a line of the ROM's letters across the
 ; middle of the black screen asks for it to be started, and once the level
 ; is in, stopped -- for a few seconds, or until ENTER or SPACE.
@@ -6653,6 +6718,8 @@ tm2:            ld      a, (hl)
 
 msgstart:       db      9, "START THE TAPE", 0
 msgstop:        db      9, "STOP THE TAPE ", 0
+
+                endif
 
 ; ------------------------------------------------------------- a test key
 ;
@@ -8151,6 +8218,16 @@ roomblk:
                 include "roomblk.asm"
 roomend:
 
+; The disk's code, assembled where it runs, in the working copy past the
+; room's: build.sh takes it out of the image to the canvas bank's code
+; (DRVIMG), and drvin puts it here when it is wanted.
+
+                if      DISK
+drvorg:
+                include "dload.asm"
+drvend:
+                endif
+
 ; The two banks it is kept in, and how much of it each one holds.  The
 ; lengths are the block's own, not what is free past the tables: roomrest
 ; copies exactly these back over the working copy, and the canvas moved down
@@ -8272,5 +8349,15 @@ LOWTOP          equ     hbsave + 4
 ; the erase went down on the wrong line.
 
 work            equ     (codeend + 0x7FF) / 0x800 * 0x800
+
+; The disk's: the next sector of the disk, just past the buffers, where
+; nothing writes but the loader and dload; the sector itself into the
+; working copy's first page, which is nothing while a level changes -- the
+; character set's chunks go through it after (chset_put); and the loader,
+; read again when the hour runs out, over the buffers, whose game is over.
+
+DPOS            equ     LOWTOP
+DBUF            equ     work
+LDRORG          equ     LOWBUF
 
                 end     start
