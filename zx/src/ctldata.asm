@@ -13,7 +13,7 @@ CM_INK          equ     0x0F            ; the story's white on blue
 CM_HI           equ     0x0E            ; and its border's yellow line
 CM_ITEM         equ     7               ; the first of the four's rows
 CM_VERROW       equ     3               ; the version's row, inside the border
-CM_VERLEN       equ     14              ; "Ver.: 0.1 " and four of the hash
+CM_VERLEN       equ     8               ; "0.1 " and four of the hash
 
                 org     CMDATA
 
