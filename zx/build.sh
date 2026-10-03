@@ -10,6 +10,18 @@ python tools/mkassets.py build
 cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/cut5.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc
 cd src
+# The controls screen's words first (ctldata.asm): the game takes their
+# addresses from them.
+../tools/pasmo.exe --bin ctldata.asm ../build/ctldata.bin ../build/ctldata.sym
+python - <<'PY'
+import re
+with open('ctldata.inc', 'w') as f:
+    f.write('; the controls screen words (ctldata.asm): build.sh -- do not edit' + chr(10))
+    for line in open('../build/ctldata.sym'):
+        m = re.match(r'(\S+)\s+EQU\s+([0-9A-Fa-f]+)H', line.strip())
+        if m:
+            f.write('%-15s equ     0x%04X' % (m.group(1), int(m.group(2), 16)) + chr(10))
+PY
 ../tools/pasmo.exe --bin pop.asm ../build/pop.bin ../build/pop.sym
 cd ..
 # PlayCut1 is a program of its own, loaded off the tape before level two
@@ -165,7 +177,12 @@ assert 0xC000 + len(art) == sym['C1ART'], 'банк заставки не той
 assert sym['C1ART'] + len(c1) <= 0x10000 - 12, 'код банка холста не влез в банк заставки'
 assert len(c1) <= sym['RB1LEN'], 'код банка холста длиннее кода постройки комнаты'
 assert sym['c1end'] <= sym['MODORG'], 'код банка холста налез на управление в образе программы'
-open('build/bin/bank_art.bin', 'wb').write(art + c1)
+# and past it, at the top of the bank, the controls screen's words
+cm = open('build/ctldata.bin', 'rb').read()
+assert sym['C1ART'] + len(c1) <= sym['CMDATA'], 'код банка холста налез на слова экрана управления'
+assert sym['CMDATA'] + len(cm) <= 0x10000 - 12, 'слова экрана управления не влезли в банк заставки'
+open('build/bin/bank_art.bin', 'wb').write(art + c1 + bytes(sym['CMDATA'] - sym['C1ART'] - len(c1)) + cm)
+print('слова экрана управления %04X..%04X' % (sym['CMDATA'], sym['CMDATA'] + len(cm)))
 print('код банка холста %04X..%04X, %d байт, свободно там %d'
       % (sym['CODE1'], sym['c1end'], len(c1), sym['CODE1_MAX'] - len(c1)))
 # The fight sits past the working copy, and the tape carries a gap to it.

@@ -532,6 +532,8 @@ class Z80:
             elif y == 3:                                # in a,(n)
                 n = self.fetch()
                 v = self.default_in
+                if n == 0x1F:                           # a Kempston joystick
+                    v = self.ports.get(0x1F, 0)
                 if n == 0xFE:                           # the keyboard: every
                     for r in range(8):                  # half row whose line
                         if not self.a & (1 << r):       # is low, ANDed

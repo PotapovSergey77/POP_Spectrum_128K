@@ -149,14 +149,15 @@ def skip_intro(cpu, path):
     check wants the game, so the intro returns at once -- unless POP_INTRO is
     set, to look at the titles themselves.
     """
-    if os.environ.get('POP_INTRO'):
-        return
     for sym in (os.path.splitext(path)[0] + '.sym.json',
                 os.path.join(os.path.dirname(path), 'sym.json')):
         if os.path.exists(sym):
-            at = json.load(open(sym)).get('intro')
-            if at is not None:
-                cpu.mem[at] = 0xC9          # RET
+            s = json.load(open(sym))
+            # and the controls screen after them, which waits for a key --
+            # unless POP_MENU is set
+            for name, keep in (('intro', 'POP_INTRO'), ('ctlmenu', 'POP_MENU')):
+                if s.get(name) is not None and not os.environ.get(keep):
+                    cpu.mem[s[name]] = 0xC9     # RET
             return
 
 

@@ -59,6 +59,9 @@ stubs:          ld      a, BANK_ART
 ; the top of the six of them.
 
 vwmap           equ     stubs
+keytab          equ     stubs + 24      ; and past it the keys: five of row,
+                                        ; mask -- the button, up, down, left,
+                                        ; right -- read_input's (ctlmenu.asm)
 
 dopage:         and     7
                 ld      b, a
@@ -809,46 +812,49 @@ nowbank:        db      BANK_ART
 ; a handler has used the press.  Without them a held key repeats its action
 ; every frame, which is not how the game plays at all.
 ;
+; The keys are keytab's, which the controls screen sets (ctlmenu.asm): by
+; default
+;
 ;   left    key 5, row F7FE bit 4        up      key 7, row EFFE bit 3
 ;   right   key 8, row EFFE bit 2        down    key 6, row EFFE bit 4
 ;   button  space, row 7FFE bit 0
 ;
 ; Not caps shift, tempting though it is: there are no cursor keys on a
 ; Spectrum, and every emulator makes them caps shift and 5-6-7-8.  Using it
-; for the button would mean every step was a careful one.
+; for the button would mean every step was a careful one.  Or a Kempston
+; joystick, port 31, its bits as C has them here.
 
 mfix0:
                 org     MODORG              ; into the canvas bank: see MODORG
-read_input:     ld      bc, 0xF7FE
-                in      a, (c)
-                ld      d, a            ; D = the 1-5 half row
-                ld      bc, 0xEFFE
-                in      a, (c)
-                ld      e, a            ; E = the 6-0 half row
-
-                xor     a               ; JSTKY
-                bit     3, e
-                jr      nz, riydn
-                dec     a
-                jr      riy2
-riydn:          bit     4, e
-                jr      nz, riy2
-                inc     a
+read_input:     ld      hl, keytab      ; the five keys, from the button's
+                ld      b, 5            ; down: C = what a Kempston gives,
+rik:            ld      a, (hl)         ; 4 fire, 3 up, 2 down, 1 left, 0
+                inc     hl              ; right
+                in      a, (254)
+                and     (hl)
+                inc     hl
+                sub     1               ; carry: down
+                rl      c
+                djnz    rik
+kjpatch:        jr      rikd            ; a Kempston joystick: jr +0 (ctlmenu)
+                in      a, (0x1f)
+                ld      c, a
+rikd:           ld      a, c            ; JSTKY: up first, then down --
+                rra                     ; 1 down, 2 up, 3 both
+                rra
+                and     3
+                cp      2
+                jr      c, riy2
+                ld      a, -1
 riy2:           ld      (jstky), a
-
-                xor     a               ; JSTKX, stored the way SPECIALK.S
-                bit     4, d            ; stores it: as if he faced left, so
-                jr      nz, rix1        ; forward is the left key
+                ld      a, c            ; JSTKX, stored the way SPECIALK.S
+                and     1               ; stores it: as if he faced left, so
+                bit     1, c            ; forward is the left key
+                jr      z, rix1
                 dec     a
-rix1:           bit     2, e
-                jr      nz, rix2
-                inc     a
-rix2:           ld      (jstkx), a
-
-                ld      bc, 0x7FFE
-                in      a, (c)
-                cpl
-                and     1
+rix1:           ld      (jstkx), a
+                ld      a, c
+                and     0x10
                 ld      (btn), a
 
 ; CLRJSTK in SPECIALK.S.  A flag already at -1 stays there until someone uses
@@ -7991,9 +7997,16 @@ stubbank:       push    bc
                 im      2
                 ld      a, BANK_ART     ; the titles' music is theirs
                 ld      (sfxbank), a
+                ld      hl, keydef      ; the keys, as they are until the
+                ld      de, keytab      ; controls screen says otherwise
+                ld      bc, 10
+                ldir
                 ld      a, POP_START    ; the titles, before the game begins
                 or      a               ; -- a tape started elsewhere, for a
-                call    nz, intro       ; test, goes straight in
+                call    nz, intro       ; test, goes straight in -- and the
+                ld      a, POP_START    ; controls after them
+                or      a
+                call    nz, ctlmenu
                 call    ststop          ; and the game's sounds its own
                 ld      a, BANK_CVS
                 ld      (sfxbank), a
@@ -8120,6 +8133,7 @@ isrbanks:       db      BANK_SPR1, BANK_SPR2, BANK_SPR3, BANK_BG, BANK_ART
                 db      BANK_CANVAS
 
                 include "intro.asm"
+                include "ctlmenu.asm"
 
 initend:
 
