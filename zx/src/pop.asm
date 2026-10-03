@@ -400,7 +400,7 @@ camtake:
                 ld      a, (vwcam)
                 ld      (cam), a
                 ld      a, 1
-                ld      (flipnow), a
+camflip:        ld      (flipnow), a    ; (fullshow upside down: lvcode.asm)
                 ret
 
 ; A = the camera the rule gives: how many of the three steps, the way he
@@ -2404,6 +2404,9 @@ mpc2:
 ; createshad, which REFLECTION acts on (lvcode.asm).  SMASHMIRROR's spec
 ; nothing reads, and is not kept.  From checkcoll1, in the module, and back.
 
+; (From level nine on, these bytes are that level's way into its upside
+; down screen: see lvcode.asm.)
+
 ckmirr:         ld      a, (charid)
                 or      a
                 jr      nz, ckmyes
@@ -3062,8 +3065,8 @@ sacskip:        inc     c
                 ret
 
 ; And the colour of a flask's potion in the one cell its bubbles keep to: red
-; for the two that give strength, green for weightlessness, blue for the
-; rest.  flask_ma puts them in cell row 5 of the block row, 4 for a tall
+; for the two that give strength, green for weightlessness and for the one
+; that turns the screen over, blue for poison.  flask_ma puts them in cell row 5 of the block row, 4 for a tall
 ; bottle -- which potion five's is not -- and in the cell that starts at room pixel 28 col + 16 -- + 12 in
 ; an odd column, where the flask is five pixels further back.
 
@@ -3293,7 +3296,7 @@ shown_attrs:    call    page_canvas     ; bank 7, in case it is that one
                 or      0x58
                 ld      h, a
                 ld      l, 0
-                jp      set_attrs_at
+shattrs:        jp      set_attrs_at
 
 
 INK_POTRED      equ     0x42
@@ -3320,12 +3323,10 @@ fatile:         ld      a, (hl)
                 cp      2               ; the tall bottle a cell row higher
                 jr      z, faink        ; than the short one --
                 jr      c, fashort      ; refresh: the short bottle
-                ld      d, INK_POTGREEN
-                cp      3
-                jr      z, faink
-                ld      d, INK_POTBLUE
-                cp      5               ; and five's is the short one too
-                jr      nz, faink
+                ld      d, INK_POTGREEN ; three and four
+                cp      5
+                jr      c, faink
+                ld      d, INK_POTBLUE  ; and five's is the short one too
 fashort:        inc     e
 faink:          ld      a, b            ; eight cell rows a block row
                 add     a, a
@@ -5346,17 +5347,18 @@ shnoflip:
                 ld      (roomp), hl
                 ld      b, 192
 fsrow:          push    bc
-                call    line_addr
+fsline:         call    line_addr       ; (upside down, these four are
+                                        ; patched: lvcode.asm, level nine)
                 ex      de, hl
                 ld      hl, (roomp)
                 call    copy32
                 push    hl              ; the room, past its thirty two
                 ld      hl, (rowptr)
                 ld      de, newcol
-                call    fs_sprite
+fsspr1:         call    fs_sprite
                 ld      hl, (rowptr)
                 ld      de, newcol + OP
-                call    fs_sprite
+fsspr2:         call    fs_sprite
                 pop     hl
                 call    nextrow
                 pop     bc
@@ -5366,7 +5368,7 @@ fsrow:          push    bc
                 ld      (vwcam), a      ; the one to show -- and a view being
                 xor     a               ; made anywhere is made over
                 call    setvis
-                jp      show_flames
+fsflames:       jp      show_flames
 
 ; The rectangles go to whichever screen is shown, bank 7 paged in case it is.
 
@@ -6905,9 +6907,11 @@ addsfx:         ld      a, (frame)
 
 ; POTIONEFFECT in MISC.S, on the effect in the sequence the kid drinks in.
 ; lastpotion is what RemoveObj left: -1 the sword, 1 a refresh of one point,
-; 2 one more point for good, 3 weightlessness, 5 poison.  The lightning is
-; the Apple's whole screen gone to one colour for a frame; the border here.
-; The upside down potion, 4, is not done: the screen cannot turn over.
+; 2 one more point for good, 3 weightlessness, 4 the screen upside down, 5
+; poison.  The lightning is the Apple's whole screen gone to one colour for a
+; frame; the border here.  Four only turns invert over -- createshad, which
+; no level with the potion uses otherwise -- and level nine's code, the only
+; level that has it, turns the screen.
 
 ; wtlessflash's count, from show_meters: weightlessness wears off a frame
 ; at a time, and all the while the floating tune goes round -- started again
@@ -6979,11 +6983,18 @@ pe2full:        ld      (kidstr), a
                 ld      bc, RED * 256 + 5
                 jr      peflash
 pe3:            cp      3
-                jr      nz, pe5
+                jr      nz, pe4
                 ld      a, 200          ; wtlesstimer
                 ld      (weightless), a
                 ld      a, SND_FLOAT    ; and the CPC's floating tune, not
                 jp      addsound        ; s_ShortPot: see c1wtless
+pe4:            cp      4               ; upside down: the rest is level
+                jr      nz, pe5         ; nine's (lvcode.asm)
+                ld      hl, createshad
+                ld      a, (hl)
+                cpl
+                ld      (hl), a
+                ret
 pe5:            cp      5
                 ret     nz
                 ld      a, SND_SPLAT

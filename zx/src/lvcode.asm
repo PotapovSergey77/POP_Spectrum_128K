@@ -1722,7 +1722,231 @@ skfx:           dw      0
 
                 endif
 
-                if      LVNUM < 3 or LVNUM = 7 or LVNUM = 9 or LVNUM = 10 or LVNUM = 11
+                if      LVNUM = 9
+; ---------------------------------------------------------------- upside down
+;
+; Level nine's two tall flasks hold potion four, which turns the screen over
+; (POTIONEFFECT in MISC.S: invert, and INVERTY turns the Apple's tables of
+; line addresses round) -- and back again, a second one.  potion_effect only
+; turns the flag over: createshad, which nothing else on this level uses and
+; levelgo clears, as MASTER.S does invert when a level begins.  The screen
+; comes back the right way up when he dies (TOPCTRL.S) and when the level is
+; left -- here as soon as he has gone through the door at the top of the
+; stairs; the meters stay at the foot, where the Spectrum has their colours.
+;
+; Everything is drawn as ever, the room and the working copy the right way
+; up; only what goes to the screen goes upside down, and always into bank 5,
+; the screen shown:
+;
+; - showgo, every rectangle from the working copy: from shabove on, flshow,
+;   a row at a time with the row's place turned over;
+; - fullshow, the screen laid from the room: its rows go to the line turned
+;   over (laflip), and him out of the working copy afterwards by showpart --
+;   which shows his rectangles through flshow -- not row by row;
+; - set_attrs, the colours: worked out as ever, then their rows turned over
+;   (flattr); shown_attrs, after a hurt, goes through it too;
+; - a new view: the view ahead goes on being made in bank 7 -- never shown
+;   now -- and when it is ready the screen is laid whole from the room
+;   instead (camflip), so bank 5 is the one shown from first to last.
+;
+; A screen line y goes to 191 - y: its address's high byte H to 0x97 - H,
+; the low byte's character row turned over, L xor 0xE0.  The code for this
+; that has to be in the fixed half -- two ways into the background bank and
+; laflip -- goes over ckmirr, the mirror's, which no level after four ever
+; runs; the eight patches are put in and taken out again from here.
+
+WORKOFS         equ     (work - SCREEN) / 256
+
+post:           ret     c               ; (the top of the frame)
+                ld      a, (createshad)
+                ld      b, a
+                ld      a, (lvflag)     ; up again when a level is to come --
+                cp      2
+                jr      nc, upright
+                ld      a, (frame)      ; already once he is through the
+                or      a               ; door at the top of the stairs, the
+                jr      z, upright      ; blank frames before nextlevel: on
+                                        ; the frame that sets lvflag, ENTER
+                                        ; held changes the level at once
+                ld      a, (charlife)   ; and when he is dead
+                rla
+                jr      c, inv1
+upright:        xor     a
+                ld      (createshad), a
+                ld      b, a
+inv1:           ld      a, (inverted)   ; as it is: nothing to do
+                cp      b
+                ret     z
+                ld      a, b
+                ld      (inverted), a
+                ld      a, 1            ; the screen laid again, either way
+                ld      (fullshow), a
+                ld      hl, ibsrc
+                ld      de, ckmirr
+                ld      bc, IBLEN
+                ldir
+                ld      hl, ptab
+                ld      a, NPATCH
+inv2:           push    af
+                ld      e, (hl)
+                inc     hl
+                ld      d, (hl)
+                inc     hl
+                push    hl
+                ld      a, (inverted)
+                or      a
+                jr      nz, inv3
+                inc     hl              ; the bytes as they were
+                inc     hl
+                inc     hl
+inv3:           ldi
+                ldi
+                ldi
+                pop     hl
+                ld      bc, 6
+                add     hl, bc
+                pop     af
+                dec     a
+                jr      nz, inv2
+                ret
+
+; A rectangle of the working copy to the screen, upside down: from showgo's
+; shabove, by bgcall.  B = its rows, C = the first; shcall has the copy's way
+; in for its width.  Rows the meters lie over now are its top eight.
+
+flshow:         ld      a, c
+                cp      8
+                jr      nc, fls1
+                ld      a, 1
+                ld      (meterdirty), a
+fls1:           ld      hl, (shcall + 1)
+                ld      (flcall + 1), hl
+                ld      a, (shcol)
+                ld      e, a
+                ld      a, c
+                call    scraddr
+                ld      a, h            ; HL = the working copy
+                add     a, WORKOFS
+                ld      h, a
+flrow:          push    bc
+                ld      a, 0x97 + WORKOFS       ; DE = the screen, the line
+                sub     h                       ; turned over
+                ld      d, a
+                ld      a, l
+                xor     0xe0
+                ld      e, a
+                push    hl
+                ld      c, 255
+flcall:         call    0               ; patched: the copy
+                pop     hl
+                inc     h               ; a line down the working copy
+                ld      a, h
+                and     7
+                jr      nz, fls2
+                ld      a, l
+                add     a, 32
+                ld      l, a
+                jr      c, fls2
+                ld      a, h
+                sub     8
+                ld      h, a
+fls2:           pop     bc
+                djnz    flrow
+                ret
+
+; set_attrs, and the colour's rows turned over: by bgcall from set_attrs.
+
+flattr:         ld      hl, SCREEN + 6144
+                call    set_attrs_at
+                ld      hl, SCREEN + 6144
+                ld      de, SCREEN + 6144 + 23 * 32
+                ld      b, 12
+fla1:           push    bc
+                ld      b, 32
+fla2:           ld      a, (de)
+                ld      c, (hl)
+                ld      (hl), a
+                ld      a, c
+                ld      (de), a
+                inc     hl
+                inc     de
+                djnz    fla2
+                ex      de, hl
+                ld      bc, -64
+                add     hl, bc
+                ex      de, hl
+                pop     bc
+                djnz    fla1
+                ret
+
+; Over ckmirr: the ways in from showgo and set_attrs, and fullshow's line.
+
+ibsrc:          ld      de, flshow
+                jp      bgcall
+                ld      de, flattr
+                jp      bgcall
+                call    line_addr       ; laflip: line_addr's, turned over
+                ld      a, l
+                xor     0xe0
+                ld      l, a
+                ld      a, 0x97
+                sub     h
+                ld      h, a
+                ret
+IBLEN           equ     $ - ibsrc       ; up to createshad, 25
+TRSHOW          equ     ckmirr
+TRATTR          equ     ckmirr + 6
+LAFLIP          equ     ckmirr + 12
+
+; The patches: where, the bytes upside down, and as they were.
+
+ptab:           dw      shabove
+                db      0xc3
+                dw      TRSHOW
+                db      0x3a
+                dw      shcol
+                dw      set_attrs
+                db      0xc3
+                dw      TRATTR
+                db      0x21
+                dw      SCREEN + 6144
+                dw      fsline
+                db      0xcd
+                dw      LAFLIP
+                db      0xcd
+                dw      line_addr
+                dw      fsspr1
+                db      0xcd
+                dw      fsnone + 1      ; a ret
+                db      0xcd
+                dw      fs_sprite
+                dw      fsspr2
+                db      0xcd
+                dw      fsnone + 1
+                db      0xcd
+                dw      fs_sprite
+                dw      fsflames
+                db      0xc3
+                dw      showpart
+                db      0xc3
+                dw      show_flames
+                dw      camflip
+                db      0x32
+                dw      fullshow
+                db      0x32
+                dw      flipnow
+                dw      shattrs
+                db      0xc3
+                dw      set_attrs
+                db      0xc3
+                dw      set_attrs_at
+NPATCH          equ     ($ - ptab) / 8
+
+inverted:       db      0               ; as the patches stand
+
+                endif
+
+                if      LVNUM < 3 or LVNUM = 7 or LVNUM = 10 or LVNUM = 11
 post:           ret
                 endif
 
