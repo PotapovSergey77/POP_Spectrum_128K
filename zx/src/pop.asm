@@ -6072,7 +6072,9 @@ smc1:           or      a
 TMIN            equ     1020            ; game frames to a minute
 TSEC            equ     17              ; and to a second
 TMSGT           equ     28              ; a message's stay: the Apple's 20
-TIMECOL         equ     11              ; its first column, of fifteen
+TIMECOL         equ     9               ; its first column, of fifteen: the
+                                        ; middle of the screen's 32, but
+                                        ; for half a cell
 
 timer:          ld      de, ovtime      ; a level begun, his death, and
                 call    bgcall          ; whether the clock runs: clock, in
