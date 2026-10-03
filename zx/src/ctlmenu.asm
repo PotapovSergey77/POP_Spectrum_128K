@@ -248,9 +248,6 @@ cmk5:           ldi
                 ld      a, ','
                 ld      (de), a
                 inc     de
-                ld      a, ' '
-                ld      (de), a
-                inc     de
                 jr      cmk1
 cmk6:           xor     a
                 ld      (de), a
