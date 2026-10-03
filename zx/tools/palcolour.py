@@ -202,12 +202,14 @@ def door_cells(room, grid, entrance):
 
 # A rail is blue only where the whole of it can be: along its row of cells,
 # a run of it -- windows standing in front of it are no break -- all of
-# whose cells are rail and nothing else, but for the two at its ends, where
-# it meets a wall, with none of it going on over a floor ('f'), and long
-# enough to be the rail along a wall and not the end of one poking out past
-# a post.  Coloured in part it looked unfinished (the user asked for it
-# this way).
-RAIL_RUN = 8
+# whose cells are rail and nothing else, but for those at its ends, where
+# it meets a wall or goes behind a pillar, with none of it going on over a
+# floor ('f'), and longer than a block: the end of one poking out past a
+# post, or the rail of a shaft a block wide, stays grey, as on level four.
+# Coloured in part it looked unfinished (the user asked for it this way);
+# and a shaft two blocks wide, or a rail that ends behind a pillar, is blue
+# all along like the rest (the user, 2026-10-03).
+RAIL_RUN = 5
 
 
 def rails(line):
@@ -222,8 +224,8 @@ def rails(line):
             e += 1
         while out[e - 1] == 'Y':
             e -= 1
-        run = out[x:e]
-        whole = ('r' not in run[1:-1] and 'f' not in run
+        run = ''.join(out[x:e])
+        whole = ('r' not in run.strip('r') and 'f' not in run
                  and run.count('R') >= RAIL_RUN)
         for i in range(x, e):
             if out[i] in 'Rrf':
