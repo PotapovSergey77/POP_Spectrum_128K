@@ -23,6 +23,8 @@ echo "версия: $VERSION ($SRCHASH)"
 python tools/mkassets.py build
 cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/cut5.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc
+# Q, on to the next level, only in a build for testing: POP_TESTKEY=1
+echo "TESTKEY         equ     ${POP_TESTKEY:-0}" > src/testkey.inc
 cd src
 # The controls screen's words first (ctldata.asm): the game takes their
 # addresses from them.
