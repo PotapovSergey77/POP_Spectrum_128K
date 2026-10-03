@@ -14,6 +14,9 @@ The disk version, booted and played on trdemu.py's Spectrum with its Beta
   - the hour run out: PlayCut6, its tune, and the titles again.
 
 Pictures of the way into build/png/disk_*.png.
+
+Q is the test key, only in a build made for testing:
+    POP_TESTKEY=1 sh build.sh
 """
 import json
 import os
@@ -45,6 +48,8 @@ def main(argv):
     os.chdir(ZX)
     os.makedirs('build/png', exist_ok=True)
     sym = json.load(open('build/disk/sym.json'))
+    if 'nextlevkey' not in sym:
+        raise SystemExit('no test key in this build: POP_TESTKEY=1 sh build.sh')
     lay = json.load(open('build/disk/trd.json'))
     disk = lambda p: p.replace('build/bin', 'build/disk/bin')
     m = trdemu.Machine('build/pop.trd', pentagon='--pentagon' in argv)

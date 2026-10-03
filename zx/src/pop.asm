@@ -6724,6 +6724,7 @@ msgstop:        db      9, "STOP THE TAPE ", 0
 
 ; ------------------------------------------------------------- a test key
 ;
+; Only in a build for testing (POP_TESTKEY=1 sh build.sh): not in the game.
 ; Q takes him to the next level, for testing: the stairs do no more than put
 ; lvflag at 2, and nextroom takes it from there -- the tune, the black screen,
 ; the tape and STARTKID in the new level's own room.  So it is armed only when
@@ -6731,6 +6732,7 @@ msgstop:        db      9, "STOP THE TAPE ", 0
 ; restart (3), and only on the frame the key goes down: held, it would carry
 ; him through the level after as well.
 
+                if      TESTKEY
 KEYROW_QT       equ     0xFBFE          ; Q is bit 0 of the Q-to-T half row
 
 nextlevkey:     ld      bc, KEYROW_QT
@@ -6751,6 +6753,7 @@ nextlevkey:     ld      bc, KEYROW_QT
                 ret
 
 qdown           equ     SYSVARS + 33    ; the key as it was last frame
+                endif
 
 ; NextFrame in TOPCTRL.S, the parts of it this port keeps here, from the main
 ; loop by c1jp.  animtrans and bonesrise come first, ahead of the kid, as they
@@ -6931,7 +6934,10 @@ kidlast:        ds      10
 ; sounds, the slicers' pictures brought up to their states, and kid_death
 ; last, as its way out may page the art bank in.
 
-c1post:         call    nextlevkey      ; a test key first of all
+c1post:
+                if      TESTKEY
+                call    nextlevkey      ; a test key first of all
+                endif
                 call    checkslice
                 call    addsfx
                 call    sl_sync

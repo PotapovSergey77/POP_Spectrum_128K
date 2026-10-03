@@ -37,6 +37,8 @@ rm -rf build/bin
 cp -r build/bin.mk build/bin
 if [ "$MEDIA" = disk ]; then DISK=1; CUTS="1 2 3 4 5 6"; else DISK=0; CUTS="1 2 3 4 5"; fi
 echo "DISK            equ     $DISK" > src/media.inc
+# Q, on to the next level, only in a build for testing: POP_TESTKEY=1
+echo "TESTKEY         equ     ${POP_TESTKEY:-0}" >> src/media.inc
 cp build/cut6.inc src/
 cp build/assets.inc build/bg.inc build/cut1.inc build/cut2.inc build/cut3.inc build/cut4.inc build/cut5.inc build/bin/*.bin src/
 cp build/cut1.inc src/cutsel.inc
