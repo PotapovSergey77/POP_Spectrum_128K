@@ -1089,12 +1089,12 @@ do_startrun:    call    get_fwd_dist
                 ret     p
                 jp      do_stepfwd
 srgo:           ld      a, SQ_STARTRUN
-                jp      jumpseq
+mjs1:           jp      jumpseq         ; (what the jumps near by share)
 
 do_turn:        call    clrall
                 ld      (clrb), a
                 call    turnseq         ; turn, or draw as he turns
-                jp      jumpseq
+                jr      mjs1
 
 ; ------------------------------------------------------------------ turning
 
@@ -1108,7 +1108,7 @@ turning:        ld      a, (btn)
                 or      a
                 ret     m
                 ld      a, SQ_TURNRUN   ; make it a running turn
-                jp      jumpseq
+                jr      mjs1
 
 ; ------------------------------------------------------------------ running
 
@@ -1137,7 +1137,7 @@ running:        ld      a, (jstkx)
                 or      a
                 ret     p
                 ld      a, SQ_RDIVEROLL ; down: dive and roll
-                jp      jumpseq
+                jr      mjs1
 
 runjumpq:       ld      a, (clru)
                 or      a
@@ -1152,12 +1152,12 @@ runstop:        ld      a, (frame)      ; only on run-10 and run-14
 runstop1:       call    clrall
                 ld      (clrf), a
                 ld      a, SQ_RUNSTOP
-                jp      jumpseq
+                jr      mjs1
 
 runturn:        call    clrall
                 ld      (clrb), a
                 ld      a, SQ_RUNTURN
-                jp      jumpseq
+                jr      mjs1
 
 ; ------------------------------------------------------------------ hanging
 
@@ -1374,7 +1374,7 @@ do_jumpedge:    call    get_dist
                 sub     10
                 call    move_by
                 ld      a, SQ_JUMPBACKHANG
-                jp      jumpseq
+                jr      mjs2
 
 ; DoJumphang.  Which of the two reaches the ledge best, and then his X is
 ; fudged so it comes out exactly -- without that he grabs on with the empty
@@ -1388,14 +1388,14 @@ jhlong:         ld      a, (atemp)
                 sub     4               ; Long adds four of its own
                 call    move_by
                 ld      a, SQ_JUMPHANGLONG
-                jp      jumpseq
+                jr      mjs2
 jhmed:          call    get_fwd_dist
                 cp      4
                 jr      c, jhlong       ; too close to the wall for Med
                 ld      a, (atemp)
                 call    move_by
                 ld      a, SQ_JUMPHANGMED
-                jp      jumpseq
+mjs2:           jp      jumpseq
 
 ; DoJumphigh.  A barrier close in front is backed away from first, and then
 ; the block his hands reach decides which jump it is: a ceiling over him and
@@ -1426,9 +1426,9 @@ jhceil:         call    base_x          ; where his hands touch: DoJumphigh
                 call    cmp_space
                 jr      nz, jhtouch
                 ld      a, SQ_HIGHJUMP  ; no ceiling above
-                jp      jumpseq
+                jr      mjs2
 jhtouch:        ld      a, SQ_JUMPUP    ; touch it, and jar the room above
-                jp      jumpseq
+                jr      mjs2
 
 ; DoStandjump marks both presses used and clears nothing else -- the
 ; direction is very likely still held, and a fresh clrF on landing would set
@@ -1438,7 +1438,7 @@ do_standjump:   ld      a, 1
                 ld      (clru), a
                 ld      (clrf), a
                 ld      a, SQ_STANDJUMP
-                jp      jumpseq
+                jr      mjs2
 
 do_runjump:     jp      run_jump
 
@@ -2046,6 +2046,9 @@ leftcoll:       ld      (collx), a
 collide:        ld      e, a
                 ld      a, c
                 ld      (collface), a
+                ld      a, (charlife)   ; dead: let him finish falling, or
+                or      a               ; whatever -- bumped, he got up and
+                ret     p               ; dropped dead again, and again
                 ld      a, (frame)
                 cp      177             ; impaled: let it be
                 ret     z
@@ -2112,10 +2115,6 @@ groundbump:     call    floor_plane
                 jp      addcharx
 gbok:           xor     a
                 ld      (yvel), a
-                ld      a, (charlife)   ; :deadbump -- dead when he hits the
-                or      a               ; wall, he is left lying: bumped, he
-                ret     z               ; got up and dropped dead again, and
-                                        ; again, and the level never restarted
                 ld      a, (frame)      ; out of a standing jump, a running
                 cp      24              ; jump or a fall the bump is hard
                 jr      z, gbhard
@@ -3746,10 +3745,14 @@ check_floor:    ld      a, (charact)
                 jp      z, cf_air
                 cp      4
                 ret     z
-                call    frame_index     ; does this frame look for floor?
-                ld      de, fcheck
-                add     hl, de
-                ld      a, (hl)
+                cp      5               ; bumped: only crouched or dead does
+                jr      nz, cfchk       ; he look -- a bumpfall's frames are
+                ld      a, (frame)      ; in the air, and with a floor check
+                cp      109             ; of their own he would step off as
+                jr      z, cfchk        ; from a floor, a row too soon, and
+                cp      185             ; never catch the ledge over him
+                ret     nz
+cfchk:          call    frame_check     ; does this frame look for floor?
                 and     F_CHECK
                 ret     z
                 call    under_flags

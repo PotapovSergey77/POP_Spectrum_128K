@@ -3607,7 +3607,7 @@ aosword:        call    onscreen
                 jr      z, aoswnew
                 ld      (trobst), a
                 cp      1
-                jp      nz, aodone
+                jr      nz, aodone
                 jr      aoswred
 aoswnew:        ld      a, r
                 and     0x3f
