@@ -1148,13 +1148,14 @@ nrcgo:          xor     a               ; nothing of the last room's still
                 ld      (flipnow), a
                 dec     a
                 ld      (vwcam), a
-                ld      hl, SCREEN
-                ld      de, SCREEN + 1
-                ld      bc, 6143
-                ld      (hl), 0
-                ldir
-                xor     a               ; and that black shown, whichever
-                call    setvis          ; screen was
+                ld      hl, SCREEN      ; its colours too, and the border:
+                ld      de, SCREEN + 1  ; a hurt's red flash (hurt_flash)
+                ld      bc, 6911        ; in the frame he went would stay
+                ld      (hl), 0         ; on the black all the time the room
+                ldir                    ; is built; the room's colours come
+                xor     a               ; with its view.  And that black
+                out     (254), a        ; shown, whichever screen was
+                call    setvis
                 call    newroom         ; this block is already back, so the
                 call    readlinks       ; room itself is all that is left
                 ld      hl, c1addsl     ; ADDSLICERS in CUT: walking into a
