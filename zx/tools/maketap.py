@@ -6,7 +6,7 @@ RAM banks and the tape has to put them there.  BASIC loads only the tape's own
 loader (src/tapeldr.asm) and calls it; the loader loads the rest, as
 Spectrum games did: the title first -- the palace with Prince of Persia over
 it -- and then the banks and the program, with how much is in, in per cent,
-at the bottom left.  The loader pages the banks itself.  The part of the
+at the bottom right.  The loader pages the banks itself.  The part of the
 program it sits in comes last, loaded by a stub low down through the ROM's
 LD-BYTES, and the stub goes into the game.
 
