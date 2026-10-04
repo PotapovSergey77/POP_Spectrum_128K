@@ -6885,6 +6885,8 @@ c1post:
 ; began again.  He stops where he is, as POP leaves screen 0 alone, and the
 ; death song goes as for any death.
 
+                if      TESTKEY = 0     ; (a build for testing has the Q
+                                        ; key in these bytes instead)
 c1kill0:        ld      a, (blocky)     ; the row under the screen
                 cp      3
                 jr      nz, kid_death
@@ -6898,6 +6900,7 @@ c1kill0:        ld      a, (blocky)     ; the row under the screen
                 ld      a, 5            ; out of the fall
                 ld      (charact), a
                 jr      kddead
+                endif
 
 ; When he has died and stopped moving, the death song: heroic if he fell in a
 ; fight.  CharLife goes past nought so it is asked for once.
