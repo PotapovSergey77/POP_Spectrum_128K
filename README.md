@@ -35,7 +35,7 @@ Ported by **Sergey Potapov** — YouTube: [@16BitMaster](https://www.youtube.com
 
 The game needs a **ZX Spectrum 128K** (or +2 / +3, or an emulator in 128K mode, e.g. Fuse).
 Load the tape with the 128K loader. The tape has a loader of its own: the title screen comes in first,
-and then the rest loads with a per cent counter at the bottom left. It reads the tape at the ROM's
+and then the rest loads with a per cent counter at the bottom right. It reads the tape at the ROM's
 speed, but not through the ROM, so an emulator's ROM fast-loading does not apply to it (in Fuse,
 "Accelerate loaders" speeds it up). After level one the game reads each next level from the tape
 itself, so leave the tape in and let it play on when a level is finished.

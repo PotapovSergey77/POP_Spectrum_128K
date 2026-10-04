@@ -3,8 +3,8 @@
 ; The tape's own loader, as Spectrum games had one: BASIC loads this and no
 ; more, and this loads the rest -- the title first, the palace with Prince of
 ; Persia over it, line by line as LOAD SCREEN$ would, and then everything
-; else with how much of it is in, in per cent, at the bottom left: white on
-; black, under the title.
+; else with how much of it is in, in per cent, at the bottom right: white
+; on black, under the title.
 ;
 ; The blocks are bare data blocks one after another, and they are read with
 ; the ROM's LD-BYTES -- the same code, copied here so that it can count:
@@ -44,8 +44,8 @@ font:           db      0x00, 0x3C, 0x46, 0x4A, 0x52, 0x62, 0x3C, 0x00  ; 0
                 db      0x00, 0x62, 0x64, 0x08, 0x10, 0x26, 0x46, 0x00  ; %
                 db      0, 0, 0, 0, 0, 0, 0, 0                          ; blank
 
-PCROW           equ     0x50E0          ; character row 23, column 0
-PCATTR          equ     0x5AE0
+PCROW           equ     0x50FC          ; character row 23, column 28
+PCATTR          equ     0x5AFC
 PCINK           equ     0x47            ; bright white on black
 
 ; From RANDOMIZE USR, with the 128's BASIC paged and nothing of the game in.
