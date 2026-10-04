@@ -59,13 +59,13 @@ def code_blocks(path):
 
 def boot(path):
     """
-    A CPU with the tape loaded the way the tape loads it: the program first,
-    then a paging stub and a block for each bank, in order.  Doing it any
-    other way hides the bugs that only show up in that order -- one of them
-    was writing six kilobytes into whichever bank happened to be paged.
+    A CPU with the tape loaded the way its loader loads it (tapeldr.asm):
+    each bank paged in at the window and its block put there, in the
+    tape's order, then the program, and into it with the last bank still
+    paged.  The manifest beside the tape says what goes where.
     """
     manifest = os.path.splitext(path)[0] + '.banks.json'
-    banks = json.load(open(manifest)) if os.path.exists(manifest) else []
+    banks = json.load(open(manifest))
     levels = [m['file'] for m in banks if m.get('level')]
     banks = [m for m in banks if not m.get('level')]
     cpu = z80.Z80()
@@ -79,21 +79,15 @@ def boot(path):
     # 0xFFFF takes as its displacement.
     cpu.mem[0x3900:0x3C00] = bytes([0xFF]) * 0x300
     cpu.mem[0x0000] = 0xF3
-    blocks = code_blocks(path)
-    # Somewhere for the stubs to return to, below the program the way CLEAR
-    # leaves it: a fixed address of its own would be inside the program as
-    # soon as it loads any lower, and the two bytes written there came out
-    # as a handful of wrong pixels in every check at once.
-    stack = blocks[0][0] - 16
-    cpu.sp = stack
-    entry = None
-    for i, (addr, payload) in enumerate(blocks):
-        if i and banks:             # page the bank this block belongs in
-            _usr(cpu, banks[0]['entry'] - STUB * (len(banks) - i), stack)
-        cpu.mem[addr:addr + len(payload)] = payload
-        if not i:
-            entry = banks[0]['entry'] if banks else addr
-    cpu.pc = entry
+    main = banks[0]
+    for m in banks[1:]:
+        cpu.io_write(0x7FFD, 0x10 | m['bank'])
+        data = open(m['file'], 'rb').read()
+        cpu.mem[0xC000:0xC000 + len(data)] = data
+    data = open(main['file'], 'rb').read()
+    cpu.mem[main['addr']:main['addr'] + len(data)] = data
+    cpu.sp = 0x5E00
+    cpu.pc = main['entry']
     release(cpu)
     skip_intro(cpu, path)
     tape_levels(cpu, path, levels)
