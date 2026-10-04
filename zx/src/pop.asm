@@ -6945,6 +6945,26 @@ c1post:
                 ld      hl, bgjp        ; the shadow out of it, five's thief,
                 call    c1far           ; six's plunge (lvcode.asm)
 
+; kill0 in TOPCTRL.S: a character on screen 0 is killed off -- fallen past
+; the foot of a room with none under it (rooms 7 and 11 of level six, down
+; the inside of a wall).  Without it he fell for ever, and the level never
+; began again.  He stops where he is, as POP leaves screen 0 alone, and the
+; death song goes as for any death.
+
+c1kill0:        ld      a, (blocky)     ; the row under the screen
+                cp      3
+                jr      nz, kid_death
+                ld      a, (links + 3)  ; and nothing there
+                or      a
+                jr      nz, kid_death
+                ld      a, (charlife)   ; alive
+                inc     a
+                jr      nz, kid_death
+                ld      (kidstr), a     ; decstr 100
+                ld      a, 5            ; out of the fall
+                ld      (charact), a
+                jr      kddead
+
 ; When he has died and stopped moving, the death song: heroic if he fell in a
 ; fight.  CharLife goes past nought so it is asked for once.
 
