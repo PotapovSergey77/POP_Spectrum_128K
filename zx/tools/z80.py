@@ -488,8 +488,22 @@ class Z80:
             c = self.f & CF
             self.f = ((self.f & (SF | ZF | PF)) | (self.a & (YF | XF)) |
                       (HF if c else 0) | (0 if c else CF))
-        else:
-            raise NotImplementedError('daa at %04X' % (self.pc - 1))
+        else:                                           # daa
+            a, f = self.a, self.f
+            adj, c = 0, f & CF
+            if (f & HF) or (a & 0x0f) > 9:
+                adj |= 0x06
+            if c or a > 0x99:
+                adj |= 0x60
+                c = CF
+            if f & NF:
+                h = HF if (f & HF) and (a & 0x0f) < 6 else 0
+                a = (a - adj) & 0xff
+            else:
+                h = HF if (a & 0x0f) > 9 else 0
+                a = (a + adj) & 0xff
+            self.a = a
+            self.f = self.sz(a) | PARITY[a] | (f & NF) | h | c | (a & (YF | XF))
 
     def group3(self, op):
         z, y = op & 7, (op >> 3) & 7

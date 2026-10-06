@@ -1908,9 +1908,8 @@ F_THIN          equ     0x20
 OOFVEL          equ     22
 DEATHVEL        equ     33              ; and past this one he does not get up
 
-check_barr:     ld      a, 0xff         ; no collision yet
-                ld      (collidel), a
-                ld      (collider), a
+check_barr:     ld      hl, 0xffff      ; no collision yet
+                ld      (collidel), hl  ; and collider, the byte after
                 ld      a, (charact)
                 cp      7               ; turning: out of reach of walls
                 ret     z
@@ -1950,9 +1949,8 @@ cbend:          ld      (endrange), a
                 ld      de, snabove
                 call    getcdata
 
-                ld      c, 9            ; a nybble gone from clear to set
+                ld      bc, 9           ; a nybble gone from clear to set
 crloop:         ld      hl, snlast
-                ld      b, 0
                 add     hl, bc
                 push    hl
                 ld      de, snthis - snlast
@@ -2014,11 +2012,11 @@ cl2:            ld      a, (collidel)
 ; RIGHTCOLL and LEFTCOLL: an edge only counts when he faces it.  A = how far
 ; in he has gone, measured from the barrier to his own edge.
 
-rightcoll:      ld      (collx), a
+rightcoll:      ld      b, a
                 ld      a, (facing)
                 or      a
                 ret     nz
-                ld      a, (collx)
+                ld      a, b
                 call    checkcoll1
                 ret     nc
                 call    rightbar
@@ -2027,11 +2025,11 @@ rightcoll:      ld      (collx), a
                 ld      c, 0
                 jr      collide
 
-leftcoll:       ld      (collx), a
+leftcoll:       ld      b, a
                 ld      a, (facing)
                 or      a
                 ret     z
-                ld      a, (collx)
+                ld      a, b
                 call    checkcoll1
                 ret     nc
                 call    leftbar
@@ -2178,17 +2176,28 @@ ckyes:          ld      a, (tempbx)
                 call    edge140
                 ld      c, a
                 ld      a, (tempscrn)   ; AdjustScrn: the rooms either side
-                ld      hl, links       ; are a screen's width away
+                ld      hl, links       ; are a screen's width away -- and
+                cp      (hl)            ; so are the two either side of the
+                jr      z, ccl          ; room below, scrnBelowL and R: in
+                inc     hl              ; the row under the room, falling
+                cp      (hl)            ; past its foot, the wall in the room
+                jr      z, ccr          ; down and to the left was taken for
+                inc     hl              ; one 140 to the right of him, and
+                inc     hl              ; the bump threw him through it
                 cp      (hl)
-                jr      nz, ccnl
                 ld      a, c
+                jr      z, ccedge       ; the room below itself: as it is
+                ld      a, (blocky)
+                cp      3
+                ld      a, c
+                jr      nz, ccedge      ; nothing else is a screen away
+                cp      135             ; scrnBelowL's blocks are the right
+                jr      c, ccr1         ; hand ones of it, edge 135 on
+ccl:            ld      a, c
                 sub     140
                 jr      ccedge
-ccnl:           inc     hl
-                cp      (hl)
-                ld      a, c
-                jr      nz, ccedge
-                add     a, 140
+ccr:            ld      a, c
+ccr1:           add     a, 140
 ccedge:         ld      (cbedge), a
                 scf
                 ret
@@ -2256,23 +2265,22 @@ gcput:          ld      a, (tempbx)
 ; GETLEFTBAR and GETRIGHTBAR, for the barrier code in cccode and the block
 ; edge in cbedge.
 
-leftbar:        ld      a, (cccode)
-                ld      e, a
-                ld      d, 0
-                ld      hl, barl
-                add     hl, de
-                ld      a, (cbedge)
+leftbar:        ld      hl, barl
+                call    barat
                 add     a, (hl)
                 ret
 
-rightbar:       ld      a, (cccode)
-                ld      e, a
-                ld      d, 0
-                ld      hl, barr
-                add     hl, de
-                ld      a, (cbedge)
+rightbar:       ld      hl, barr
+                call    barat
                 add     a, 13
                 sub     (hl)
+                ret
+
+barat:          ld      a, (cccode)     ; HL = the table's entry for it,
+                ld      e, a            ; A = the block's edge
+                ld      d, 0
+                add     hl, de
+                ld      a, (cbedge)
                 ret
 
 ; A = a column.  Out: A = its left edge, 140 wide, with angle added.
@@ -5834,7 +5842,6 @@ runion:         ds      4               ; and the frame's, with the sword
 curfdy          equ     0x5C33          ; SETUPCHAR's Fdy for this frame
 collidel        equ     0x5C34          ; CHECKBARR and its helpers
 collider        equ     0x5C35
-collx           equ     0x5C36
 collface        equ     0x5C37
 bythis          equ     0x5C38
 bylast:         db      0

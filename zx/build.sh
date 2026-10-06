@@ -6,7 +6,7 @@
 #   build/png/      whatever the diagnostic tools draw
 set -e
 cd "$(dirname "$0")"
-# The version on the controls screen: 0.1 and the first four of the sources'
+# The version on the controls screen: 0.2 and the first four of the sources'
 # hash -- git's tree of zx/ as the files stand, tracked ones
 # only, which is `git rev-parse <commit>:zx` for a build from that commit
 # unchanged.
@@ -17,7 +17,7 @@ SRCHASH=$( (GIT_INDEX_FILE=$VERINDEX git read-tree HEAD &&
             GIT_INDEX_FILE=$VERINDEX git add -u . &&
             GIT_INDEX_FILE=$VERINDEX git write-tree --prefix="$(git rev-parse --show-prefix)") 2>/dev/null || echo '????')
 rm -f "$VERINDEX"
-VERSION="0.1 $(echo "$SRCHASH" | cut -c1-4)"
+VERSION="0.2 $(echo "$SRCHASH" | cut -c1-4)"
 echo "                db      \"$VERSION\", 0" > src/ctlver.inc
 echo "версия: $VERSION ($SRCHASH)"
 python tools/mkassets.py build
