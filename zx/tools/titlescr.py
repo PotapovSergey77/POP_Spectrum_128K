@@ -320,11 +320,15 @@ def apex(pix):
             for x, y in cells:
                 if pix[y][x] == BORDER_INK:
                     pix[y][x] = BORDER_PAPER
-    # and the yellow line under the band stops at the arch, as the Apple's
+    # and the yellow line under the band stops at the arch, as the Apple's;
+    # the band's own lines a little short of it, or by the point they made
+    # it a block with corners
     for y in range(0, TOP + 2):
         for x in range(SIDE, 256 - SIDE):
             k = onion_at(x, y)
-            if k == 1:
+            if k == 0 and y < TOP and pix[y][x] == FRAME and y in HALF_OUT                     and abs(x + 0.5 - 128) < HALF_OUT[y] + 2:
+                pix[y][x] = BORDER_PAPER
+            elif k == 1:
                 pix[y][x] = zx(RED)
             elif k == 2:
                 pix[y][x] = heavy(YELLOW)
@@ -339,7 +343,9 @@ def apex(pix):
 # in the border; the yellow is as thick all the way round.  A cell the
 # yellow runs through keeps it pixel for pixel, and what else it holds is
 # the one colour most of the rest of the cell is.
-ARCH_TIP = 6                # the line the inside of the point closes on
+ARCH_TIP = 8                # the line the inside of the point closes on:
+                            # the first of a cell's, so none of the red is
+                            # left over the cell's top
 ARCH_TO = 96                # below here the column is the arch's side
 ARCH_FOOT = 72              # the half width it comes down to, the column's
 RING_T = 6.5                # the yellow, across
@@ -430,14 +436,18 @@ def ring_cells(pix, y0, y1):
                 continue
             paper = max(rest, key=rest.get)
             # a few pixels of the other side are the yellow's, a speck of the
-            # wrong colour by it being worse than the yellow a pixel wider
+            # wrong colour by it being worse than the yellow a pixel wider --
+            # those next to it: one further in, a star's, goes the paper's,
+            # where in the yellow's it stood out of the curve
             few = sum(rest.values()) - rest[paper] <= 6
             for x, y in cell:
                 v = pix[y][x]
                 if v in yellow:
                     continue
                 key = v - 16 if HEAVY <= v < TITLE else v
-                if key != paper and few:
+                if key != paper and few and any(
+                        onion_at(x + dx, y + dy) == 2
+                        for dx in (-1, 0, 1) for dy in (-1, 0, 1)):
                     pix[y][x] = heavy(YELLOW)
                 else:
                     pix[y][x] = paper + 16 if ZX <= paper < HEAVY else paper
