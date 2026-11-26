@@ -7064,7 +7064,7 @@ potion_effect:  ld      a, (charid)
                 call    cue_song
                 ld      a, 1            ; the sword: three green flashes
                 ld      (gotsword), a
-                ld      bc, GREEN * 256 + 3
+                ld      bc, WHOLE * 256 + GREEN * 256 + 3
                 jr      peflash
 penotsword:     dec     a
                 cp      1

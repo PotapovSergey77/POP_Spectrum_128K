@@ -52,9 +52,11 @@ PCINK           equ     0x47            ; bright white on black
 
 entry:          di
                 ld      sp, LDRSTACK    ; over this code, under the window
-                ld      ix, 0x4000      ; the title: no count yet (kvar 0)
-                ld      de, 6912
-                call    ldblk
+                ld      ix, 0x4000      ; the title: no count yet (kvar 0),
+                ld      de, 6912        ; and by the ROM, which a DivMMC
+                call    ldblk           ; serves from a .tap
+                xor     a
+                ld      (romload), a
                 ld      hl, PCATTR      ; then the count's four cells
                 ld      b, 4
 arm1:           ld      (hl), PCINK
@@ -113,13 +115,82 @@ last:           ld      hl, stubsrc
 
 ldblk:          push    ix
                 push    de
+                ld      hl, TOUT
+                ld      (tocnt), hl
+                ld      a, (romload)
+                or      a
+                jr      nz, ldrom
                 ld      a, 0xff
                 scf
                 call    ldbytes
-                pop     de
+ldback:         pop     de
                 pop     ix
-                ret     c
-                jr      ldblk
+                jr      nc, ldblk
+                ld      a, (romload)    ; the ROM's: no count while it
+                or      a               ; loads, so it goes up by the block
+                ret     z
+                ld      b, d
+                inc     b
+pcblk:          dec     b
+                ret     z
+                ld      hl, (acc)
+                ld      de, (kvar)
+                add     hl, de
+                ld      (acc), hl
+                call    c, pcinc
+                jr      pcblk
+
+; The ROM's LD-BYTES, from where it has pushed SA/LD-RET -- our own way back
+; instead -- which is where a DivMMC takes over the loading of a .tap: it
+; feeds no signal to the EAR port, and a loader of its own hears nothing.
+
+ldrom:          ld      a, 0xff
+                scf
+                inc     d
+                ex      af, af'
+                dec     d
+                di
+                ld      a, 0x0f
+                out     (0xfe), a
+                ld      hl, ldback
+                push    hl
+                jp      0x0562
+
+; The figures one per cent on, all three drawn.
+
+pcinc:          ld      hl, pcunit
+                inc     (hl)
+                ld      a, (hl)
+                cp      10
+                jr      nz, pcdraw
+                ld      (hl), 0
+                dec     hl
+                ld      a, (hl)
+                cp      GL_BLANK
+                jr      nz, pci1
+                xor     a
+pci1:           inc     a
+                ld      (hl), a
+                cp      10
+                jr      nz, pcdraw
+                ld      (hl), 0
+                dec     hl
+                ld      (hl), 1
+pcdraw:         ld      a, (pchund)
+                ld      e, PCROW & 0xff
+                call    drawd
+                ld      a, (pcten)
+                ld      e, (PCROW & 0xff) + 1
+                call    drawd
+                ld      a, (pcunit)
+                ld      e, (PCROW & 0xff) + 2
+                jp      drawd
+
+; Nothing heard: the ROM's from now on (A is nought, carry clear).
+
+ldtime:         inc     a
+                ld      (romload), a
+                ret
 
 ; LD-BYTES, 0556 in the 48K ROM, all but its way out through SA/LD-RET.
 
@@ -136,8 +207,16 @@ ldbytes:        inc     d
                 ld      c, a
                 cp      a
 ldbreak:        ret     nz
+                ld      hl, (tocnt)     ; nothing heard for TOUT tries, some
+                dec     hl              ; three and a half seconds: a DivMMC
+                ld      (tocnt), hl     ; loading the .tap, and from now on
+                ld      a, h            ; it is the ROM's LD-BYTES (no carry:
+                or      l               ; ldblk asks again)
+                jr      z, ldtime
 ldstart:        call    ldedge1
                 jr      nc, ldbreak
+                ld      hl, TOUT        ; an edge: the count starts again
+                ld      (tocnt), hl
                 ld      hl, 0x0415
 ldwait:         djnz    ldwait
                 dec     hl
@@ -273,22 +352,14 @@ hkten:          inc     a
                 xor     a
                 ld      e, (PCROW & 0xff) + 2
                 call    drawd
-                exx                     ; 718 T: 711 over
-                ld      b, 0xb2 + 12
-                jp      ldmarker
-hk100:          ld      (hl), 0
+                exx                     ; 718 T: 711 over -- and no more: the
+                ld      b, 0xb2 + 12    ; first edge of a nought is 855 T on
+                jp      ldmarker        ; and would be missed
+hk100:          ld      (hl), 0         ; (never: the count tops at 99)
                 dec     hl
                 ld      (hl), 1
-                ld      a, 1
-                ld      e, PCROW & 0xff
-                call    drawd
-                xor     a
-                ld      e, (PCROW & 0xff) + 1
-                call    drawd
-                xor     a
-                ld      e, (PCROW & 0xff) + 2
-                call    drawd
-                exx                     ; 993 T: 986 over
+                call    pcdraw          ; all three: 769 T
+                exx                     ; 1027 T: 1020 over
                 ld      b, 0xb2 + 17
                 jp      ldmarker
 
@@ -334,7 +405,11 @@ drawd:          add     a, a
                 inc     d
                 ret
 
+TOUT            equ     800             ; tries of some 15000 T each
+
 acc:            dw      0
+tocnt:          dw      0
+romload:        db      1               ; 1: the ROM loads, the DivMMC's way
 kvar:           dw      0               ; nought while the title loads
 pchund:         db      GL_BLANK
 pcten:          db      GL_BLANK
