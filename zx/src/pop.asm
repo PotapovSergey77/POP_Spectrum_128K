@@ -6956,7 +6956,11 @@ c1post:
 ; the foot of a room with none under it (rooms 7 and 11 of level six, down
 ; the inside of a wall).  Without it he fell for ever, and the level never
 ; began again.  He stops where he is, as POP leaves screen 0 alone, and the
-; death song goes as for any death.
+; death song goes as for any death.  One dead already stops there too: on
+; the Apple he falls on through screen 0, out of sight, while the level
+; waits to begin again; here, still in the room, he came round from the top
+; of it and down again and again (level eleven, room 22: impaled on the
+; spikes, the floor over them came down on him and left him in the wall).
 
                 if      TESTKEY = 0     ; (a build for testing has the Q
                                         ; key in these bytes instead)
@@ -6966,12 +6970,12 @@ c1kill0:        ld      a, (blocky)     ; the row under the screen
                 ld      a, (links + 3)  ; and nothing there
                 or      a
                 jr      nz, kid_death
-                ld      a, (charlife)   ; alive
+                ld      a, 5            ; out of the fall, alive or dead
+                ld      (charact), a
+                ld      a, (charlife)   ; alive: killed
                 inc     a
                 jr      nz, kid_death
                 ld      (kidstr), a     ; decstr 100
-                ld      a, 5            ; out of the fall
-                ld      (charact), a
                 jr      kddead
                 endif
 
