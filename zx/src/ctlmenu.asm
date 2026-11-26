@@ -4,8 +4,11 @@
 ; keyboard, with the keys as they are defined -- by default the arrows of
 ; an emulator, 5 6 7 8, and space -- a Kempston joystick, a Sinclair one
 ; (keys 6 to 0, as the 128's own joystick port gives them); the keys can be
-; defined afresh, which chooses the keyboard.  An arrow marks the one
-; chosen, and 0 starts the game.  The screen is the story's (T_PROLOG), its border and its
+; defined afresh, which chooses the keyboard.  The one chosen is in the
+; border's yellow; an arrow, moved by the arrow keys (7 up, 6 down, with
+; caps shift or without), points at one, and ENTER does it -- as its own
+; key does, 1 to 4, and 0 starts the game, the arrow first put by it.
+; The screen is the story's (T_PROLOG), its border and its
 ; blue, the story cleared off it.  Run once, from start, out of the start
 ; block: the working copy goes over it with the first room.
 ;
@@ -38,41 +41,59 @@ cmclr:          push    af
                 ld      hl, cmtext
                 call    cmblock
                 call    cmkeys
-                ld      a, 1            ; the keyboard, to begin with
+                ld      c, CM_HI        ; the keyboard, to begin with
+                call    cmmark
+                ld      a, 1            ; and the arrow by it
                 call    cmarrow
                 xor     a
                 call    setvis
 
-cmwait:         call    cmup            ; a key: 0 to 4
+cmwait:         call    cmrel
 cm1:            halt
-                ld      a, 0xef         ; 0: the game
+                ld      a, 0xbf         ; ENTER: the one the arrow is by
                 in      a, (254)
                 rra
-                jr      nc, cmgo
-                ld      a, 0xf7
+                jr      nc, cmenter
+                ld      a, 0xef         ; 0: Start Game
+                in      a, (254)
+                ld      c, 4
+                rra
+                jr      nc, cmdo
+                ld      b, -1           ; 7: the arrow up
+                bit     2, a
+                jr      z, cmmove
+                ld      b, 1            ; 6: down
+                bit     3, a
+                jr      z, cmmove
+                ld      a, 0xf7         ; 1 to 4: that one
                 in      a, (254)
                 cpl
                 and     0x0f
                 jr      z, cm1
-                ld      c, 0            ; 1 to 3: that one, marked
+                ld      c, -1
+cmn:            inc     c
                 rrca
+                jr      nc, cmn
+cmdo:           ld      a, c            ; the arrow to it first
+                call    cmcursor
+cmenter:        ld      a, (cmcur)
+                cp      4
+                jr      z, cmgo
+                cp      3
                 jr      c, cmpick
-                inc     c
-                rrca
-                jr      c, cmpick
-                inc     c
-                rrca
-                jr      c, cmpick
-                call    cmdef           ; 4: the keys, and the keyboard
-                ld      c, 0
-cmpick:         push    bc
-                xor     a               ; the arrow off where it was
-                call    cmarrow
-                pop     bc
-                ld      a, c
-                ld      (cmsel), a
-                ld      a, 1            ; and on where it is now
-                call    cmarrow
+                call    cmdef           ; Define Keys: the keys, and the
+                xor     a               ; keyboard
+cmpick:         call    cmchoose
+                jr      cmwait
+
+cmmove:         ld      a, (cmcur)      ; one up or down, round from the
+                add     a, b            ; top to the foot and back
+                jp      p, cmm1
+                ld      a, 4
+cmm1:           cp      5
+                jr      c, cmm2
+                xor     a
+cmm2:           call    cmcursor
                 jr      cmwait
 
 cmgo:           ld      a, (cmsel)
@@ -99,12 +120,19 @@ cmset:          push    af
                 di
                 ret
 
-cmsel:          db      0               ; 0 the keyboard, 1 Kempston, 2 Sinclair
+; The arrow off where it was, and on by A.
 
-; The arrow by the one chosen, A = 1; A = 0 rubs it out.
+cmcursor:       push    af
+                xor     a
+                call    cmarrow
+                pop     af
+                ld      (cmcur), a
+                ld      a, 1
+
+; The arrow by the one it is at, A = 1; A = 0 rubs it out.
 
 cmarrow:        push    af
-                ld      a, (cmsel)
+                ld      a, (cmcur)
                 add     a, a
                 add     a, CM_ITEM
                 ld      e, 4
@@ -116,16 +144,6 @@ cmarrow:        push    af
                 jp      nz, cmglyph
                 ld      hl, 0x3d00      ; the ROM's space
                 jp      cmglyph
-
-; Every key up.
-
-cmup:           halt
-                xor     a
-                in      a, (254)
-                cpl
-                and     0x1f
-                jr      nz, cmup
-                ret
 
 ; Define Keys: left, right, up and down, the button; a key already given
 ; this time round is not taken again.

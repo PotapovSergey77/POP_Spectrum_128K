@@ -2391,6 +2391,7 @@ lscol:          db      0
 
 RED             equ     2
 GREEN           equ     4
+WHOLE           equ     0x80            ; a flash over the whole screen too
 
 ; DRAWFLASKA and SETUPFLASK: the bubbles over the bottle, a frame of them for
 ; the low five bits of its state, two bytes in and two pixels on -- three for
@@ -2671,8 +2672,10 @@ show_meters:    call    page_canvas
                 jr      z, smdark
                 dec     (hl)
                 ld      a, (lightcolor)
-                cp      GREEN           ; the sword's: the whole ground green
-                call    z, green_attrs
+                or      a               ; WHOLE: the whole ground that colour
+                call    m, green_attrs  ; -- the sword's green, the vizier's
+                                        ; yellow -- the port's top bits
+                                        ; nothing
 smdark:         out     (254), a
                 ld      a, (lightning)  ; the flash over, the colours back
                 or      a
@@ -2779,6 +2782,10 @@ smkid:          ld      (kiddrawn), a
 ; kept, for the border.
 
 green_attrs:    push    af
+                add     a, a            ; the paper: WHOLE goes out of the top
+                add     a, a
+                add     a, a
+                ld      (gapaper + 1), a
                 ld      a, 1
                 ld      (greenon), a
                 call    page_canvas
@@ -2789,7 +2796,7 @@ green_attrs:    push    af
                 ld      bc, 768
 galoop:         ld      a, (hl)
                 and     0xc7
-                or      GREEN * 8
+gapaper:        or      0               ; patched: the paper
                 ld      (hl), a
                 inc     hl
                 dec     bc

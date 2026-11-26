@@ -7,7 +7,7 @@
 ; end of the art bank's tape block.  Nothing writes there before the game
 ; begins, when the art bank is cleared for the room.
 
-CMDATA          equ     0xFE20
+CMDATA          equ     0xFE00
 
 CM_INK          equ     0x0F            ; the story's white on blue
 CM_HI           equ     0x0E            ; and its border's yellow line
@@ -178,6 +178,48 @@ cmblock:        ld      a, (hl)
                 pop     hl
                 call    cmstr
                 jr      cmblock
+
+; Every key up; cmrel those of the menu: 0 to 9, ENTER and its row --
+; caps shift may be held, for the arrow keys.
+
+cmrel:          ld      b, 0xa7
+                jr      cmu1
+cmup:           ld      b, 0
+cmu1:           halt
+                ld      a, b
+                in      a, (254)
+                cpl
+                and     0x1f
+                jr      nz, cmu1
+                ret
+
+; A the one chosen now: the one till now in white, this one in yellow.
+
+cmchoose:       push    af
+                ld      c, CM_INK
+                call    cmmark
+                pop     af
+                ld      (cmsel), a
+                ld      c, CM_HI
+
+; The one chosen, its words in colour C: row 7, 9 or 11, from column 9.
+
+cmmark:         ld      a, (cmsel)
+                rrca                    ; two rows down, 64 cells, a turn
+                rrca
+                add     a, CM_ITEM * 32 + 9
+                ld      l, a
+                ld      a, 0x58
+                adc     a, 0
+                ld      h, a
+                ld      b, 17           ; "Kempston Joystick"
+cmmk1:          ld      (hl), c
+                inc     l
+                djnz    cmmk1
+                ret
+
+cmsel:          db      0               ; 0 the keyboard, 1 Kempston, 2 Sinclair
+cmcur:          db      0               ; the arrow's: those, Define Keys, Start
 
 cmofs:          db      6, 8, 2, 4, 0   ; left, right, up, down, the button
 cmasks:         db      "LEFT", 0, "RIGHT", 0, "UP", 0, "DOWN", 0, "FIRE", 0

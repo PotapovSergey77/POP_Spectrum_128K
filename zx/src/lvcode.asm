@@ -1313,7 +1313,9 @@ post:           jp      c, start
 ; wiggling never settles, but falls, and landing shakes none.  (A falling
 ; floor crushes him running here, as crushchar has it on this level only:
 ; mobcrush in bg.asm does on every level.)  The vizier dead, the exit
-; opens: s_Upstairs, white lightning, and the plate in screen 24 pushed.
+; opens: s_Upstairs, lightning -- the whole screen yellow, the user asked:
+; white in the border alone looked like a Spectrum gone wrong -- and the
+; plate in screen 24 pushed.
 ; Up its stairs, no tune.  jaffmusic's s_Jaffar, as the kid goes in to
 ; him, the CPC has none of, and the vizier's wait for it to end (Alert in
 ; AUTO.S) waits for nothing.
@@ -1324,7 +1326,7 @@ post:           jp      c, start
 CRUMBLE1        equ     23              ; CRUMBLE's screens
 CRUMBLE2        equ     16
 EXITPLATE       equ     24              ; DEADENEMY's rdblock 24, 0, 0
-WHITE           equ     7               ; lightcolor $FF, the border's white
+YELLOWALL       equ     0x80 + 6        ; lightcolor $FF: WHOLE, yellow
 LIGHTTIME       equ     10
 
 post:           jp      c, start
@@ -1351,7 +1353,7 @@ post:           jp      c, start
                 ret     nz
                 inc     a
                 ld      (exitopen), a
-                ld      a, WHITE
+                ld      a, YELLOWALL
                 ld      (lightcolor), a
                 ld      a, LIGHTTIME
                 ld      (lightning), a

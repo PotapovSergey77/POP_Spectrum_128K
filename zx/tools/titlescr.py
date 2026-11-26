@@ -1076,15 +1076,6 @@ def byline(pix):
     big_text(pix, 'Jordan Mechner', 128, 140)
 
 
-def port(pix):
-    """Not the Apple's: who made this port, after the title, in the
-    byline's face and on its lines, and where to find him in the copyright
-    line's letters under it."""
-    big_text(pix, 'ported by', 128, 126)
-    big_text(pix, 'Sergey Potapov', 128, 140)
-    small_text(pix, 'YouTube: @16BitMaster', 128, 149)
-
-
 def presents(pix):
     # the Apple's lines: its letters' feet on 129 and 143; across, the
     # middle of the screen
@@ -1209,8 +1200,8 @@ def screen(name):
             presents(pix)
         elif name == 'byline':
             byline(pix)
-        elif name == 'port':
-            port(pix)
+        elif name == 'port':      # after the title, the splash alone,
+            pass                  # where the Apple has it
         else:
             credit(pix, apple, cols, dots, splash, ink=TITLE)
         edges(pix)
